@@ -1,0 +1,92 @@
+---
+# yaml-language-server: $schema=https://schema.infrahub.app/infrahub/schema/latest.json
+version: "1.0"
+
+nodes:
+  - name: IsisProcess
+    namespace: Mpls
+    description: ISIS routing process on a PE/P router.
+    label: ISIS Process
+    icon: mdi:router-network
+    inherit_from:
+      - RoutingProtocol
+    human_friendly_id:
+      - device__name__value
+    display_label: "ISIS on {{ device__name__value }}"
+    attributes:
+      - name: area_id
+        kind: Text
+        default_value: "49.0001"
+        order_weight: 1200
+      - name: level
+        kind: Dropdown
+        default_value: "level-2"
+        order_weight: 1300
+        choices:
+          - name: level-1
+            label: Level-1
+          - name: level-2
+            label: Level-2
+          - name: level-1-2
+            label: Level-1-2
+      - name: net_id
+        kind: Text
+        order_weight: 1400
+        description: "ISO NET identifier (e.g. 49.0001.0100.0000.0001.00)."
+    relationships:
+      - name: interfaces
+        peer: InterfacePhysical
+        cardinality: many
+        optional: true
+        kind: Attribute
+
+  - name: LdpProcess
+    namespace: Mpls
+    description: LDP process on a PE/P router.
+    label: LDP Process
+    icon: mdi:label-outline
+    inherit_from:
+      - RoutingProtocol
+    human_friendly_id:
+      - device__name__value
+    display_label: "LDP on {{ device__name__value }}"
+    attributes:
+      - name: router_id
+        kind: Text
+        order_weight: 1200
+    relationships:
+      - name: transport_address
+        peer: IpamIPAddress
+        cardinality: one
+        optional: true
+        kind: Attribute
+      - name: interfaces
+        peer: InterfacePhysical
+        cardinality: many
+        optional: true
+        kind: Attribute
+
+  - name: BgpProcess
+    namespace: Mpls
+    description: MP-BGP overlay process on a PE.
+    label: MP-BGP Process
+    icon: mdi:network
+    inherit_from:
+      - RoutingProtocol
+    human_friendly_id:
+      - device__name__value
+    display_label: "MP-BGP on {{ device__name__value }}"
+    attributes:
+      - name: router_id
+        kind: Text
+        order_weight: 1200
+      - name: address_families
+        kind: List
+        order_weight: 1300
+        description: "MP-BGP address families enabled (vpnv4, vpnv6)."
+    relationships:
+      - name: sessions
+        peer: RoutingBGPSession
+        cardinality: many
+        optional: true
+        kind: Attribute
