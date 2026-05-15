@@ -1,0 +1,10 @@
+---
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: RoutingAutonomousSystem
+  data:
+    - name: OpsMillNet-AS
+      asn: 65000
+      description: Backbone AS for the OpsMillNet demo.
+      organization: OpsMillNet
