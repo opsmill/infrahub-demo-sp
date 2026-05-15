@@ -1,0 +1,28 @@
+---
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: LocationGeneric
+  data:
+    - name: EMEA
+      shortname: emea
+      description: Europe, Middle East, Africa region.
+
+---
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: LocationHosting
+  data:
+    - name: London
+      shortname: lon
+      description: London PoP.
+    - name: Frankfurt
+      shortname: fra
+      description: Frankfurt PoP.
+    - name: Amsterdam
+      shortname: ams
+      description: Amsterdam PoP.
+    - name: Paris
+      shortname: par
+      description: Paris PoP.
