@@ -1,0 +1,43 @@
+---
+services:
+  database:
+    environment:
+      - NEO4J_dbms_memory_transaction_total_max=8g
+      - NEO4J_dbms_memory_heap_initial__size=2g
+      - NEO4J_dbms_memory_heap_max__size=4g
+      - NEO4J_dbms_memory_pagecache_size=2g
+
+  infrahub-server:
+    ports:
+      - "${INFRAHUB_PORT:-8000}:8000"
+
+  task-manager:
+    ports:
+      - "${PREFECT_PORT:-4200}:4200"
+
+  task-worker:
+    volumes:
+      - ./:/upstream
+
+  streamlit-service-catalog:
+    build:
+      context: ./service_catalog
+      dockerfile: Dockerfile
+    container_name: service-catalog
+    ports:
+      - "${STREAMLIT_PORT:-8501}:8501"
+    environment:
+      - INFRAHUB_ADDRESS=http://infrahub-server:8000
+      - INFRAHUB_UI_URL=${INFRAHUB_UI_URL:-http://localhost:8000}
+      - INFRAHUB_API_TOKEN=${INFRAHUB_API_TOKEN:-06438eb2-8019-4776-878c-0941b1f1d1ec}
+      - DEFAULT_BRANCH=main
+      - GENERATOR_WAIT_TIME=60
+    volumes:
+      - ./service_catalog:/app
+      - ./objects:/objects:ro
+    depends_on:
+      - infrahub-server
+    profiles:
+      - service-catalog
+    networks:
+      - default
