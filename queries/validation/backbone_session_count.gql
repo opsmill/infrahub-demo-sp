@@ -1,0 +1,17 @@
+query BackboneSessionCount {
+  DcimDevice(role__value: "pe") {
+    count
+    edges {
+      node {
+        name { value }
+      }
+    }
+  }
+  RoutingBGPSession(session_type__value: "INTERNAL") {
+    edges {
+      node {
+        device { node { name { value } } }
+      }
+    }
+  }
+}
