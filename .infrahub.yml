@@ -10,9 +10,17 @@ schemas:
 menus:
   - menus/menu.yml
 
-queries: []
+queries:
+  - {name: l3vpn, file_path: queries/service/l3vpn.gql}
 python_transforms: []
 jinja2_transforms: []
 artifact_definitions: []
-generator_definitions: []
+generator_definitions:
+  - name: generate_l3vpn
+    file_path: generators/generate_l3vpn.py
+    targets: l3vpns
+    query: l3vpn
+    class_name: L3VpnGenerator
+    parameters:
+      name: name__value
 check_definitions: []
