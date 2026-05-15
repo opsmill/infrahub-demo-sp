@@ -1,0 +1,12 @@
+query L3VpnOverlap {
+  ServiceL3Vpn {
+    edges {
+      node {
+        id
+        name { value }
+        vpn_id { value }
+        vrf { node { vrf_rd { value } } }
+      }
+    }
+  }
+}
