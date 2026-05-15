@@ -1,0 +1,35 @@
+query L3Vpn($name: String!) {
+  ServiceL3Vpn(name__value: $name) {
+    edges {
+      node {
+        id
+        name { value }
+        vpn_id { value }
+        address_family { value }
+        status { value }
+        tenant { node { id name { value } } }
+        vrf { node { id name { value } vrf_rd { value } } }
+        sites {
+          edges {
+            node {
+              id
+              name { value }
+              routing_protocol { value }
+              bgp_peer_asn { value }
+              static_routes { value }
+              status { value }
+              pe { node { id name { value } platform { node { name { value } } } } }
+              pe_interface { node { id name { value } } }
+              customer_subnet { node { id prefix { value } } }
+              pe_address { node { id address { value } } }
+              ce_address { node { id address { value } } }
+            }
+          }
+        }
+      }
+    }
+  }
+  TopologyMplsBackbone(name__value: "mpls-backbone-1") {
+    edges { node { asn { node { asn { value } } } } }
+  }
+}
