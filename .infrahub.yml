@@ -1,0 +1,18 @@
+---
+# Schemas, queries, transforms, generators, checks, and artifacts
+# are registered here. This file grows as phases progress.
+
+schemas:
+  - schemas/base/
+  - schemas/extensions/
+  - schemas/sp/
+
+menus:
+  - menus/menu.yml
+
+queries: []
+python_transforms: []
+jinja2_transforms: []
+artifact_definitions: []
+generator_definitions: []
+check_definitions: []
