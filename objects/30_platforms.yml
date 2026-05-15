@@ -1,0 +1,42 @@
+---
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: DcimPlatform
+  data:
+    - name: arista_eos
+      description: Arista EOS
+      manufacturer: Arista
+      nornir_platform: eos
+      napalm_driver: eos
+      netmiko_device_type: arista_eos
+      ansible_network_os: eos
+      containerlab_os: ceos
+
+    - name: cisco_iosxr
+      description: Cisco IOS-XR
+      manufacturer: Cisco
+      nornir_platform: iosxr
+      napalm_driver: iosxr
+      netmiko_device_type: cisco_xr
+      ansible_network_os: iosxr
+      # containerlab_os intentionally unset — no free clab image
+
+    - name: juniper_junos
+      description: Juniper Junos
+      manufacturer: Juniper
+      nornir_platform: junos
+      napalm_driver: junos
+      netmiko_device_type: juniper_junos
+      ansible_network_os: junos
+      # containerlab_os intentionally unset — no free clab image
+
+    - name: nokia_sros
+      description: Nokia SR OS
+      manufacturer: Nokia
+      nornir_platform: sros
+      napalm_driver: sros
+      netmiko_device_type: nokia_sros
+      ansible_network_os: nokia.sros
+      # SR OS substitutes to SR Linux in the lab. See clab_topology transform.
+      containerlab_os: srl
