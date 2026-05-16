@@ -12,7 +12,7 @@ from typing import Any
 
 from infrahub_sdk.generator import InfrahubGenerator
 
-from generators.common import (
+from .common import (
     allocate_prefix_from_pool,
     find_or_create_route_target,
     next_free_physical_interface,
