@@ -21,7 +21,7 @@ The topology is written to `lab/mpls-topology.clab.yml` by
 
 | Bootstrap PE | Vendor | Containerlab image | Notes |
 |---|---|---|---|
-| `pe-lon-arista` | Arista EOS | `ceos:latest` | Full config push via `invoke lab.push-arista` |
+| `pe-lon-arista` | Arista EOS | `ceos:latest` | Full configuration push via `invoke lab.push-arista` |
 | `pe-fra-cisco` | Cisco IOS-XR | — | Not in lab v1 (out of scope) |
 | `pe-ams-juniper` | Juniper Junos | — | Not in lab v1 (out of scope) |
 | `pe-par-nokia` | Nokia SR OS | SR Linux (`ghcr.io/nokia/srlinux`) | SR Linux used in place of SR OS (see below) |
@@ -40,8 +40,9 @@ data model remains `nokia_sros` for schema consistency; the containerlab
 artifact swaps in the SR Linux image automatically.
 
 The SR Linux node boots with the generated Nokia SR OS configuration loaded
-as a startup config, but **SR Linux does not parse SR OS CLI syntax**. Config
-push to the Nokia PE is therefore not available in v1 (see [Known gaps](#known-gaps)).
+as a startup configuration, but **SR Linux does not parse SR OS CLI syntax**.
+Configuration push to the Nokia PE is therefore not available in v1 (see
+[Known gaps](#known-gaps)).
 
 ---
 
@@ -84,9 +85,9 @@ Expected output:
 
 ---
 
-## Push Arista config
+## Push Arista configuration
 
-After the lab is up, push the Arista EOS config artifact from Infrahub:
+After the lab is up, push the Arista EOS configuration artifact from Infrahub:
 
 ```bash
 uv run invoke lab.push-arista
@@ -128,9 +129,9 @@ Shows container health without modifying anything.
 
 | Gap | Details |
 |---|---|
-| Nokia SR Linux config push | SR Linux uses a different CLI/API from SR OS. The Nokia config artifact renders SR OS syntax and cannot be applied directly to SR Linux. Config validation for the Nokia PE is demo-only. |
+| Nokia SR Linux configuration push | SR Linux uses a different CLI/API from SR OS. The Nokia configuration artifact renders SR OS syntax and cannot be applied directly to SR Linux. Configuration validation for the Nokia PE is demo-only. |
 | Cisco / Juniper PEs | IOS-XR and Junos container images require vendor licences; these PEs are absent from the v1 lab topology. |
-| CE routing | CE nodes have loopbacks but no BGP daemon configured. Confirming end-to-end L3VPN reachability requires manual CE config. |
+| CE routing | CE nodes have loopbacks but no BGP daemon configured. Confirming end-to-end L3VPN reachability requires manual CE configuration. |
 | cEOS image | The Arista cEOS image must be imported manually (`docker import`) before containerlab can start the node. |
 
 ---
