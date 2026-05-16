@@ -32,12 +32,18 @@ async def allocate_prefix_from_pool(
         The Infrahub node for the newly-allocated IpamPrefix.
     """
     pool: Any = await client.get(kind="CoreIPPrefixPool", name__value=pool_name, branch=branch)
-    return await client.allocate_next_ip_prefix(
+    prefix = await client.allocate_next_ip_prefix(
         pool,
         identifier=identifier,
         prefix_length=prefix_length,
         branch=branch,
     )
+    # The pool allocation does not populate the mandatory `status` field;
+    # set it so subsequent saves on this prefix succeed.
+    if not prefix.status.value:
+        prefix.status.value = "active"
+        await prefix.save(allow_upsert=True)
+    return prefix
 
 
 async def find_or_create_route_target(
