@@ -45,9 +45,14 @@ uv sync
 
 ### 2. Start Infrahub and load bootstrap data
 
+`uv run` does not auto-load `.env`, so export it into the shell first:
+
 ```bash
+set -a; source .env; set +a
 uv run invoke init
 ```
+
+(Or use any equivalent — `direnv`, a shell rc snippet, etc.)
 
 This command:
 
