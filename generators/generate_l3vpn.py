@@ -108,6 +108,7 @@ class L3VpnGenerator(InfrahubGenerator):
         else:
             iface = await next_free_physical_interface(self.client, pe_name, self.branch)
             iface.role.value = "cust"
+            iface.status.value = "active"  # remove from the free-interface candidate set
             iface.description.value = f"L3VPN {vpn['name']['value']}"
             await iface.save(allow_upsert=True)
             site_obj.pe_interface = iface

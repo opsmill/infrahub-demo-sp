@@ -24,9 +24,11 @@ class L3VpnSiteSubnetCheck(InfrahubCheck):
             subnets: list[tuple[str, ipaddress.IPv4Network]] = []
             for site_edge in vpn["sites"]["edges"]:
                 site = site_edge["node"]
-                if not site.get("customer_subnet"):
+                # Unset relationship returns ``{"node": None}`` (truthy dict).
+                subnet_node = (site.get("customer_subnet") or {}).get("node")
+                if not subnet_node:
                     continue
-                prefix_str = site["customer_subnet"]["node"]["prefix"]["value"]
+                prefix_str = subnet_node["prefix"]["value"]
                 subnets.append((site["name"]["value"], ipaddress.IPv4Network(prefix_str)))
 
             for i, (name_a, net_a) in enumerate(subnets):

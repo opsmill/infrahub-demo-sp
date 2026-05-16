@@ -22,9 +22,13 @@ class L3VpnOverlapCheck(InfrahubCheck):
         rd_to_vpns: dict[str, list[str]] = defaultdict(list)
         for edge in data.get("ServiceL3Vpn", {}).get("edges", []):
             node = edge["node"]
-            if not node.get("vrf"):
+            # Unset relationship returns ``{"node": None}`` (truthy dict).
+            # Skip VPNs whose generator hasn't materialized a VRF yet.
+            vrf_rel = node.get("vrf") or {}
+            vrf_node = vrf_rel.get("node")
+            if not vrf_node:
                 continue
-            vrf_rd = node["vrf"]["node"].get("vrf_rd")
+            vrf_rd = vrf_node.get("vrf_rd")
             if not vrf_rd or vrf_rd.get("value") is None:
                 continue
             rd = vrf_rd["value"]

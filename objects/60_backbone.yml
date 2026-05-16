@@ -232,10 +232,24 @@ spec:
           - address: 10.1.0.11/31
     # Free customer-facing interfaces — allocated to L3VPN sites by the
     # generate_l3vpn generator (status=free is its allocation filter).
+    # Four free interfaces per PE so the catalog can create multiple
+    # L3VPNs without exhausting the pool.
     - {name: Ethernet4, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-lon-arista}
+    - {name: Ethernet5, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-lon-arista}
+    - {name: Ethernet6, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-lon-arista}
+    - {name: Ethernet7, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-lon-arista}
     - {name: Ethernet4, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-fra-cisco}
+    - {name: Ethernet5, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-fra-cisco}
+    - {name: Ethernet6, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-fra-cisco}
+    - {name: Ethernet7, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-fra-cisco}
     - {name: Ethernet4, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-ams-juniper}
+    - {name: Ethernet5, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-ams-juniper}
+    - {name: Ethernet6, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-ams-juniper}
+    - {name: Ethernet7, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-ams-juniper}
     - {name: Ethernet4, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-par-nokia}
+    - {name: Ethernet5, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-par-nokia}
+    - {name: Ethernet6, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-par-nokia}
+    - {name: Ethernet7, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-par-nokia}
 
 ---
 # Backbone p2p prefixes (6 × /31 from 10.1.0.0/16)
