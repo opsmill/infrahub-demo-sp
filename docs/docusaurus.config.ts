@@ -65,7 +65,7 @@ const config: Config = {
           type: "docSidebar",
           sidebarId: "DemoSpSidebar",
           position: "left",
-          label: "SP Bundle (MPLS L3VPN)",
+          label: "Infrahub demo-sp example",
         },
         {
           href: "https://github.com/opsmill/infrahub-demo-sp",
