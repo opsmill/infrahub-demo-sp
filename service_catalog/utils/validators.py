@@ -43,11 +43,25 @@ def validate_create_l3vpn_form(
 
     nets: list[tuple[str, ipaddress.IPv4Network]] = []
     for site in sites:
+        raw = site.get("customer_subnet", "")
         try:
-            nets.append((site["name"], ipaddress.IPv4Network(site["customer_subnet"])))
-        except (ValueError, KeyError):
-            errors.append(f"Site {site.get('name', '?')}: invalid customer_subnet.")
+            net = ipaddress.IPv4Network(raw, strict=True)
+        except ValueError as strict_err:
+            try:
+                net = ipaddress.IPv4Network(raw, strict=False)
+            except ValueError:
+                errors.append(
+                    f"Site {site.get('name', '?')}: customer_subnet '{raw}' is not a valid "
+                    f"IPv4 CIDR ({strict_err}).",
+                )
+                continue
+            errors.append(
+                f"Site {site.get('name', '?')}: customer_subnet '{raw}' has host bits set; "
+                f"use the network address (e.g. {net.with_prefixlen}).",
+            )
             continue
+        nets.append((site["name"], net))
+
     for i, (n1, net1) in enumerate(nets):
         for n2, net2 in nets[i + 1 :]:
             if net1.overlaps(net2):

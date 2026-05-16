@@ -72,6 +72,32 @@ def test_overlapping_subnets_in_same_vpn() -> None:
     assert any("overlap" in e.lower() for e in errors)
 
 
+def test_customer_subnet_with_host_bits_set() -> None:
+    """User-typed network with host bits set should produce a hint, not a generic 'invalid'."""
+    errors = validate_create_l3vpn_form(
+        name="a",
+        tenant="t",
+        sites=[
+            _site(name="s1", subnet="10.10.10.10/24"),
+            _site(name="s2", pe="pe-par-nokia"),
+        ],
+    )
+    assert any("host bits set" in e and "10.10.10.0/24" in e for e in errors)
+
+
+def test_customer_subnet_garbage_string() -> None:
+    """Truly malformed CIDR returns a clear 'not a valid IPv4 CIDR' error."""
+    errors = validate_create_l3vpn_form(
+        name="a",
+        tenant="t",
+        sites=[
+            _site(name="s1", subnet="not-a-cidr"),
+            _site(name="s2", pe="pe-par-nokia"),
+        ],
+    )
+    assert any("not a valid IPv4 CIDR" in e for e in errors)
+
+
 def test_happy_path_returns_empty() -> None:
     errors = validate_create_l3vpn_form(
         name="acme-prod",
