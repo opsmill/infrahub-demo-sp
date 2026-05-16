@@ -86,6 +86,11 @@ def bootstrap(c: Context) -> None:
         "uv run infrahubctl protocols --branch main --out generators/schema_protocols.py",
         pty=True,
     )
+    # Force the L3VPN generator to run synchronously. Without this the
+    # automatic generator dispatch races with artifact generation —
+    # artifacts kick off before the VRF/IPs are materialized and end up
+    # in `Error` state, requiring a manual re-trigger.
+    c.run("uv run python scripts/run_generator.py generate_l3vpn", pty=True)
 
 
 @task(name="init")
