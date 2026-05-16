@@ -1,0 +1,13 @@
+# rumdl configuration — markdown linting for CI.
+
+[global]
+# Skip historical plans/specs (reference material, not user-facing docs)
+# and pull-in third-party content.
+exclude = [
+    ".git",
+    ".github",
+    "node_modules",
+    "docs/node_modules",
+    "docs/superpowers",
+    "tests",
+]

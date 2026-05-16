@@ -100,8 +100,6 @@ Schema Definition → Data Loading → Generator Execution → Transform Process
 4. **Test both paths**: Cover success and failure scenarios
 5. **Integration tests**: Require running Infrahub instance
 
-See [tests/AGENTS.md](./tests/AGENTS.md) for detailed testing conventions.
-
 ## Post-Change Validation
 
 **IMPORTANT**: After making code changes, always run the full lint suite:
@@ -163,8 +161,6 @@ INFRAHUB_GIT_LOCAL="true"  # Use local repo instead of GitHub
 ## Sub-Project Guidelines
 
 - [docs/AGENTS.md](./docs/AGENTS.md) - Documentation site (Docusaurus)
-- [service_catalog/AGENTS.md](./service_catalog/AGENTS.md) - Streamlit application
-- [tests/AGENTS.md](./tests/AGENTS.md) - Testing conventions
 
 ## Resources
 

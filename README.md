@@ -124,12 +124,12 @@ uv run invoke --list
 
 | Page | Contents |
 |---|---|
-| [docs/quickstart.md](docs/quickstart.md) | Prerequisites, step-by-step setup, first L3VPN |
-| [docs/architecture.md](docs/architecture.md) | Data flow, directory map, schema layering |
-| [docs/schema-reference.md](docs/schema-reference.md) | SP schema field tables with user-provided vs generator-filled annotations |
-| [docs/services/l3vpn.md](docs/services/l3vpn.md) | L3VPN service lifecycle, checks, per-vendor config diffs |
-| [docs/lab/containerlab.md](docs/lab/containerlab.md) | Lab setup, SR OS → SR Linux substitution, config push, known gaps |
-| [docs/troubleshooting.md](docs/troubleshooting.md) | Bootstrap timeouts, missing free interface, port conflicts, image pulls |
+| [docs/docs/quickstart.mdx](docs/docs/quickstart.mdx) | Prerequisites, step-by-step setup, first L3VPN |
+| [docs/docs/architecture.mdx](docs/docs/architecture.mdx) | Data flow, directory map, schema layering |
+| [docs/docs/schema-reference.mdx](docs/docs/schema-reference.mdx) | SP schema field tables with user-provided vs generator-filled annotations |
+| [docs/docs/services/l3vpn.mdx](docs/docs/services/l3vpn.mdx) | L3VPN service lifecycle, checks, per-vendor config diffs |
+| [docs/docs/lab/containerlab.mdx](docs/docs/lab/containerlab.mdx) | Lab setup, SR OS → SR Linux substitution, config push, known gaps |
+| [docs/docs/troubleshooting.mdx](docs/docs/troubleshooting.mdx) | Bootstrap timeouts, missing free interface, port conflicts, image pulls |
 | [docs/AGENTS.md](docs/AGENTS.md) | Guidance for AI coding assistants working in this repo |
 
 ---

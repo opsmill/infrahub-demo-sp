@@ -78,7 +78,9 @@ def bootstrap(c: Context) -> None:
     c.run("uv run infrahubctl menu load menus/menu.yml", pty=True)
     for path in sorted(Path("objects").glob("*.yml")):
         c.run(f"uv run infrahubctl object load {shlex.quote(str(path))}", pty=True)
-    repo_file = "objects/git-repo/local-dev.yml" if INFRAHUB_GIT_LOCAL else "objects/git-repo/github.yml"
+    repo_file = (
+        "objects/git-repo/local-dev.yml" if INFRAHUB_GIT_LOCAL else "objects/git-repo/github.yml"
+    )
     c.run(f"uv run infrahubctl object load {shlex.quote(repo_file)}", pty=True)
     c.run(
         "uv run infrahubctl protocols --branch main --out generators/schema_protocols.py",

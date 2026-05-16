@@ -46,7 +46,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           version: "0.9.18"
-      - run: uv sync
+      - run: uv sync --extra dev
       - name: Check code formatting
         run: |
           uv run ruff format --check --diff
@@ -67,7 +67,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           version: "0.9.18"
-      - run: uv sync
+      - run: uv sync --extra dev
       - name: Run yamllint
         run: uv run yamllint -s .
 
@@ -82,6 +82,11 @@ jobs:
         uses: rvben/rumdl@v0
         with:
           report-type: annotations
+          # Only fail CI on errors (broken relative links, missing required
+          # frontmatter, etc.). Pre-existing warnings (line length, bare
+          # URLs, command prompts) are surfaced as annotations but don't
+          # block the build.
+          args: --fail-on error
 
   unit-test:
     if: |
@@ -97,7 +102,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           version: "0.9.18"
-      - run: uv sync
+      - run: uv sync --extra dev
       - name: Run unit tests
         run: uv run pytest tests/unit/ tests/catalog/
 

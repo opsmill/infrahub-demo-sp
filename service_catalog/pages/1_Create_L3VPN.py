@@ -85,9 +85,7 @@ if submitted:
         branch = run_async(client_main.branch.create(branch_name, sync_with_git=False))
         client = client_for(branch=branch_name)
 
-        vpn_id_pool = run_async(
-            client.get(kind="CoreNumberPool", name__value="vpn_id_pool")
-        )
+        vpn_id_pool = run_async(client.get(kind="CoreNumberPool", name__value="vpn_id_pool"))
 
         vpn = run_async(
             client.create(

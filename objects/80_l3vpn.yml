@@ -6,10 +6,10 @@ kind: Object
 spec:
   kind: IpamPrefix
   data:
-    - {prefix: 10.200.10.0/24, description: Trading floor LAN — London,    status: active, role: public}
+    - {prefix: 10.200.10.0/24, description: Trading floor LAN — London, status: active, role: public}
     - {prefix: 10.200.20.0/24, description: Trading floor LAN — Frankfurt, status: active, role: public}
     - {prefix: 10.200.30.0/24, description: Trading floor LAN — Amsterdam, status: active, role: public}
-    - {prefix: 10.200.40.0/24, description: Trading floor LAN — Paris,     status: active, role: public}
+    - {prefix: 10.200.40.0/24, description: Trading floor LAN — Paris, status: active, role: public}
 
 ---
 # ServiceL3Vpn + 4 sites (one per PE). The l3vpns group is the
