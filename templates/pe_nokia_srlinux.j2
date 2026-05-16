@@ -1,0 +1,120 @@
+{% import '_macros.j2' as m %}
+{% set device = data.DcimDevice.edges[0].node %}
+{% set isis = data.MplsIsisProcess.edges[0].node %}
+{% set ldp = data.MplsLdpProcess.edges[0].node %}
+{% set bgp = data.MplsBgpProcess.edges[0].node %}
+{% set sites = data.ServiceL3VpnSite.edges %}
+{# Map our generic Ethernet<N> interface names onto SR Linux ethernet-1/<N> #}
+{% macro srl_iface(name) -%}
+{%- if name == 'Loopback0' -%}lo0
+{%- else -%}ethernet-1/{{ name | replace('Ethernet', '') }}
+{%- endif -%}
+{%- endmacro %}
+# SR Linux configuration for {{ device.name.value }}
+# Apply via gNMIC / CLI:  ssh admin@<clab-host> < this-file
+set / system name {{ device.name.value }}
+{% for iface in device.interfaces.edges if iface.node.name.value == 'Loopback0' %}
+set / interface lo0 admin-state enable
+set / interface lo0 subinterface 0 admin-state enable
+{% for ip in iface.node.ip_addresses.edges %}
+set / interface lo0 subinterface 0 ipv4 admin-state enable
+set / interface lo0 subinterface 0 ipv4 address {{ ip.node.address.value }}
+{% endfor %}
+{% endfor %}
+
+{# Core backbone interfaces #}
+{% for iface in device.interfaces.edges if iface.node.role.value == 'core' %}
+set / interface {{ srl_iface(iface.node.name.value) }} admin-state enable
+set / interface {{ srl_iface(iface.node.name.value) }} mtu {{ iface.node.mtu.value }}
+set / interface {{ srl_iface(iface.node.name.value) }} subinterface 0 admin-state enable
+set / interface {{ srl_iface(iface.node.name.value) }} subinterface 0 ipv4 admin-state enable
+{% for ip in iface.node.ip_addresses.edges %}
+set / interface {{ srl_iface(iface.node.name.value) }} subinterface 0 ipv4 address {{ ip.node.address.value }}
+{% endfor %}
+{% endfor %}
+
+{# Customer-facing interfaces (one per L3VPN site) #}
+{% for site_edge in sites %}
+{% set site = site_edge.node %}
+set / interface {{ srl_iface(site.pe_interface.node.name.value) }} admin-state enable
+set / interface {{ srl_iface(site.pe_interface.node.name.value) }} description "L3VPN {{ site.l3vpn.node.name.value }} - {{ site.name.value }}"
+set / interface {{ srl_iface(site.pe_interface.node.name.value) }} subinterface 0 admin-state enable
+set / interface {{ srl_iface(site.pe_interface.node.name.value) }} subinterface 0 ipv4 admin-state enable
+set / interface {{ srl_iface(site.pe_interface.node.name.value) }} subinterface 0 ipv4 address {{ site.pe_address.node.address.value }}
+{% endfor %}
+
+{# Default network-instance: IGP + iBGP mesh #}
+set / network-instance default type default
+set / network-instance default router-id {{ bgp.router_id.value }}
+{% for iface in device.interfaces.edges if iface.node.name.value == 'Loopback0' %}
+set / network-instance default interface {{ srl_iface(iface.node.name.value) }}.0
+{% endfor %}
+{% for iface in device.interfaces.edges if iface.node.role.value == 'core' %}
+set / network-instance default interface {{ srl_iface(iface.node.name.value) }}.0
+{% endfor %}
+
+set / network-instance default protocols isis instance i1 admin-state enable
+set / network-instance default protocols isis instance i1 level-capability {{ isis.level.value | replace('-', '') | upper }}
+set / network-instance default protocols isis instance i1 net [ {{ isis.net_id.value }} ]
+{% for iface in device.interfaces.edges if iface.node.name.value == 'Loopback0' %}
+set / network-instance default protocols isis instance i1 interface {{ srl_iface(iface.node.name.value) }}.0 admin-state enable
+set / network-instance default protocols isis instance i1 interface {{ srl_iface(iface.node.name.value) }}.0 passive true
+{% endfor %}
+{% for iface in device.interfaces.edges if iface.node.role.value == 'core' %}
+set / network-instance default protocols isis instance i1 interface {{ srl_iface(iface.node.name.value) }}.0 admin-state enable
+set / network-instance default protocols isis instance i1 interface {{ srl_iface(iface.node.name.value) }}.0 circuit-type point-to-point
+{% endfor %}
+
+set / network-instance default protocols ldp admin-state enable
+{% for iface in device.interfaces.edges if iface.node.role.value == 'core' %}
+set / network-instance default protocols ldp discovery interfaces interface {{ srl_iface(iface.node.name.value) }}.0
+{% endfor %}
+
+set / network-instance default protocols bgp admin-state enable
+set / network-instance default protocols bgp autonomous-system {{ device.asn.node.asn.value }}
+set / network-instance default protocols bgp router-id {{ bgp.router_id.value }}
+set / network-instance default protocols bgp group ibgp-mesh peer-as {{ device.asn.node.asn.value }}
+{% for iface in device.interfaces.edges if iface.node.name.value == 'Loopback0' %}
+{% for ip in iface.node.ip_addresses.edges %}
+set / network-instance default protocols bgp group ibgp-mesh local-address {{ m.ip_only(ip.node.address.value) }}
+{% endfor %}
+{% endfor %}
+set / network-instance default protocols bgp group ibgp-mesh afi-safi ipv4-unicast admin-state enable
+set / network-instance default protocols bgp group ibgp-mesh afi-safi l3vpn-ipv4-unicast admin-state enable
+{% for session in bgp.sessions.edges if session.node.session_type.value == 'INTERNAL' %}
+{% set peer = m.ip_only(session.node.remote_ip.node.address.value) %}
+set / network-instance default protocols bgp neighbor {{ peer }} admin-state enable
+set / network-instance default protocols bgp neighbor {{ peer }} peer-group ibgp-mesh
+{% endfor %}
+
+{# Per-VPN ip-vrf network-instances + PE-CE eBGP #}
+{% set seen_vpns = [] %}
+{% for site_edge in sites %}
+{% set site = site_edge.node %}
+{% set vpn = site.l3vpn.node %}
+{% if vpn.name.value not in seen_vpns %}
+{% set _ = seen_vpns.append(vpn.name.value) %}
+
+set / network-instance {{ vpn.name.value }} type ip-vrf
+set / network-instance {{ vpn.name.value }} description "L3VPN {{ vpn.name.value }} (vpn-id {{ vpn.vpn_id.value }})"
+{% for s in sites if s.node.l3vpn.node.name.value == vpn.name.value %}
+set / network-instance {{ vpn.name.value }} interface {{ srl_iface(s.node.pe_interface.node.name.value) }}.0
+{% endfor %}
+set / network-instance {{ vpn.name.value }} vxlan-interface ""
+set / network-instance {{ vpn.name.value }} protocols bgp-vpn bgp-instance 1 route-target import-rt target:{{ vpn.vrf.node.import_rt.node.name.value }}
+set / network-instance {{ vpn.name.value }} protocols bgp-vpn bgp-instance 1 route-target export-rt target:{{ vpn.vrf.node.export_rt.node.name.value }}
+set / network-instance {{ vpn.name.value }} protocols bgp-vpn bgp-instance 1 route-distinguisher rd {{ vpn.vrf.node.vrf_rd.value }}
+set / network-instance {{ vpn.name.value }} protocols bgp admin-state enable
+set / network-instance {{ vpn.name.value }} protocols bgp autonomous-system {{ device.asn.node.asn.value }}
+set / network-instance {{ vpn.name.value }} protocols bgp router-id {{ bgp.router_id.value }}
+{% for s in sites if s.node.l3vpn.node.name.value == vpn.name.value and s.node.routing_protocol.value == 'ebgp' %}
+{% set ce = m.ip_only(s.node.ce_address.node.address.value) %}
+set / network-instance {{ vpn.name.value }} protocols bgp group ce-{{ s.node.name.value }} peer-as {{ s.node.bgp_peer_asn.value }}
+set / network-instance {{ vpn.name.value }} protocols bgp group ce-{{ s.node.name.value }} afi-safi ipv4-unicast admin-state enable
+set / network-instance {{ vpn.name.value }} protocols bgp neighbor {{ ce }} admin-state enable
+set / network-instance {{ vpn.name.value }} protocols bgp neighbor {{ ce }} peer-group ce-{{ s.node.name.value }}
+{% endfor %}
+{% endif %}
+{% endfor %}
+
+commit save
