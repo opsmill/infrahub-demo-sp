@@ -107,6 +107,17 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = "-vv --strict-markers"
 
+[tool.rumdl.global]
+# Historical plans/specs reference paths that don't resolve as filesystem
+# links; treat them as reference material, not user-facing docs. The tests
+# tree contains fixture markdown that isn't user-facing either.
+exclude = [
+    "docs/node_modules",
+    "docs/superpowers",
+    "tests",
+]
+respect-gitignore = true
+
 [tool.coverage.run]
 source = ["generators", "transforms", "checks", "service_catalog/utils"]
 omit = ["tests/*", "scripts/*"]
