@@ -3,7 +3,7 @@ query PeInterfaceAlloc {
     edges {
       node {
         name { value }
-        pe { node { name { value } } }
+        pe_device { node { name { value } } }
         pe_interface { node { id name { value } } }
       }
     }

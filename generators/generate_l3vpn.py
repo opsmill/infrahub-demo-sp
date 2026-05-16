@@ -97,7 +97,7 @@ class L3VpnGenerator(InfrahubGenerator):
             id=site["id"],
             branch=self.branch,
         )
-        pe_name = site["pe"]["node"]["name"]["value"]
+        pe_name = site["pe_device"]["node"]["name"]["value"]
 
         if site.get("pe_interface"):
             iface = await self.client.get(
@@ -215,7 +215,7 @@ class L3VpnGenerator(InfrahubGenerator):
             description=desc,
             session_type="EXTERNAL",
             role="peering",
-            device={"id": site["pe"]["node"]["id"]},
+            device={"id": site["pe_device"]["node"]["id"]},
             local_as=backbone_as,
             remote_as=remote_as,
             local_ip=site_obj.pe_address,

@@ -1,52 +1,54 @@
 ---
-# yaml-language-server: $schema=https://schema.infrahub.app/infrahub/menu/latest.json
-data:
-  - namespace: Service
-    name: ServiceCatalog
-    label: Service Catalog
-    icon: mdi:shopping
-    order_weight: 1000
-    children:
-      data:
-        - namespace: Service
-          name: L3Vpn
-          label: L3 VPNs
-          icon: mdi:vpn
-          kind: ServiceL3Vpn
-          order_weight: 1100
+apiVersion: infrahub.app/v1
+kind: Menu
+spec:
+  data:
+    - namespace: Service
+      name: ServiceCatalog
+      label: Service Catalog
+      icon: mdi:shopping
+      order_weight: 1000
+      children:
+        data:
+          - namespace: Service
+            name: L3Vpn
+            label: L3 VPNs
+            icon: mdi:vpn
+            kind: ServiceL3Vpn
+            order_weight: 1100
 
-  - namespace: Topology
-    name: Topology
-    label: Topology
-    icon: carbon:network-3-reference
-    order_weight: 2000
-    children:
-      data:
-        - namespace: Topology
-          name: MplsBackbone
-          label: MPLS Backbones
-          kind: TopologyMplsBackbone
-          order_weight: 2100
+    - namespace: Topology
+      name: Topology
+      label: Topology
+      icon: carbon:network-3-reference
+      order_weight: 2000
+      children:
+        data:
+          - namespace: Topology
+            name: MplsBackbone
+            label: MPLS Backbones
+            kind: TopologyMplsBackbone
+            order_weight: 2100
 
-  - namespace: Mpls
-    name: Mpls
-    label: MPLS
-    icon: mdi:router-network
-    order_weight: 3000
-    children:
-      data:
-        - namespace: Mpls
-          name: IsisProcess
-          label: ISIS Processes
-          icon: mdi:chevron-triple-right
-          kind: MplsIsisProcess
-        - namespace: Mpls
-          name: LdpProcess
-          label: LDP Processes
-          icon: mdi:label-outline
-          kind: MplsLdpProcess
-        - namespace: Mpls
-          name: BgpProcess
-          label: MP-BGP Processes
-          icon: mdi:routes
-          kind: MplsBgpProcess
+    - namespace: Mpls
+      name: Mpls
+      label: MPLS
+      icon: mdi:router-network
+      order_weight: 3000
+      children:
+        data:
+          - namespace: Mpls
+            name: IsisProcess
+            label: ISIS Processes
+            icon: mdi:chevron-triple-right
+            kind: MplsIsisProcess
+          - namespace: Mpls
+            name: LdpProcess
+            label: LDP Processes
+            icon: mdi:label-outline
+            kind: MplsLdpProcess
+          - namespace: Mpls
+            name: BgpProcess
+            label: MP-BGP Processes
+            icon: mdi:routes
+            kind: MplsBgpProcess

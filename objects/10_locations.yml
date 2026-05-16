@@ -2,7 +2,7 @@
 apiVersion: infrahub.app/v1
 kind: Object
 spec:
-  kind: LocationGeneric
+  kind: LocationRegion
   data:
     - name: EMEA
       shortname: emea
@@ -12,7 +12,7 @@ spec:
 apiVersion: infrahub.app/v1
 kind: Object
 spec:
-  kind: LocationHosting
+  kind: LocationSite
   data:
     - name: London
       shortname: lon

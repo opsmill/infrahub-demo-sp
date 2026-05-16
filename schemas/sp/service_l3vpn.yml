@@ -131,7 +131,7 @@ nodes:
         optional: false
         kind: Parent
         order_weight: 1050
-      - name: pe
+      - name: pe_device
         peer: DcimDevice
         cardinality: one
         optional: false

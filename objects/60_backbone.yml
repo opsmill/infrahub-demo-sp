@@ -75,16 +75,16 @@ spec:
   data:
     - address: 10.0.0.1/32
       description: pe-lon-arista loopback
-      interface: {device: pe-lon-arista, name: Loopback0}
+      interface: {hfid: [pe-lon-arista, Loopback0]}
     - address: 10.0.0.2/32
       description: pe-fra-cisco loopback
-      interface: {device: pe-fra-cisco, name: Loopback0}
+      interface: {hfid: [pe-fra-cisco, Loopback0]}
     - address: 10.0.0.3/32
       description: pe-ams-juniper loopback
-      interface: {device: pe-ams-juniper, name: Loopback0}
+      interface: {hfid: [pe-ams-juniper, Loopback0]}
     - address: 10.0.0.4/32
       description: pe-par-nokia loopback
-      interface: {device: pe-par-nokia, name: Loopback0}
+      interface: {hfid: [pe-par-nokia, Loopback0]}
 
 ---
 # Backbone physical interfaces (one per p2p link end = 12 total for 6 links)
@@ -133,23 +133,23 @@ spec:
   kind: IpamIPAddress
   data:
     # lon <-> fra (10.1.0.0/31)
-    - {address: 10.1.0.0/31, interface: {device: pe-lon-arista, name: Ethernet1}}
-    - {address: 10.1.0.1/31, interface: {device: pe-fra-cisco, name: Ethernet1}}
+    - {address: 10.1.0.0/31, interface: {hfid: [pe-lon-arista, Ethernet1]}}
+    - {address: 10.1.0.1/31, interface: {hfid: [pe-fra-cisco, Ethernet1]}}
     # lon <-> ams (10.1.0.2/31)
-    - {address: 10.1.0.2/31, interface: {device: pe-lon-arista, name: Ethernet2}}
-    - {address: 10.1.0.3/31, interface: {device: pe-ams-juniper, name: Ethernet1}}
+    - {address: 10.1.0.2/31, interface: {hfid: [pe-lon-arista, Ethernet2]}}
+    - {address: 10.1.0.3/31, interface: {hfid: [pe-ams-juniper, Ethernet1]}}
     # lon <-> par (10.1.0.4/31)
-    - {address: 10.1.0.4/31, interface: {device: pe-lon-arista, name: Ethernet3}}
-    - {address: 10.1.0.5/31, interface: {device: pe-par-nokia, name: Ethernet1}}
+    - {address: 10.1.0.4/31, interface: {hfid: [pe-lon-arista, Ethernet3]}}
+    - {address: 10.1.0.5/31, interface: {hfid: [pe-par-nokia, Ethernet1]}}
     # fra <-> ams (10.1.0.6/31)
-    - {address: 10.1.0.6/31, interface: {device: pe-fra-cisco, name: Ethernet2}}
-    - {address: 10.1.0.7/31, interface: {device: pe-ams-juniper, name: Ethernet2}}
+    - {address: 10.1.0.6/31, interface: {hfid: [pe-fra-cisco, Ethernet2]}}
+    - {address: 10.1.0.7/31, interface: {hfid: [pe-ams-juniper, Ethernet2]}}
     # fra <-> par (10.1.0.8/31)
-    - {address: 10.1.0.8/31, interface: {device: pe-fra-cisco, name: Ethernet3}}
-    - {address: 10.1.0.9/31, interface: {device: pe-par-nokia, name: Ethernet2}}
+    - {address: 10.1.0.8/31, interface: {hfid: [pe-fra-cisco, Ethernet3]}}
+    - {address: 10.1.0.9/31, interface: {hfid: [pe-par-nokia, Ethernet2]}}
     # ams <-> par (10.1.0.10/31)
-    - {address: 10.1.0.10/31, interface: {device: pe-ams-juniper, name: Ethernet3}}
-    - {address: 10.1.0.11/31, interface: {device: pe-par-nokia, name: Ethernet3}}
+    - {address: 10.1.0.10/31, interface: {hfid: [pe-ams-juniper, Ethernet3]}}
+    - {address: 10.1.0.11/31, interface: {hfid: [pe-par-nokia, Ethernet3]}}
 
 ---
 # ISIS processes

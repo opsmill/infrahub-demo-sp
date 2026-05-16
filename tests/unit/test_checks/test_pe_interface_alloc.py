@@ -21,7 +21,7 @@ def _site(name: str, pe: str, iface_id: str | None) -> dict:
     return {
         "node": {
             "name": {"value": name},
-            "pe": {"node": {"name": {"value": pe}}},
+            "pe_device": {"node": {"name": {"value": pe}}},
             "pe_interface": (
                 {"node": {"id": iface_id, "name": {"value": "Ethernet1"}}} if iface_id else None
             ),

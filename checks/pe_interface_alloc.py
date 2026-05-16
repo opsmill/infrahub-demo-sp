@@ -24,7 +24,7 @@ class PeInterfaceAllocCheck(InfrahubCheck):
             node = edge["node"]
             if not node.get("pe_interface"):
                 continue
-            key = (node["pe"]["node"]["name"]["value"], node["pe_interface"]["node"]["id"])
+            key = (node["pe_device"]["node"]["name"]["value"], node["pe_interface"]["node"]["id"])
             groups[key].append(node["name"]["value"])
 
         for (pe, _), sites in groups.items():

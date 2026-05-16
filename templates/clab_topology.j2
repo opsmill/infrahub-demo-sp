@@ -34,9 +34,9 @@ topology:
 {% endfor %}
 {% for site_edge in data.ServiceL3VpnSite.edges %}
 {% set site = site_edge.node %}
-{% set pe_platform = site.pe.node.platform.node.name.value %}
+{% set pe_platform = site.pe_device.node.platform.node.name.value %}
 {% if pe_platform in ['arista_eos', 'nokia_sros'] %}
-    ce-{{ site.l3vpn.node.name.value }}-{{ site.pe.node.name.value }}:
+    ce-{{ site.l3vpn.node.name.value }}-{{ site.pe_device.node.name.value }}:
       kind: linux
       exec:
         - ip addr add {{ site.ce_address.node.address.value }} dev eth1
@@ -60,10 +60,10 @@ topology:
 {% endif %}
 {% for site_edge in data.ServiceL3VpnSite.edges %}
 {% set site = site_edge.node %}
-{% set pe_platform = site.pe.node.platform.node.name.value %}
+{% set pe_platform = site.pe_device.node.platform.node.name.value %}
 {% if pe_platform in ['arista_eos', 'nokia_sros'] %}
     - endpoints:
-        - "{{ site.pe.node.name.value }}:{{ site.pe_interface.node.name.value }}"
-        - "ce-{{ site.l3vpn.node.name.value }}-{{ site.pe.node.name.value }}:eth1"
+        - "{{ site.pe_device.node.name.value }}:{{ site.pe_interface.node.name.value }}"
+        - "ce-{{ site.l3vpn.node.name.value }}-{{ site.pe_device.node.name.value }}:eth1"
 {% endif %}
 {% endfor %}

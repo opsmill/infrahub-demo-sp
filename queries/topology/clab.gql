@@ -29,7 +29,7 @@ query Clab($name: String!) {
     edges {
       node {
         name { value }
-        pe { node { name { value } platform { node { name { value } } } } }
+        pe_device { node { name { value } platform { node { name { value } } } } }
         pe_interface { node { name { value } } }
         pe_address { node { address { value } } }
         ce_address { node { address { value } } }

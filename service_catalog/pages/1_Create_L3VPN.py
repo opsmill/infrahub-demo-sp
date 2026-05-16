@@ -113,7 +113,7 @@ if submitted:
                     kind="ServiceL3VpnSite",
                     name=s["name"],
                     l3vpn=vpn,
-                    pe={"hfid": [s["pe"]]},
+                    pe_device={"hfid": [s["pe"]]},
                     customer_subnet=cust,
                     routing_protocol=s["routing_protocol"],
                     bgp_peer_asn=s["bgp_peer_asn"],

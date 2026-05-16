@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shlex
 from pathlib import Path
 
@@ -11,12 +12,34 @@ from invoke.tasks import task
 
 REPO_ROOT = Path(__file__).resolve().parent
 COMPOSE_PROJECT = "sp-demo"
+INFRAHUB_VERSION = os.getenv("INFRAHUB_VERSION", "stable")
+LOCAL_COMPOSE_FILE = REPO_ROOT / "docker-compose.yml"
+OVERRIDE_FILE = REPO_ROOT / "docker-compose.override.yml"
+
+
+def _compose_base() -> str:
+    """Build the docker compose invocation, sourcing the base file locally or upstream.
+
+    Mirrors infrahub-demo-dc: if a local ``docker-compose.yml`` exists, use it; otherwise
+    stream the file from ``https://infrahub.opsmill.io/<version>`` via ``docker compose -f -``.
+    The committed ``docker-compose.override.yml`` is always layered on top.
+    """
+    base = f"docker compose -p {COMPOSE_PROJECT}"
+    if LOCAL_COMPOSE_FILE.exists():
+        cmd = f"{base} -f {LOCAL_COMPOSE_FILE}"
+        if OVERRIDE_FILE.exists():
+            cmd += f" -f {OVERRIDE_FILE}"
+        return cmd
+    cmd = f"curl -sf https://infrahub.opsmill.io/{INFRAHUB_VERSION} | {base} -f -"
+    if OVERRIDE_FILE.exists():
+        cmd += f" -f {OVERRIDE_FILE}"
+    return cmd
 
 
 def _compose(c: Context, args: str, profile: str | None = None) -> None:
     """Run docker compose with the demo project name and optional profile."""
     profile_arg = f"--profile {profile}" if profile else ""
-    c.run(f"docker compose -p {COMPOSE_PROJECT} {profile_arg} {args}", pty=True)
+    c.run(f"{_compose_base()} {profile_arg} {args}", pty=True)
 
 
 @task

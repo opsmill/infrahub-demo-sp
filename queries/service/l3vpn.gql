@@ -18,7 +18,7 @@ query L3Vpn($name: String!) {
               bgp_peer_asn { value }
               static_routes { value }
               status { value }
-              pe { node { id name { value } platform { node { name { value } } } } }
+              pe_device { node { id name { value } platform { node { name { value } } } } }
               pe_interface { node { id name { value } } }
               customer_subnet { node { id prefix { value } } }
               pe_address { node { id address { value } } }

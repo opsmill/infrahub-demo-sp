@@ -36,7 +36,7 @@ async def main() -> None:
         kind="ServiceL3VpnSite",
         name="smoketest-site-lon",
         l3vpn=vpn,
-        pe={"hfid": ["pe-lon-arista"]},
+        pe_device={"hfid": ["pe-lon-arista"]},
         customer_subnet=cust,
         routing_protocol="ebgp",
         bgp_peer_asn=65501,
