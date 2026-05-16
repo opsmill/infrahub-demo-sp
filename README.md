@@ -37,8 +37,8 @@ eBGP sessions, then renders per-vendor device configs as Infrahub artifacts.
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/opsmill/sp-demo-mpls-l3vpn.git
-cd sp-demo-mpls-l3vpn
+git clone https://github.com/opsmill/infrahub-demo-sp.git
+cd infrahub-demo-sp
 cp .env.example .env
 uv sync
 ```
@@ -76,13 +76,17 @@ The sidebar shows:
 
 ### 4. Start the Streamlit Service Catalog
 
+Set `INFRAHUB_SERVICE_CATALOG="true"` in `.env`, then:
+
 ```bash
-uv run invoke start --catalog --build
+uv run invoke start
 ```
 
-Visit **http://localhost:8501** to create your first L3VPN. The catalog
-allocates a VPN ID, opens a feature branch, creates the service objects,
-and opens a Proposed Change — all in one click.
+`invoke start` / `invoke init` will now also build and start the
+Streamlit sidecar on every run. Visit **http://localhost:8501** to
+create your first L3VPN. The catalog allocates a VPN ID, opens a
+feature branch, creates the service objects, and opens a Proposed
+Change — all in one click.
 
 ### 5. Review and merge the Proposed Change
 
@@ -106,8 +110,7 @@ uv run invoke --list
 | Task | Description |
 |---|---|
 | `invoke init` | Destroy → start → bootstrap (full reset) |
-| `invoke start` | Start Infrahub containers |
-| `invoke start --catalog --build` | Start with Streamlit sidecar |
+| `invoke start` | Start Infrahub containers (set `INFRAHUB_SERVICE_CATALOG=true` to include the Streamlit sidecar) |
 | `invoke destroy` | Stop and remove containers + volumes |
 | `invoke bootstrap` | Load schemas, menu, and bootstrap objects |
 | `invoke lint` | Run ruff, mypy, yamllint |
@@ -137,7 +140,7 @@ uv run invoke --list
 ## Repository layout
 
 ```
-sp-demo-mpls-l3vpn/
+infrahub-demo-sp/
 ├── schemas/
 │   ├── base/           # Core schema-library nodes
 │   ├── extensions/     # Routing, VRF, topology extensions

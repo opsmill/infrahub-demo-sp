@@ -5,7 +5,7 @@
 
 ## Project Overview
 
-**sp-demo-mpls-l3vpn** is a comprehensive demonstration of multi-vendor MPLS network provisioning using [Infrahub](https://docs.infrahub.app). It showcases:
+**infrahub-demo-sp** is a comprehensive demonstration of multi-vendor MPLS network provisioning using [Infrahub](https://docs.infrahub.app). It showcases:
 
 - Multi-vendor MPLS backbone topology (Arista EOS, Cisco IOS-XR, Juniper Junos, Nokia SR OS)
 - L3VPN service provisioning via Streamlit Service Catalog

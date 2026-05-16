@@ -59,7 +59,7 @@ Represents a single PE attachment of an L3VPN to a customer subnet. One site
 | Field | Peer | Cardinality | Required | Description | Who sets it |
 |---|---|---|---|---|---|
 | `l3vpn` | `ServiceL3Vpn` | one | Required | Parent VPN (parent relationship) | User / catalog |
-| `pe` | `DcimDevice` | one | Required | PE router for this attachment | User |
+| `pe_device` | `DcimDevice` | one | Required | PE router for this attachment | User |
 | `pe_interface` | `InterfacePhysical` | one | Optional | PE-facing physical interface | Generator allocates from free interfaces |
 | `customer_subnet` | `IpamPrefix` | one | Required | Customer prefix to be placed into the VRF | User |
 | `pe_address` | `IpamIPAddress` | one | Optional | PE IP on the PE-CE /30 link | Generator allocates from `pe_ce_pool` |
@@ -170,6 +170,44 @@ overlay process carrying VPNv4 / VPNv6 address families.
 
 ---
 
+## LocationRegion / LocationSite
+
+**Namespace:** `Location` · **File:** `schemas/sp/location_concrete.yml`
+
+Concrete location kinds for this demo. `LocationRegion` inherits from
+`LocationGeneric` (the schema-library generic), and `LocationSite` adds
+hosting capability via `LocationHosting`. Both render under
+`LocationGeneric` in the sidebar menu. The bootstrap data uses
+`LocationRegion` for `emea` and `LocationSite` for the four PoPs
+(`lon`, `fra`, `ams`, `par`).
+
+| Kind | Inherits | Purpose |
+|---|---|---|
+| `LocationRegion` | `LocationGeneric` | Geographic region (e.g. `emea`) |
+| `LocationSite` | `LocationGeneric`, `LocationHosting` | PoP / site that hosts PEs |
+
+---
+
+## DcimDevice role extension
+
+**File:** `schemas/sp/dcim_role_pe.yml`
+
+This file is a schema *extension* (not a new node) that adds SP-specific
+choices to the existing `DcimDevice.role` dropdown:
+
+| Role | Label | Use |
+|---|---|---|
+| `pe` | Provider Edge | PE router terminating customer VPNs |
+| `p` | Provider Core | P router (transit only, no customer VRFs) |
+| `rr` | Route Reflector | BGP route reflector |
+| `core` | Core Router | Central part of the network |
+| `edge` | Edge Router | Network boundary with external networks |
+| `cpe` | Customer Premise Equipment | Devices at the customer's premises |
+
+The demo bootstrap sets `role = pe` on all four PEs.
+
+---
+
 ## Resource Pools
 
 The following pools are bootstrapped in `objects/50_pools.yml` and consumed
@@ -193,7 +231,7 @@ the `L3VpnGenerator` fills in automatically:
 |---|---|---|
 | `ServiceL3Vpn` | `name`, `vpn_id`, `address_family`, `tenant` | User / catalog |
 | `ServiceL3Vpn` | `vrf`, `status = active` | Generator |
-| `ServiceL3VpnSite` | `name`, `pe`, `routing_protocol`, `bgp_peer_asn`, `customer_subnet`, `l3vpn` | User / catalog |
+| `ServiceL3VpnSite` | `name`, `pe_device`, `routing_protocol`, `bgp_peer_asn`, `customer_subnet`, `l3vpn` | User / catalog |
 | `ServiceL3VpnSite` | `pe_interface`, `pe_address`, `ce_address`, `status = active` | Generator |
 | `IpamVRF` | all | Generator |
 | `IpamIPAddress` (PE-CE) | all | Generator |

@@ -81,6 +81,7 @@ VLANs
 VNets
 VPCs
 VPNs
+VRFs
 VXLAN
 walkthrough
 yamllint

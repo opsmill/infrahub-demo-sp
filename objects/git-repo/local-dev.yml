@@ -4,6 +4,6 @@ kind: Object
 spec:
   kind: CoreRepository
   data:
-    - name: sp-demo-mpls-l3vpn
+    - name: infrahub-demo-sp
       location: "/upstream"
       default_branch: "main"

@@ -14,7 +14,7 @@ const config: Config = {
   baseUrl: '/',
 
   organizationName: 'opsmill',
-  projectName: 'sp-demo-mpls-l3vpn',
+  projectName: 'infrahub-demo-sp',
 
   onBrokenLinks: 'throw',
   onDuplicateRoutes: "throw",
@@ -40,7 +40,7 @@ const config: Config = {
         docs: {
           // Please change this to your repo.
           // Remove this to remove the "edit this page" links.
-          editUrl: "https://github.com/opsmill/sp-demo-mpls-l3vpn/tree/main/docs",
+          editUrl: "https://github.com/opsmill/infrahub-demo-sp/tree/main/docs",
           routeBasePath: "/",
           sidebarCollapsed: true,
           sidebarPath: "./sidebars.ts",
@@ -68,7 +68,7 @@ const config: Config = {
           label: "SP Bundle (MPLS L3VPN)",
         },
         {
-          href: "https://github.com/opsmill/sp-demo-mpls-l3vpn",
+          href: "https://github.com/opsmill/infrahub-demo-sp",
           position: "right",
           className: "header-github-link",
           "aria-label": "GitHub repository",

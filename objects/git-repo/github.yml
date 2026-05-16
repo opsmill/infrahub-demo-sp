@@ -4,6 +4,6 @@ kind: Object
 spec:
   kind: CoreReadOnlyRepository
   data:
-    - name: sp-demo-mpls-l3vpn
+    - name: infrahub-demo-sp
       location: "https://github.com/opsmill/infrahub-demo-sp.git"
       ref: "main"
