@@ -13,6 +13,7 @@ from invoke.tasks import task
 REPO_ROOT = Path(__file__).resolve().parent
 COMPOSE_PROJECT = "sp-demo"
 INFRAHUB_VERSION = os.getenv("INFRAHUB_VERSION", "stable")
+INFRAHUB_SERVICE_CATALOG = os.getenv("INFRAHUB_SERVICE_CATALOG", "false").lower() == "true"
 LOCAL_COMPOSE_FILE = REPO_ROOT / "docker-compose.yml"
 OVERRIDE_FILE = REPO_ROOT / "docker-compose.override.yml"
 
@@ -43,10 +44,16 @@ def _compose(c: Context, args: str, profile: str | None = None) -> None:
 
 
 @task
-def start(c: Context, build: bool = False, catalog: bool = False) -> None:
-    """Start Infrahub containers. Use --catalog to enable the Streamlit sidecar."""
-    build_arg = "--build" if build else ""
-    profile = "service-catalog" if catalog else None
+def start(c: Context, build: bool = False) -> None:
+    """Start Infrahub containers.
+
+    Set ``INFRAHUB_SERVICE_CATALOG=true`` in ``.env`` to also build and start the
+    Streamlit service-catalog sidecar on every ``invoke start`` / ``invoke init``.
+    """
+    profile = "service-catalog" if INFRAHUB_SERVICE_CATALOG else None
+    # Always pass --build when the catalog is enabled so local code changes
+    # in service_catalog/ are picked up on every start.
+    build_arg = "--build" if (build or INFRAHUB_SERVICE_CATALOG) else ""
     _compose(c, f"up -d {build_arg}", profile=profile)
 
 
