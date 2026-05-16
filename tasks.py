@@ -1,14 +1,23 @@
-"""Invoke tasks for the SP demo MPLS L3VPN repo."""
+"""Invoke tasks for the infrahub-demo-sp repo."""
 
 from __future__ import annotations
 
+import importlib.metadata
 import os
 import shlex
+import time
 from pathlib import Path
 
 from invoke.collection import Collection
 from invoke.context import Context
 from invoke.tasks import task
+from rich import box
+from rich.console import Console
+from rich.panel import Panel
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+from rich.table import Table
+
+console = Console()
 
 REPO_ROOT = Path(__file__).resolve().parent
 COMPOSE_PROJECT = "sp-demo"
@@ -17,6 +26,57 @@ INFRAHUB_SERVICE_CATALOG = os.getenv("INFRAHUB_SERVICE_CATALOG", "false").lower(
 INFRAHUB_GIT_LOCAL = os.getenv("INFRAHUB_GIT_LOCAL", "false").lower() == "true"
 LOCAL_COMPOSE_FILE = REPO_ROOT / "docker-compose.yml"
 OVERRIDE_FILE = REPO_ROOT / "docker-compose.override.yml"
+
+
+def _banner(title: str, body: str = "", border: str = "cyan") -> None:
+    """Print a Rich panel with a colored border and optional body.
+
+    Args:
+        title: Heading shown in the panel border.
+        body: Optional multi-line body rendered inside the panel.
+        border: Rich color name for the border + title style.
+    """
+    content = body or f"[bold {border}]{title}[/bold {border}]"
+    title_arg = f"[bold]{title}[/bold]" if body else None
+    console.print()
+    console.print(Panel(content, title=title_arg, border_style=border, box=box.SIMPLE))
+
+
+def _step(msg: str) -> None:
+    """Print an in-progress step marker."""
+    console.print(f"[cyan]→[/cyan] {msg}")
+
+
+def _wait(msg: str) -> None:
+    """Print a waiting / pending step marker."""
+    console.print(f"[yellow]→[/yellow] {msg}")
+
+
+def _success(msg: str) -> None:
+    """Print a success marker."""
+    console.print(f"[green]✓[/green] {msg}")
+
+
+def _sleep_with_progress(seconds: int, description: str) -> None:
+    """Sleep for ``seconds``, drawing a Rich progress bar each second.
+
+    Args:
+        seconds: How long to sleep.
+        description: Label shown alongside the progress bar.
+    """
+    with Progress(
+        SpinnerColumn(spinner_name="dots12", style="bold bright_yellow"),
+        TextColumn("[progress.description]{task.description}", style="bold white"),
+        BarColumn(bar_width=40, style="yellow", complete_style="bright_green"),
+        TextColumn("[bold bright_cyan]{task.percentage:>3.0f}%"),
+        TextColumn("•", style="dim"),
+        TimeElapsedColumn(),
+        console=console,
+    ) as progress:
+        bar = progress.add_task(description, total=seconds)
+        for _ in range(seconds):
+            time.sleep(1)
+            progress.update(bar, advance=1)
 
 
 def _compose_base() -> str:
@@ -44,6 +104,58 @@ def _compose(c: Context, args: str, profile: str | None = None) -> None:
     c.run(f"{_compose_base()} {profile_arg} {args}", pty=True)
 
 
+def _compose_source() -> str:
+    """Human-readable description of where the base compose file comes from."""
+    if LOCAL_COMPOSE_FILE.exists():
+        return "Local (docker-compose.yml)"
+    return f"infrahub.opsmill.io ({INFRAHUB_VERSION})"
+
+
+def _task_summary(t: object) -> str:
+    """Return the first line of the task's docstring, or a placeholder."""
+    body = (t.__doc__ or "").strip()
+    return body.split("\n", 1)[0] if body else "(no description)"
+
+
+@task(name="list")
+def list_tasks(c: Context) -> None:
+    """List every available invoke task with its description."""
+    rows: list[tuple[str, str]] = [(t.name, _task_summary(t)) for t in ns.tasks.values()]
+    rows.extend((f"lab.{t.name}", _task_summary(t)) for t in lab.tasks.values())
+    rows.sort(key=lambda row: row[0])
+    table = Table(
+        title="Available invoke tasks",
+        box=box.SIMPLE,
+        show_header=True,
+        header_style="bold cyan",
+    )
+    table.add_column("Task", style="green", no_wrap=True)
+    table.add_column("Description", style="white")
+    for name, description in rows:
+        table.add_row(name, description)
+    console.print()
+    console.print(table)
+    console.print()
+
+
+@task
+def info(c: Context) -> None:
+    """Show the current demo configuration."""
+    try:
+        sdk_version = importlib.metadata.version("infrahub-sdk")
+    except importlib.metadata.PackageNotFoundError:
+        sdk_version = "unknown"
+    body = (
+        f"[cyan]Project:[/cyan]         {COMPOSE_PROJECT}\n"
+        f"[cyan]Infrahub:[/cyan]        {INFRAHUB_VERSION}\n"
+        f"[cyan]Infrahub SDK:[/cyan]    {sdk_version}\n"
+        f"[cyan]Compose source:[/cyan] {_compose_source()}\n"
+        f"[cyan]Local git:[/cyan]      {'enabled' if INFRAHUB_GIT_LOCAL else 'disabled'}\n"
+        f"[cyan]Service catalog:[/cyan] {'enabled' if INFRAHUB_SERVICE_CATALOG else 'disabled'}"
+    )
+    _banner("Infrahub demo-sp configuration", body=body, border="blue")
+
+
 @task
 def start(c: Context, build: bool = False) -> None:
     """Start Infrahub containers.
@@ -51,17 +163,32 @@ def start(c: Context, build: bool = False) -> None:
     Set ``INFRAHUB_SERVICE_CATALOG=true`` in ``.env`` to also build and start the
     Streamlit service-catalog sidecar on every ``invoke start`` / ``invoke init``.
     """
-    profile = "service-catalog" if INFRAHUB_SERVICE_CATALOG else None
-    # Always pass --build when the catalog is enabled so local code changes
-    # in service_catalog/ are picked up on every start.
-    build_arg = "--build" if (build or INFRAHUB_SERVICE_CATALOG) else ""
+    catalog_on = INFRAHUB_SERVICE_CATALOG
+    rebuild = build or catalog_on
+    body = (
+        f"[green]Starting Infrahub[/green] [dim]({INFRAHUB_VERSION})[/dim]\n"
+        f"[dim]Project:[/dim]         {COMPOSE_PROJECT}\n"
+        f"[dim]Compose source:[/dim] {_compose_source()}\n"
+        f"[dim]Service catalog:[/dim] {'enabled' if catalog_on else 'disabled'}\n"
+        f"[dim]Local git:[/dim]      {'enabled' if INFRAHUB_GIT_LOCAL else 'disabled'}"
+        + ("\n[yellow]Rebuild:[/yellow] enabled" if rebuild else "")
+    )
+    _banner("invoke start", body=body, border="green")
+    profile = "service-catalog" if catalog_on else None
+    build_arg = "--build" if rebuild else ""
     _compose(c, f"up -d {build_arg}", profile=profile)
+    _success("Infrahub UI:      http://localhost:8000  (admin / infrahub)")
+    if catalog_on:
+        _success("Service catalog:  http://localhost:8501")
 
 
 @task
 def destroy(c: Context) -> None:
     """Tear down Infrahub containers and volumes."""
+    _banner("invoke destroy", border="red")
+    _wait("Removing containers and volumes")
     _compose(c, "down -v", profile="service-catalog")
+    _success("Infrahub torn down")
 
 
 @task
@@ -74,63 +201,118 @@ def bootstrap(c: Context) -> None:
     definitions, generators, and checks. Selection is driven by the
     ``INFRAHUB_GIT_LOCAL`` env var.
     """
+    _banner("invoke bootstrap", border="cyan")
+
+    _step("Loading schemas")
     c.run("uv run infrahubctl schema load schemas/", pty=True)
+    _success("Schemas loaded")
+
+    _step("Loading sidebar menu")
     c.run("uv run infrahubctl menu load menus/menu.yml", pty=True)
+    _success("Menu loaded")
+
+    _step("Loading bootstrap objects")
     for path in sorted(Path("objects").glob("*.yml")):
         c.run(f"uv run infrahubctl object load {shlex.quote(str(path))}", pty=True)
+    _success("Bootstrap objects loaded")
+
     repo_file = (
         "objects/git-repo/local-dev.yml" if INFRAHUB_GIT_LOCAL else "objects/git-repo/github.yml"
     )
+    _step(f"Registering CoreRepository ({repo_file})")
     c.run(f"uv run infrahubctl object load {shlex.quote(repo_file)}", pty=True)
+    _success("CoreRepository registered")
+
+    _step("Exporting Python protocols from the live schema")
     c.run(
         "uv run infrahubctl protocols --branch main --out generators/schema_protocols.py",
         pty=True,
     )
+    _success("Protocols exported")
+
     # Force the L3VPN generator to run synchronously. Without this the
     # automatic generator dispatch races with artifact generation —
     # artifacts kick off before the VRF/IPs are materialized and end up
     # in `Error` state, requiring a manual re-trigger.
+    _step("Running the L3VPN generator")
     c.run("uv run python scripts/run_generator.py generate_l3vpn", pty=True)
+    _success("Generator complete")
+
     # Now that the generator has materialized the data the templates
     # depend on, regenerate every artifact — Infrahub's earlier
     # auto-dispatch ran against incomplete state and left artifacts in
     # `Error`. This converges every CoreArtifact to `Ready`.
+    _step("Regenerating artifacts")
     c.run("uv run python scripts/regenerate_artifacts.py", pty=True)
+    _success("All artifacts ready")
+
+    console.print()
+    _banner("Bootstrap complete", border="green")
 
 
 @task(name="init")
 def init_demo(c: Context) -> None:
     """Destroy, start, and bootstrap the demo end-to-end."""
+    _banner(
+        "invoke init",
+        body="[bold]Full reset of the infrahub-demo-sp stack[/bold]",
+        border="magenta",
+    )
     destroy(c)
     start(c, build=True)
-    c.run("sleep 30", pty=True)
+    _wait("Waiting 30s for containers to settle")
+    _sleep_with_progress(30, "containers warming up")
     bootstrap(c)
+    console.print()
+    _banner(
+        "infrahub-demo-sp ready",
+        body=(
+            "[green]✓[/green] Infrahub UI:      http://localhost:8000  (admin / infrahub)\n"
+            + (
+                "[green]✓[/green] Service catalog:  http://localhost:8501\n"
+                if INFRAHUB_SERVICE_CATALOG
+                else ""
+            )
+            + "[dim]Try:[/dim] uv run invoke info"
+        ),
+        border="green",
+    )
 
 
 @task
 def lint(c: Context) -> None:
     """Run the full lint suite: ruff, mypy, yamllint."""
+    _banner("invoke lint", border="cyan")
+    _step("ruff check")
     c.run("uv run ruff check .", pty=True)
+    _step("ruff format --check")
     c.run("uv run ruff format --check .", pty=True)
+    _step("mypy")
     c.run("uv run mypy .", pty=True)
+    _step("yamllint")
     c.run("uv run yamllint .", pty=True)
+    _success("Lint suite passed")
 
 
 @task
 def test(c: Context, kind: str = "unit") -> None:
     """Run pytest; kind in {unit, integration, catalog, all}."""
-    if kind == "all":
-        c.run("uv run pytest tests/", pty=True)
-    else:
-        c.run(f"uv run pytest tests/{kind}/", pty=True)
+    _banner(f"invoke test --kind {kind}", border="cyan")
+    target = "tests/" if kind == "all" else f"tests/{kind}/"
+    c.run(f"uv run pytest {target}", pty=True)
+    _success(f"{kind} tests passed")
 
 
 @task
 def docs(c: Context) -> None:
     """Build the Docusaurus documentation site under docs/."""
+    _banner("invoke docs", border="cyan")
     with c.cd(str(REPO_ROOT / "docs")):
+        _step("pnpm install")
         c.run("pnpm install --frozen-lockfile", pty=True)
+        _step("pnpm run build")
         c.run("pnpm run build", pty=True)
+    _success("Docusaurus site built")
 
 
 LAB_DIR = REPO_ROOT / "lab"
@@ -151,32 +333,40 @@ def _fetch_artifact(c: Context, artifact_name: str, dest: Path) -> None:
     )
 
 
-# Lab namespace (filled in Phase 8)
+# Lab namespace
 lab = Collection("lab")
 
 
 @task(name="deploy")
 def lab_deploy(c: Context) -> None:
     """Fetch the clab topology artifact and run containerlab deploy."""
+    _banner("invoke lab.deploy", border="cyan")
     LAB_DIR.mkdir(exist_ok=True)
+    _step(f"Fetching clab-mpls-topology → {LAB_TOPO.relative_to(REPO_ROOT)}")
     _fetch_artifact(c, "clab-mpls-topology", LAB_TOPO)
+    _success("Topology artifact fetched")
+    _step("Running containerlab deploy")
     c.run(f"containerlab deploy --topo {LAB_TOPO}", pty=True)
+    _success("Lab deployed")
 
 
 @task(name="destroy")
 def lab_destroy(c: Context) -> None:
     """Tear down the running lab."""
+    _banner("invoke lab.destroy", border="red")
     if not LAB_TOPO.exists():
-        print(f"No lab topology at {LAB_TOPO}; nothing to destroy.")
+        _wait(f"No lab topology at {LAB_TOPO}; nothing to destroy.")
         return
     c.run(f"containerlab destroy --topo {LAB_TOPO}", pty=True)
+    _success("Lab destroyed")
 
 
 @task(name="status")
 def lab_status(c: Context) -> None:
     """Show running clab containers."""
+    _banner("invoke lab.status", border="cyan")
     if not LAB_TOPO.exists():
-        print(f"No lab topology at {LAB_TOPO}.")
+        _wait(f"No lab topology at {LAB_TOPO}.")
         return
     c.run(f"containerlab inspect --topo {LAB_TOPO}", pty=True)
 
@@ -184,13 +374,18 @@ def lab_status(c: Context) -> None:
 @task(name="push-arista")
 def lab_push_arista(c: Context) -> None:
     """Push the rendered Arista config to the running cEOS lab node."""
+    _banner("invoke lab.push-arista", border="cyan")
     LAB_DIR.mkdir(exist_ok=True)
     arista_cfg = LAB_DIR / "pe-lon-arista.cfg"
+    _step(f"Fetching pe-arista-eos → {arista_cfg.relative_to(REPO_ROOT)}")
     _fetch_artifact(c, "pe-arista-eos", arista_cfg)
+    _success("Artifact fetched")
+    _step("Pushing config to clab-pe-lon-arista")
     c.run(
         f"uv run python scripts/push_arista.py {shlex.quote(str(arista_cfg))} pe-lon-arista",
         pty=True,
     )
+    _success("Config pushed")
 
 
 lab.add_task(lab_deploy)
@@ -199,6 +394,8 @@ lab.add_task(lab_status)
 lab.add_task(lab_push_arista)
 
 ns = Collection()
+ns.add_task(list_tasks)
+ns.add_task(info)
 ns.add_task(start)
 ns.add_task(destroy)
 ns.add_task(bootstrap)
