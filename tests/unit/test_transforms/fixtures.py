@@ -111,9 +111,7 @@ def pe_fixture(name: str, loopback: str, net_id: str) -> dict:
                                     "node": {
                                         "description": {"value": "iBGP to peer"},
                                         "session_type": {"value": "INTERNAL"},
-                                        "local_ip": {
-                                            "node": {"address": {"value": loopback}}
-                                        },
+                                        "local_ip": {"node": {"address": {"value": loopback}}},
                                         "remote_ip": {
                                             "node": {"address": {"value": "10.0.0.1/32"}}
                                         },

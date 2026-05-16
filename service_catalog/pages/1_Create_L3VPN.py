@@ -34,28 +34,40 @@ with st.form("create_l3vpn"):
         site_name = st.text_input("Site name", key=f"sname_{i}")
         pe_label = st.selectbox("PE", options=list(pe_options.keys()), key=f"pe_{i}")
         subnet = st.text_input("Customer subnet (CIDR)", key=f"sub_{i}", placeholder="10.1.0.0/24")
-        proto = st.radio("PE-CE routing", options=["ebgp", "static", "connected"],
-                         key=f"proto_{i}", horizontal=True)
-        asn = st.number_input("BGP peer ASN", min_value=0, max_value=4294967295,
-                              key=f"asn_{i}", value=0) if proto == "ebgp" else None
+        proto = st.radio(
+            "PE-CE routing",
+            options=["ebgp", "static", "connected"],
+            key=f"proto_{i}",
+            horizontal=True,
+        )
+        asn = (
+            st.number_input(
+                "BGP peer ASN", min_value=0, max_value=4294967295, key=f"asn_{i}", value=0
+            )
+            if proto == "ebgp"
+            else None
+        )
         static_routes = None
         if proto == "static":
-            static_text = st.text_area("Static routes (one `<prefix> via <next-hop>` per line)",
-                                       key=f"sr_{i}")
+            static_text = st.text_area(
+                "Static routes (one `<prefix> via <next-hop>` per line)", key=f"sr_{i}"
+            )
             static_routes = []
             for line in static_text.splitlines():
                 parts = [p.strip() for p in line.split("via")]
                 if len(parts) == 2:
                     static_routes.append({"prefix": parts[0], "next_hop": parts[1]})
 
-        sites.append({
-            "name": site_name,
-            "pe": pe_options[pe_label],
-            "customer_subnet": subnet,
-            "routing_protocol": proto,
-            "bgp_peer_asn": int(asn) if asn else None,
-            "static_routes": static_routes,
-        })
+        sites.append(
+            {
+                "name": site_name,
+                "pe": pe_options[pe_label],
+                "customer_subnet": subnet,
+                "routing_protocol": proto,
+                "bgp_peer_asn": int(asn) if asn else None,
+                "static_routes": static_routes,
+            }
+        )
 
     submitted = st.form_submit_button("Create L3VPN", type="primary")
 
@@ -74,39 +86,50 @@ if submitted:
         branch = run_async(client_main.branch.create(branch_name, sync_with_git=False))
         client = client_for(branch=branch_name)
 
-        vpn = run_async(client.create(
-            kind="ServiceL3Vpn",
-            name=name,
-            description=description,
-            vpn_id=vpn_id,
-            address_family=address_family,
-            tenant={"hfid": [tenant]},
-        ))
+        vpn = run_async(
+            client.create(
+                kind="ServiceL3Vpn",
+                name=name,
+                description=description,
+                vpn_id=vpn_id,
+                address_family=address_family,
+                tenant={"hfid": [tenant]},
+            )
+        )
         run_async(vpn.save())
 
         for s in sites:
-            cust = run_async(client.create(
-                kind="IpamPrefix", prefix=s["customer_subnet"], status="active", role="public",
-            ))
+            cust = run_async(
+                client.create(
+                    kind="IpamPrefix",
+                    prefix=s["customer_subnet"],
+                    status="active",
+                    role="public",
+                )
+            )
             run_async(cust.save())
-            site_obj = run_async(client.create(
-                kind="ServiceL3VpnSite",
-                name=s["name"],
-                l3vpn=vpn,
-                pe={"hfid": [s["pe"]]},
-                customer_subnet=cust,
-                routing_protocol=s["routing_protocol"],
-                bgp_peer_asn=s["bgp_peer_asn"],
-                static_routes=s["static_routes"],
-            ))
+            site_obj = run_async(
+                client.create(
+                    kind="ServiceL3VpnSite",
+                    name=s["name"],
+                    l3vpn=vpn,
+                    pe={"hfid": [s["pe"]]},
+                    customer_subnet=cust,
+                    routing_protocol=s["routing_protocol"],
+                    bgp_peer_asn=s["bgp_peer_asn"],
+                    static_routes=s["static_routes"],
+                )
+            )
             run_async(site_obj.save())
 
-        pc = run_async(client_main.create(
-            kind="CoreProposedChange",
-            source_branch=branch_name,
-            destination_branch="main",
-            name=f"Create L3VPN {name}",
-        ))
+        pc = run_async(
+            client_main.create(
+                kind="CoreProposedChange",
+                source_branch=branch_name,
+                destination_branch="main",
+                name=f"Create L3VPN {name}",
+            )
+        )
         run_async(pc.save())
 
     st.success(f"Branch `{branch_name}` opened, vpn_id={vpn_id}.")

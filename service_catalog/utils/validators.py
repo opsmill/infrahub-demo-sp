@@ -49,7 +49,7 @@ def validate_create_l3vpn_form(
             errors.append(f"Site {site.get('name', '?')}: invalid customer_subnet.")
             continue
     for i, (n1, net1) in enumerate(nets):
-        for n2, net2 in nets[i + 1:]:
+        for n2, net2 in nets[i + 1 :]:
             if net1.overlaps(net2):
                 errors.append(f"Subnets overlap: {n1} ({net1}) and {n2} ({net2}).")
 

@@ -19,10 +19,12 @@ FIXTURE = {
                                 "node": {
                                     "id": "1",
                                     "name": {"value": "pe-lon-arista"},
-                                    "platform": {"node": {
-                                        "name": {"value": "arista_eos"},
-                                        "containerlab_os": {"value": "ceos"},
-                                    }},
+                                    "platform": {
+                                        "node": {
+                                            "name": {"value": "arista_eos"},
+                                            "containerlab_os": {"value": "ceos"},
+                                        }
+                                    },
                                     "interfaces": {"edges": []},
                                 }
                             },
@@ -30,10 +32,12 @@ FIXTURE = {
                                 "node": {
                                     "id": "2",
                                     "name": {"value": "pe-fra-cisco"},
-                                    "platform": {"node": {
-                                        "name": {"value": "cisco_iosxr"},
-                                        "containerlab_os": {"value": None},
-                                    }},
+                                    "platform": {
+                                        "node": {
+                                            "name": {"value": "cisco_iosxr"},
+                                            "containerlab_os": {"value": None},
+                                        }
+                                    },
                                     "interfaces": {"edges": []},
                                 }
                             },
@@ -41,10 +45,12 @@ FIXTURE = {
                                 "node": {
                                     "id": "4",
                                     "name": {"value": "pe-par-nokia"},
-                                    "platform": {"node": {
-                                        "name": {"value": "nokia_sros"},
-                                        "containerlab_os": {"value": "srl"},
-                                    }},
+                                    "platform": {
+                                        "node": {
+                                            "name": {"value": "nokia_sros"},
+                                            "containerlab_os": {"value": "srl"},
+                                        }
+                                    },
                                     "interfaces": {"edges": []},
                                 }
                             },
@@ -83,6 +89,4 @@ async def test_renders_backbone_link_between_arista_and_nokia() -> None:
     rendered = await ClabTopology.__new__(ClabTopology).transform(FIXTURE)
     parsed = yaml.safe_load(rendered)
     links = parsed["topology"]["links"]
-    assert any(
-        ("pe-lon-arista" in str(link) and "pe-par-nokia" in str(link)) for link in links
-    )
+    assert any(("pe-lon-arista" in str(link) and "pe-par-nokia" in str(link)) for link in links)

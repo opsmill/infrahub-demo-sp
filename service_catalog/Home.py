@@ -20,9 +20,11 @@ dashboard = st.Page(
 )
 create_l3vpn = st.Page("pages/1_Create_L3VPN.py", title="Create L3VPN", icon="🔗")
 
-pg = st.navigation({
-    "": [dashboard],
-    "Service Catalog": [create_l3vpn],
-})
+pg = st.navigation(
+    {
+        "": [dashboard],
+        "Service Catalog": [create_l3vpn],
+    }
+)
 
 pg.run()

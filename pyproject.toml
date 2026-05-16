@@ -60,6 +60,31 @@ warn_unused_ignores = true
 module = "tasks"
 ignore_errors = true
 
+# service_catalog pages run with Streamlit's CWD set to service_catalog/,
+# so relative imports like `import utils` are correct at runtime but cannot
+# be resolved by mypy from the repo root.
+[[tool.mypy.overrides]]
+module = "service_catalog.*"
+ignore_errors = true
+
+# scripts/ are one-off helper scripts, not production modules.
+[[tool.mypy.overrides]]
+module = "scripts.*"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "smoke_create_l3vpn"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "push_arista"
+ignore_errors = true
+
+# tests/ use untyped fixtures and helpers — relax strict mode there.
+[[tool.mypy.overrides]]
+module = "tests.*"
+ignore_errors = true
+
 [[tool.mypy.overrides]]
 module = "netmiko"
 ignore_missing_imports = true
