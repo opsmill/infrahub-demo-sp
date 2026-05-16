@@ -10,10 +10,12 @@ nodes:
     icon: carbon:network-3
     # `CoreArtifactTarget` is required so the `clab-mpls-topology`
     # artifact definition can target this node — without it, Infrahub
-    # silently no-ops on artifact-generate for topologies.
+    # silently no-ops on artifact-generate for topologies. Must be
+    # listed first (Infrahub schema validator requires CoreArtifactTarget
+    # to come before any user-defined generics).
     inherit_from:
-      - TopologyGeneric
       - CoreArtifactTarget
+      - TopologyGeneric
     include_in_menu: false
     human_friendly_id:
       - name__value

@@ -32,7 +32,13 @@ topology:
     {{ pe.name.value }}:
       kind: {{ pe.platform.node.containerlab_os.value }}
 {% endfor %}
-{% for site_edge in data.ServiceL3VpnSite.edges %}
+{# Skip sites whose generator hasn't materialized PE/CE addresses or interfaces yet. #}
+{% set materialized_sites = data.ServiceL3VpnSite.edges
+    | selectattr('node.pe_interface.node')
+    | selectattr('node.pe_address.node')
+    | selectattr('node.ce_address.node')
+    | list %}
+{% for site_edge in materialized_sites %}
 {% set site = site_edge.node %}
 {% set pe_platform = site.pe_device.node.platform.node.name.value %}
 {% if pe_platform in ['arista_eos', 'nokia_sros'] %}
@@ -58,7 +64,7 @@ topology:
 {% if arista[0] and nokia[0] %}
     - endpoints: ["{{ arista[0].name.value }}:eth3", "{{ nokia[0].name.value }}:eth1"]
 {% endif %}
-{% for site_edge in data.ServiceL3VpnSite.edges %}
+{% for site_edge in materialized_sites %}
 {% set site = site_edge.node %}
 {% set pe_platform = site.pe_device.node.platform.node.name.value %}
 {% if pe_platform in ['arista_eos', 'nokia_sros'] %}
