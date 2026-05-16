@@ -15,8 +15,38 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 
 from infrahub_sdk import InfrahubClientSync
+from infrahub_sdk.exceptions import NodeNotFoundError
+
+SYNC_TIMEOUT_SECONDS = 120
+SYNC_POLL_INTERVAL_SECONDS = 3
+
+
+def _wait_for_generator(client: InfrahubClientSync, name: str) -> object:
+    """Return the named CoreGeneratorDefinition, waiting for repo sync.
+
+    Bootstrap registers the repository immediately before calling this
+    script, but the server-side git sync (which discovers
+    ``.infrahub.yml`` and instantiates ``CoreGeneratorDefinition`` rows)
+    runs asynchronously and can take 30-60s on a cold clone. Poll instead
+    of failing immediately.
+
+    Raises:
+        TimeoutError: If the generator does not appear within the timeout.
+    """
+    deadline = time.monotonic() + SYNC_TIMEOUT_SECONDS
+    while True:
+        try:
+            return client.get(kind="CoreGeneratorDefinition", name__value=name)
+        except NodeNotFoundError:
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"Generator {name!r} did not appear within {SYNC_TIMEOUT_SECONDS}s; "
+                    "is the CoreRepository sync stuck?"
+                ) from None
+            time.sleep(SYNC_POLL_INTERVAL_SECONDS)
 
 
 def main() -> int:
@@ -31,7 +61,7 @@ def main() -> int:
     args = parser.parse_args()
 
     client = InfrahubClientSync()
-    generator = client.get(kind="CoreGeneratorDefinition", name__value=args.name)
+    generator = _wait_for_generator(client, args.name)
     response = client.execute_graphql(
         """
         mutation Run($id: String!) {

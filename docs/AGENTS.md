@@ -94,7 +94,7 @@ Update documentation whenever:
 - A new schema node is added to `schemas/sp/` — add a table row in
   `schema-reference.md`.
 - A new vendor transform is added — add a row to the vendor table in
-  `architecture.md` and a config snippet in `services/l3vpn.md`.
+  `architecture.md` and a configuration snippet in `services/l3vpn.md`.
 - A new check is added — add a row to the checks table in `services/l3vpn.md`.
 - A new invoke task is added — add a row to the invoke table in `README.md`.
 - The containerlab topology changes — update `lab/containerlab.md`.

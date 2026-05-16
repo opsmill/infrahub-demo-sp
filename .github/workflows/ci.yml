@@ -165,4 +165,10 @@ jobs:
           curl -sL "https://github.com/errata-ai/vale/releases/download/v${VALE_VERSION}/vale_${VALE_VERSION}_Linux_64-bit.tar.gz" -o vale.tar.gz
           tar -xzf vale.tar.gz
       - name: "Validate documentation style"
-        run: ./vale $(find ./docs -type f \( -name "*.mdx" -o -name "*.md" \) )
+        # docs/superpowers/ holds historical plans/specs, not user-facing
+        # documentation — exclude it from style validation (same rationale
+        # as the rumdl exclude in pyproject.toml).
+        run: |
+          ./vale $(find ./docs -type f \
+            \( -name "*.mdx" -o -name "*.md" \) \
+            -not -path "./docs/superpowers/*")
