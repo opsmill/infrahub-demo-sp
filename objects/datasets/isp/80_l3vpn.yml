@@ -1,0 +1,57 @@
+---
+# Customer-facing prefixes for the Kestrel Bank L3VPN.
+# These represent the LAN behind each branch CE; the generator binds them
+# to the VPN's VRF.
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: IpamPrefix
+  data:
+    - {prefix: 10.200.10.0/24, description: Kestrel Bank — London branch LAN, status: active, role: public}
+    - {prefix: 10.200.20.0/24, description: Kestrel Bank — Frankfurt branch LAN, status: active, role: public}
+    - {prefix: 10.200.30.0/24, description: Kestrel Bank — Amsterdam branch LAN, status: active, role: public}
+    - {prefix: 10.200.40.0/24, description: Kestrel Bank — Paris branch LAN, status: active, role: public}
+
+---
+# ServiceL3Vpn + 4 branch sites (one per PE). Joining the l3vpns group
+# fires generate_l3vpn, which materialises the VRF, RTs, PE-CE /30
+# allocations, and PE-CE eBGP sessions.
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: ServiceL3Vpn
+  data:
+    - name: kestrel-bank-mpls
+      description: Kestrel Bank branch MPLS VPN — interconnects four European branches over the Lumina backbone.
+      vpn_id: 100
+      address_family: ipv4
+      status: draft
+      tenant:
+        kind: OrganizationTenant
+        data:
+          name: kestrel-bank
+      member_of_groups:
+        - l3vpns
+      sites:
+        kind: ServiceL3VpnSite
+        data:
+          - name: london-branch
+            pe_device: pe-lon-arista
+            customer_subnet: ["10.200.10.0/24", "default"]
+            routing_protocol: ebgp
+            bgp_peer_asn: 65101
+          - name: frankfurt-branch
+            pe_device: pe-fra-cisco
+            customer_subnet: ["10.200.20.0/24", "default"]
+            routing_protocol: ebgp
+            bgp_peer_asn: 65101
+          - name: amsterdam-branch
+            pe_device: pe-ams-juniper
+            customer_subnet: ["10.200.30.0/24", "default"]
+            routing_protocol: ebgp
+            bgp_peer_asn: 65101
+          - name: paris-branch
+            pe_device: pe-par-nokia
+            customer_subnet: ["10.200.40.0/24", "default"]
+            routing_protocol: ebgp
+            bgp_peer_asn: 65101

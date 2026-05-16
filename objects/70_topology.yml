@@ -5,11 +5,11 @@ spec:
   kind: TopologyMplsBackbone
   data:
     - name: mpls-backbone-1
-      description: Sterling Financial EMEA MPLS backbone..
+      description: EMEA MPLS backbone.
       isis_area: "49.0001"
       isis_level: level-2
       location: emea
-      asn: ["65000", "Sterling-Financial-AS"]
+      asn: ["65000", "Backbone-AS"]
       pes:
         - pe-lon-arista
         - pe-fra-cisco

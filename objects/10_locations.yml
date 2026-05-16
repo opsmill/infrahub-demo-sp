@@ -6,7 +6,7 @@ spec:
   data:
     - name: EMEA
       shortname: emea
-      description: Sterling Financial EMEA region - covers all European hub offices.
+      description: EMEA region covering the European hub offices.
 
 ---
 apiVersion: infrahub.app/v1

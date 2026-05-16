@@ -1,0 +1,34 @@
+---
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: OrganizationProvider
+  data:
+    - name: Lumina Networks
+      description: Lumina Networks - pan-European wholesale fiber and managed-network operator.
+
+---
+# Tenants are external customers of the Lumina backbone — a mix of verticals
+# typical of a pan-European wholesale ISP: finance, public sector, research,
+# media, healthcare, cloud, logistics, broadcast.
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: OrganizationTenant
+  data:
+    - name: kestrel-bank
+      description: Kestrel Banking Group - European retail and corporate bank, branch connectivity over MPLS L3VPN.
+    - name: borough-of-westhaven
+      description: Westhaven Borough Council - municipal services, schools, civic-centre WAN.
+    - name: arcadia-research
+      description: Arcadia Research Institute - federated R&D campuses, high-bandwidth dataset replication.
+    - name: flo-streaming
+      description: Flo Streaming Networks - on-demand video provider, regional CDN egress.
+    - name: syringa-health
+      description: Syringa Health Systems - regional hospital network, EMR replication and tele-radiology.
+    - name: helios-cloud
+      description: Helios Cloud - IaaS provider, customer-VRF interconnect across multiple PoPs.
+    - name: meridian-logistics
+      description: Meridian Logistics - international freight, warehouse and depot connectivity.
+    - name: stellarcast-broadcast
+      description: Stellarcast Broadcasting - TV broadcaster, contribution and distribution circuits.

@@ -191,8 +191,33 @@ def destroy(c: Context) -> None:
     _success("Infrahub torn down")
 
 
+DATASETS_DIR = REPO_ROOT / "objects" / "datasets"
+DEFAULT_DATASET = "sterling-financial"
+
+
+def _dataset_files(dataset: str) -> list[Path]:
+    """Return the ordered list of YAML files to load for ``dataset``.
+
+    Merges shared ``objects/*.yml`` with the dataset-specific overlay at
+    ``objects/datasets/<dataset>/*.yml``. Sorting is by basename so the
+    numeric prefixes (``00_*``, ``02_*``, ``20_*``, ``80_*``) interleave
+    in the right load order regardless of which directory each file
+    lives in.
+
+    Raises:
+        ValueError: If ``dataset`` is not a directory under ``DATASETS_DIR``.
+    """
+    overlay_dir = DATASETS_DIR / dataset
+    if not overlay_dir.is_dir():
+        available = ", ".join(sorted(p.name for p in DATASETS_DIR.iterdir() if p.is_dir()))
+        raise ValueError(f"Unknown dataset {dataset!r}. Available: {available}")
+    shared = [p for p in (REPO_ROOT / "objects").glob("*.yml")]
+    overlay = list(overlay_dir.glob("*.yml"))
+    return sorted(shared + overlay, key=lambda p: p.name)
+
+
 @task
-def bootstrap(c: Context) -> None:
+def bootstrap(c: Context, dataset: str = DEFAULT_DATASET) -> None:
     """Load schemas, menus, and bootstrap object data into Infrahub.
 
     A ``CoreRepository`` (local mount at ``/upstream``) or
@@ -200,8 +225,13 @@ def bootstrap(c: Context) -> None:
     server can discover ``.infrahub.yml`` — transforms, artifact
     definitions, generators, and checks. Selection is driven by the
     ``INFRAHUB_GIT_LOCAL`` env var.
+
+    ``--dataset`` selects which customer-facing overlay to layer onto
+    the shared backbone. Currently ``sterling-financial`` (default) or
+    ``isp``. See ``objects/datasets/`` for what each provides.
     """
-    _banner("invoke bootstrap", border="cyan")
+    paths = _dataset_files(dataset)
+    _banner(f"invoke bootstrap --dataset {dataset}", border="cyan")
 
     _step("Loading schemas")
     c.run("uv run infrahubctl schema load schemas/", pty=True)
@@ -211,8 +241,8 @@ def bootstrap(c: Context) -> None:
     c.run("uv run infrahubctl menu load menus/menu.yml", pty=True)
     _success("Menu loaded")
 
-    _step("Loading bootstrap objects")
-    for path in sorted(Path("objects").glob("*.yml")):
+    _step(f"Loading bootstrap objects ({len(paths)} files)")
+    for path in paths:
         c.run(f"uv run infrahubctl object load {shlex.quote(str(path))}", pty=True)
     _success("Bootstrap objects loaded")
 
@@ -251,18 +281,24 @@ def bootstrap(c: Context) -> None:
 
 
 @task(name="init")
-def init_demo(c: Context) -> None:
-    """Destroy, start, and bootstrap the demo end-to-end."""
+def init_demo(c: Context, dataset: str = DEFAULT_DATASET) -> None:
+    """Destroy, start, and bootstrap the demo end-to-end.
+
+    ``--dataset`` is forwarded to ``bootstrap``; see ``invoke bootstrap --help``
+    for the available datasets.
+    """
     _banner(
         "invoke init",
-        body="[bold]Full reset of the infrahub-demo-sp stack[/bold]",
+        body=(
+            f"[bold]Full reset of the infrahub-demo-sp stack[/bold]\n[dim]Dataset:[/dim] {dataset}"
+        ),
         border="magenta",
     )
     destroy(c)
     start(c, build=True)
     _wait("Waiting 30s for containers to settle")
     _sleep_with_progress(30, "containers warming up")
-    bootstrap(c)
+    bootstrap(c, dataset=dataset)
     console.print()
     _banner(
         "infrahub-demo-sp ready",
