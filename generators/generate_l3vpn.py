@@ -52,7 +52,7 @@ class L3VpnGenerator(InfrahubGenerator):
         vpn_id = int(vpn["vpn_id"]["value"])
         rd = f"{backbone_asn}:{vpn_id}"
 
-        if vpn["vrf"]:
+        if vpn.get("vrf") and vpn["vrf"].get("node"):
             return await self.client.get(
                 kind="IpamVRF",
                 id=vpn["vrf"]["node"]["id"],
@@ -99,7 +99,7 @@ class L3VpnGenerator(InfrahubGenerator):
         )
         pe_name = site["pe_device"]["node"]["name"]["value"]
 
-        if site.get("pe_interface"):
+        if site.get("pe_interface") and site["pe_interface"].get("node"):
             iface = await self.client.get(
                 kind="InterfacePhysical",
                 id=site["pe_interface"]["node"]["id"],
@@ -112,7 +112,9 @@ class L3VpnGenerator(InfrahubGenerator):
             await iface.save(allow_upsert=True)
             site_obj.pe_interface = iface
 
-        if not site.get("pe_address") or not site.get("ce_address"):
+        has_pe_addr = site.get("pe_address") and site["pe_address"].get("node")
+        has_ce_addr = site.get("ce_address") and site["ce_address"].get("node")
+        if not has_pe_addr or not has_ce_addr:
             p2p = await allocate_prefix_from_pool(
                 self.client,
                 "pe_ce_pool",

@@ -126,10 +126,16 @@ LAB_TOPO = LAB_DIR / "mpls-backbone.clab.yml"
 
 
 def _fetch_artifact(c: Context, artifact_name: str, dest: Path) -> None:
-    """Download the latest artifact content into ``dest``."""
+    """Download the latest artifact content into ``dest``.
+
+    Infrahub serves rendered artifacts from ``/api/storage/object/<id>``.
+    ``scripts/fetch_artifact.py`` resolves the artifact name to a
+    ``storage_id`` and streams the bytes to stdout, which we redirect.
+    """
     c.run(
-        f"uv run infrahubctl artifact get {artifact_name} > {shlex.quote(str(dest))}",
-        pty=True,
+        f"uv run python scripts/fetch_artifact.py {shlex.quote(artifact_name)} "
+        f"> {shlex.quote(str(dest))}",
+        pty=False,
     )
 
 

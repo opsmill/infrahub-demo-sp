@@ -1,0 +1,56 @@
+---
+# Customer-facing prefixes for the trading-floor L3VPN.
+# These represent the LAN behind each CE; the generator binds them to the VPN's VRF.
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: IpamPrefix
+  data:
+    - {prefix: 10.200.10.0/24, description: Trading floor LAN — London,    status: active, role: public}
+    - {prefix: 10.200.20.0/24, description: Trading floor LAN — Frankfurt, status: active, role: public}
+    - {prefix: 10.200.30.0/24, description: Trading floor LAN — Amsterdam, status: active, role: public}
+    - {prefix: 10.200.40.0/24, description: Trading floor LAN — Paris,     status: active, role: public}
+
+---
+# ServiceL3Vpn + 4 sites (one per PE). The l3vpns group is the
+# generator target, so adding the VPN there fires generate_l3vpn,
+# which materialises the VRF, RTs, PE-CE /30 allocation, and BGP session.
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: ServiceL3Vpn
+  data:
+    - name: trading-floor-vpn
+      description: Inter-regional trading-floor L3VPN across all 4 PEs.
+      vpn_id: 100
+      address_family: ipv4
+      status: draft
+      tenant:
+        kind: OrganizationTenant
+        data:
+          name: markets-trading
+      member_of_groups:
+        - l3vpns
+      sites:
+        kind: ServiceL3VpnSite
+        data:
+          - name: london
+            pe_device: pe-lon-arista
+            customer_subnet: ["10.200.10.0/24", "default"]
+            routing_protocol: ebgp
+            bgp_peer_asn: 65100
+          - name: frankfurt
+            pe_device: pe-fra-cisco
+            customer_subnet: ["10.200.20.0/24", "default"]
+            routing_protocol: ebgp
+            bgp_peer_asn: 65100
+          - name: amsterdam
+            pe_device: pe-ams-juniper
+            customer_subnet: ["10.200.30.0/24", "default"]
+            routing_protocol: ebgp
+            bgp_peer_asn: 65100
+          - name: paris
+            pe_device: pe-par-nokia
+            customer_subnet: ["10.200.40.0/24", "default"]
+            routing_protocol: ebgp
+            bgp_peer_asn: 65100
