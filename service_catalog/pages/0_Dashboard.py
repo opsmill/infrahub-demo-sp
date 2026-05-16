@@ -28,7 +28,7 @@ if not vpns:
 
 rows = []
 for vpn in vpns:
-    sites = run_async(client.filters(kind="ServiceL3VpnSite", l3vpn__id=vpn.id, branch=branch))
+    sites = run_async(client.filters(kind="ServiceL3VpnSite", l3vpn__ids=[vpn.id], branch=branch))
     rd = vpn.vrf.peer.vrf_rd.value if vpn.vrf and vpn.vrf.peer else ""
     rows.append(
         {
