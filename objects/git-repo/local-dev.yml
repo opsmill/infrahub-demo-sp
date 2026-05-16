@@ -1,0 +1,9 @@
+---
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: CoreRepository
+  data:
+    - name: sp-demo-mpls-l3vpn
+      location: "/upstream"
+      default_branch: "main"
