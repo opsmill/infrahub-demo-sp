@@ -96,6 +96,14 @@ def test(c: Context, kind: str = "unit") -> None:
         c.run(f"uv run pytest tests/{kind}/", pty=True)
 
 
+@task
+def docs(c: Context) -> None:
+    """Build the Docusaurus documentation site under docs/."""
+    with c.cd(str(REPO_ROOT / "docs")):
+        c.run("pnpm install --frozen-lockfile", pty=True)
+        c.run("pnpm run build", pty=True)
+
+
 LAB_DIR = REPO_ROOT / "lab"
 LAB_TOPO = LAB_DIR / "mpls-backbone.clab.yml"
 
@@ -162,4 +170,5 @@ ns.add_task(bootstrap)
 ns.add_task(init_demo)
 ns.add_task(lint)
 ns.add_task(test)
+ns.add_task(docs)
 ns.add_collection(lab)

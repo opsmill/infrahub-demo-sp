@@ -1,6 +1,14 @@
 ---
 extends: default
 
+ignore: |
+  /.git
+  /.venv
+  /docs/node_modules
+  /docs/pnpm-lock.yaml
+  /docs/build
+  /docs/.docusaurus
+
 rules:
   line-length:
     max: 120
