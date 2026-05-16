@@ -8,8 +8,12 @@ nodes:
     description: An MPLS service-provider backbone with PEs.
     label: MPLS Backbone
     icon: carbon:network-3
+    # `CoreArtifactTarget` is required so the `clab-mpls-topology`
+    # artifact definition can target this node — without it, Infrahub
+    # silently no-ops on artifact-generate for topologies.
     inherit_from:
       - TopologyGeneric
+      - CoreArtifactTarget
     include_in_menu: false
     human_friendly_id:
       - name__value
