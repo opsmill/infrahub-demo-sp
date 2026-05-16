@@ -91,6 +91,11 @@ def bootstrap(c: Context) -> None:
     # artifacts kick off before the VRF/IPs are materialized and end up
     # in `Error` state, requiring a manual re-trigger.
     c.run("uv run python scripts/run_generator.py generate_l3vpn", pty=True)
+    # Now that the generator has materialized the data the templates
+    # depend on, regenerate every artifact — Infrahub's earlier
+    # auto-dispatch ran against incomplete state and left artifacts in
+    # `Error`. This converges every CoreArtifact to `Ready`.
+    c.run("uv run python scripts/regenerate_artifacts.py", pty=True)
 
 
 @task(name="init")
