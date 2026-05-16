@@ -7,6 +7,7 @@ autoescape
 automations
 backend
 BGP
+clab
 colo
 colocation
 composable
@@ -27,6 +28,7 @@ ENIs
 env
 envrc
 evolvability
+extranet
 Fortinet
 FQDNs
 hostname
@@ -58,6 +60,7 @@ parallelization
 POP
 POPs
 Pydantic
+reachability
 rebase
 repos
 reusability
@@ -77,5 +80,7 @@ VLAN
 VLANs
 VNets
 VPCs
+VPNs
 VXLAN
 walkthrough
+yamllint
