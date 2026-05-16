@@ -23,6 +23,7 @@ python_transforms:
   - {name: pe_cisco_iosxr, class_name: PeCiscoIosXr, file_path: transforms/pe_cisco_iosxr.py}
   - {name: pe_juniper_junos, class_name: PeJuniperJunos, file_path: transforms/pe_juniper_junos.py}
   - {name: pe_nokia_sros, class_name: PeNokiaSrOs, file_path: transforms/pe_nokia_sros.py}
+  - {name: pe_nokia_srlinux, class_name: PeNokiaSrLinux, file_path: transforms/pe_nokia_srlinux.py}
   - {name: clab_topology, class_name: ClabTopology, file_path: transforms/clab_topology.py}
 jinja2_transforms: []
 artifact_definitions:
@@ -49,6 +50,12 @@ artifact_definitions:
     content_type: text/plain
     targets: pe_nokia_sros
     transformation: pe_nokia_sros
+    parameters: {device: name__value}
+  - name: pe-nokia-srlinux-config
+    artifact_name: pe-nokia-srlinux
+    content_type: text/plain
+    targets: pe_nokia_sros
+    transformation: pe_nokia_srlinux
     parameters: {device: name__value}
   - name: clab-mpls-topology
     artifact_name: clab-mpls-topology
