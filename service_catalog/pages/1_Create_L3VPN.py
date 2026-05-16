@@ -86,6 +86,10 @@ if submitted:
         client = client_for(branch=branch_name)
 
         vpn_id_pool = run_async(client.get(kind="CoreNumberPool", name__value="vpn_id_pool"))
+        # `l3vpns` is the target group the `generate_l3vpn` generator runs
+        # against; without membership the catalog-created VPN is invisible
+        # to the generator and downstream artifact/check pipeline.
+        l3vpns_group = run_async(client.get(kind="CoreStandardGroup", name__value="l3vpns"))
 
         vpn = run_async(
             client.create(
@@ -95,6 +99,7 @@ if submitted:
                 vpn_id=vpn_id_pool,
                 address_family=address_family,
                 tenant={"hfid": [tenant]},
+                member_of_groups=[l3vpns_group.id],
             )
         )
         run_async(vpn.save())
