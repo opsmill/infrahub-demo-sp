@@ -35,11 +35,20 @@ def client_for(branch: str = "main") -> InfrahubClient:
 
 
 def display_logo() -> None:
-    """Render the OpsMillNet logo in the Streamlit sidebar."""
-    logo = ASSETS_DIR / "logo.svg"
-    if logo.exists():
-        st.sidebar.image(str(logo), width="stretch")
-    st.sidebar.markdown("# Service Catalog")
+    """Render the Infrahub logo above the sidebar navigation.
+
+    Uses ``st.logo()`` to place the logo above the page navigation links.
+    Streamlit automatically swaps between the light and dark variants
+    based on the active theme.
+    """
+    logo_light = ASSETS_DIR / "infrahub-hori.svg"
+    logo_dark = ASSETS_DIR / "infrahub-hori-dark.svg"
+    if logo_light.exists() and logo_dark.exists():
+        st.logo(str(logo_light), icon_image=str(logo_dark))
+    elif logo_light.exists():
+        st.logo(str(logo_light))
+    else:
+        st.sidebar.markdown("### Infrahub Service Catalog")
 
 
 def run_async(coro: Any) -> Any:
