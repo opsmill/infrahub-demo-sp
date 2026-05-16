@@ -11,7 +11,7 @@ spec:
       location: lon
       platform: arista_eos
       device_type: 7280R3
-      asn: ["65000", "Sterling-Financial-AS"]
+      asn: ["65000", "Backbone-AS"]
       member_of_groups:
         - pe_arista_eos
         - pes
@@ -21,7 +21,7 @@ spec:
       location: fra
       platform: cisco_iosxr
       device_type: NCS-540
-      asn: ["65000", "Sterling-Financial-AS"]
+      asn: ["65000", "Backbone-AS"]
       member_of_groups:
         - pe_cisco_iosxr
         - pes
@@ -31,7 +31,7 @@ spec:
       location: ams
       platform: juniper_junos
       device_type: MX204
-      asn: ["65000", "Sterling-Financial-AS"]
+      asn: ["65000", "Backbone-AS"]
       member_of_groups:
         - pe_juniper_junos
         - pes
@@ -41,7 +41,7 @@ spec:
       location: par
       platform: nokia_sros
       device_type: 7250-IXR-R6
-      asn: ["65000", "Sterling-Financial-AS"]
+      asn: ["65000", "Backbone-AS"]
       member_of_groups:
         - pe_nokia_sros
         - pes
@@ -348,8 +348,8 @@ spec:
       session_type: INTERNAL
       role: backbone
       device: pe-lon-arista
-      local_as: ["65000", "Sterling-Financial-AS"]
-      remote_as: ["65000", "Sterling-Financial-AS"]
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
       local_ip: ["10.0.0.1/32", "default"]
       remote_ip: ["10.0.0.2/32", "default"]
       status: active
@@ -357,8 +357,8 @@ spec:
       session_type: INTERNAL
       role: backbone
       device: pe-lon-arista
-      local_as: ["65000", "Sterling-Financial-AS"]
-      remote_as: ["65000", "Sterling-Financial-AS"]
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
       local_ip: ["10.0.0.1/32", "default"]
       remote_ip: ["10.0.0.3/32", "default"]
       status: active
@@ -366,8 +366,8 @@ spec:
       session_type: INTERNAL
       role: backbone
       device: pe-lon-arista
-      local_as: ["65000", "Sterling-Financial-AS"]
-      remote_as: ["65000", "Sterling-Financial-AS"]
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
       local_ip: ["10.0.0.1/32", "default"]
       remote_ip: ["10.0.0.4/32", "default"]
       status: active
@@ -376,8 +376,8 @@ spec:
       session_type: INTERNAL
       role: backbone
       device: pe-fra-cisco
-      local_as: ["65000", "Sterling-Financial-AS"]
-      remote_as: ["65000", "Sterling-Financial-AS"]
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
       local_ip: ["10.0.0.2/32", "default"]
       remote_ip: ["10.0.0.1/32", "default"]
       status: active
@@ -385,8 +385,8 @@ spec:
       session_type: INTERNAL
       role: backbone
       device: pe-fra-cisco
-      local_as: ["65000", "Sterling-Financial-AS"]
-      remote_as: ["65000", "Sterling-Financial-AS"]
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
       local_ip: ["10.0.0.2/32", "default"]
       remote_ip: ["10.0.0.3/32", "default"]
       status: active
@@ -394,8 +394,8 @@ spec:
       session_type: INTERNAL
       role: backbone
       device: pe-fra-cisco
-      local_as: ["65000", "Sterling-Financial-AS"]
-      remote_as: ["65000", "Sterling-Financial-AS"]
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
       local_ip: ["10.0.0.2/32", "default"]
       remote_ip: ["10.0.0.4/32", "default"]
       status: active
@@ -404,8 +404,8 @@ spec:
       session_type: INTERNAL
       role: backbone
       device: pe-ams-juniper
-      local_as: ["65000", "Sterling-Financial-AS"]
-      remote_as: ["65000", "Sterling-Financial-AS"]
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
       local_ip: ["10.0.0.3/32", "default"]
       remote_ip: ["10.0.0.1/32", "default"]
       status: active
@@ -413,8 +413,8 @@ spec:
       session_type: INTERNAL
       role: backbone
       device: pe-ams-juniper
-      local_as: ["65000", "Sterling-Financial-AS"]
-      remote_as: ["65000", "Sterling-Financial-AS"]
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
       local_ip: ["10.0.0.3/32", "default"]
       remote_ip: ["10.0.0.2/32", "default"]
       status: active
@@ -422,8 +422,8 @@ spec:
       session_type: INTERNAL
       role: backbone
       device: pe-ams-juniper
-      local_as: ["65000", "Sterling-Financial-AS"]
-      remote_as: ["65000", "Sterling-Financial-AS"]
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
       local_ip: ["10.0.0.3/32", "default"]
       remote_ip: ["10.0.0.4/32", "default"]
       status: active
@@ -432,8 +432,8 @@ spec:
       session_type: INTERNAL
       role: backbone
       device: pe-par-nokia
-      local_as: ["65000", "Sterling-Financial-AS"]
-      remote_as: ["65000", "Sterling-Financial-AS"]
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
       local_ip: ["10.0.0.4/32", "default"]
       remote_ip: ["10.0.0.1/32", "default"]
       status: active
@@ -441,8 +441,8 @@ spec:
       session_type: INTERNAL
       role: backbone
       device: pe-par-nokia
-      local_as: ["65000", "Sterling-Financial-AS"]
-      remote_as: ["65000", "Sterling-Financial-AS"]
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
       local_ip: ["10.0.0.4/32", "default"]
       remote_ip: ["10.0.0.2/32", "default"]
       status: active
@@ -450,8 +450,8 @@ spec:
       session_type: INTERNAL
       role: backbone
       device: pe-par-nokia
-      local_as: ["65000", "Sterling-Financial-AS"]
-      remote_as: ["65000", "Sterling-Financial-AS"]
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
       local_ip: ["10.0.0.4/32", "default"]
       remote_ip: ["10.0.0.3/32", "default"]
       status: active

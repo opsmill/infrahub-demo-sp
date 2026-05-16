@@ -4,7 +4,7 @@ kind: Object
 spec:
   kind: RoutingAutonomousSystem
   data:
-    - name: Sterling-Financial-AS
+    - name: Backbone-AS
       asn: 65000
       description: Private ASN for the Sterling Financial EMEA MPLS backbone.
       organization: Sterling Financial

@@ -1,0 +1,10 @@
+---
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: RoutingAutonomousSystem
+  data:
+    - name: Backbone-AS
+      asn: 65000
+      description: ASN for the Lumina Networks pan-European MPLS backbone.
+      organization: Lumina Networks

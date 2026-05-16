@@ -154,8 +154,9 @@ class L3VpnGenerator(InfrahubGenerator):
         await cust_subnet.save(allow_upsert=True)
 
         if site["routing_protocol"]["value"] == "ebgp":
+            tenant_id = vpn["tenant"]["node"]["id"]
             await self._ensure_ebgp_session(
-                site, site_obj, vrf, vpn["name"]["value"], backbone_as_id
+                site, site_obj, vrf, vpn["name"]["value"], backbone_as_id, tenant_id
             )
 
         site_obj.status.value = "active"  # type: ignore[union-attr]
@@ -168,6 +169,7 @@ class L3VpnGenerator(InfrahubGenerator):
         vrf: Any,
         vpn_name: str,
         backbone_as_id: str,
+        tenant_id: str,
     ) -> None:
         """Create PE-CE eBGP session if it doesn't already exist.
 
@@ -178,6 +180,8 @@ class L3VpnGenerator(InfrahubGenerator):
             vpn_name: Human-readable VPN name (for the session description).
             backbone_as_id: Infrahub ID of the backbone RoutingAutonomousSystem — derived
                 from the query result to avoid coupling to a hardcoded AS name.
+            tenant_id: Infrahub ID of the VPN's tenant — used as the owner of the
+                customer-side RoutingAutonomousSystem when one needs to be created.
         """
         desc = f"L3VPN PE-CE {vpn_name} {site['name']['value']}"
         existing = await self.client.filters(
@@ -207,7 +211,7 @@ class L3VpnGenerator(InfrahubGenerator):
                 branch=self.branch,
                 name=f"customer-as-{remote_asn}",
                 asn=remote_asn,
-                organization={"hfid": ["Sterling Financial"]},
+                organization={"id": tenant_id},
             )
             await remote_as.save(allow_upsert=True)
 
