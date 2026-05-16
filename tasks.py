@@ -14,6 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parent
 COMPOSE_PROJECT = "sp-demo"
 INFRAHUB_VERSION = os.getenv("INFRAHUB_VERSION", "stable")
 INFRAHUB_SERVICE_CATALOG = os.getenv("INFRAHUB_SERVICE_CATALOG", "false").lower() == "true"
+INFRAHUB_GIT_LOCAL = os.getenv("INFRAHUB_GIT_LOCAL", "false").lower() == "true"
 LOCAL_COMPOSE_FILE = REPO_ROOT / "docker-compose.yml"
 OVERRIDE_FILE = REPO_ROOT / "docker-compose.override.yml"
 
@@ -65,11 +66,20 @@ def destroy(c: Context) -> None:
 
 @task
 def bootstrap(c: Context) -> None:
-    """Load schemas, menus, and bootstrap object data into Infrahub."""
+    """Load schemas, menus, and bootstrap object data into Infrahub.
+
+    A ``CoreRepository`` (local mount at ``/upstream``) or
+    ``CoreReadOnlyRepository`` (public GitHub clone) is registered so the
+    server can discover ``.infrahub.yml`` — transforms, artifact
+    definitions, generators, and checks. Selection is driven by the
+    ``INFRAHUB_GIT_LOCAL`` env var.
+    """
     c.run("uv run infrahubctl schema load schemas/", pty=True)
     c.run("uv run infrahubctl menu load menus/menu.yml", pty=True)
     for path in sorted(Path("objects").glob("*.yml")):
         c.run(f"uv run infrahubctl object load {shlex.quote(str(path))}", pty=True)
+    repo_file = "objects/git-repo/local-dev.yml" if INFRAHUB_GIT_LOCAL else "objects/git-repo/github.yml"
+    c.run(f"uv run infrahubctl object load {shlex.quote(repo_file)}", pty=True)
     c.run(
         "uv run infrahubctl protocols --branch main --out generators/schema_protocols.py",
         pty=True,
