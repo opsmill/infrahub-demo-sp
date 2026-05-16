@@ -3,7 +3,11 @@
 {% set isis = data.MplsIsisProcess.edges[0].node %}
 {% set ldp = data.MplsLdpProcess.edges[0].node %}
 {% set bgp = data.MplsBgpProcess.edges[0].node %}
-{% set sites = data.ServiceL3VpnSite.edges %}
+{% set sites = data.ServiceL3VpnSite.edges
+    | selectattr('node.pe_interface.node')
+    | selectattr('node.pe_address.node')
+    | selectattr('node.l3vpn.node.vrf.node')
+    | list %}
 {#- Derive ISIS system-id from NET ID: parts [2].[3].[4] for xx.aaaa.bbbb.cccc.dddd.00 #}
 {% set net_parts = isis.net_id.value.split('.') %}
 {% set system_id = net_parts[2] ~ '.' ~ net_parts[3] ~ '.' ~ net_parts[4] %}

@@ -3,7 +3,11 @@
 {% set isis = data.MplsIsisProcess.edges[0].node %}
 {% set ldp = data.MplsLdpProcess.edges[0].node %}
 {% set bgp = data.MplsBgpProcess.edges[0].node %}
-{% set sites = data.ServiceL3VpnSite.edges %}
+{% set sites = data.ServiceL3VpnSite.edges
+    | selectattr('node.pe_interface.node')
+    | selectattr('node.pe_address.node')
+    | selectattr('node.l3vpn.node.vrf.node')
+    | list %}
 !
 ! Arista EOS configuration for {{ device.name.value }}
 !

@@ -22,9 +22,14 @@ class PeInterfaceAllocCheck(InfrahubCheck):
         groups: dict[tuple[str, str], list[str]] = defaultdict(list)
         for edge in data.get("ServiceL3VpnSite", {}).get("edges", []):
             node = edge["node"]
-            if not node.get("pe_interface"):
+            # Unset relationships are returned as ``{"node": None}`` (truthy
+            # dict). Skip sites whose generator hasn't yet allocated an
+            # interface or attached the PE device.
+            iface_node = (node.get("pe_interface") or {}).get("node")
+            pe_node = (node.get("pe_device") or {}).get("node")
+            if not iface_node or not pe_node:
                 continue
-            key = (node["pe_device"]["node"]["name"]["value"], node["pe_interface"]["node"]["id"])
+            key = (pe_node["name"]["value"], iface_node["id"])
             groups[key].append(node["name"]["value"])
 
         for (pe, _), sites in groups.items():
