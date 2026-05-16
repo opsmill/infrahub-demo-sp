@@ -17,12 +17,16 @@ spec:
     - name: London
       shortname: lon
       description: London PoP.
+      parent: emea
     - name: Frankfurt
       shortname: fra
       description: Frankfurt PoP.
+      parent: emea
     - name: Amsterdam
       shortname: ams
       description: Amsterdam PoP.
+      parent: emea
     - name: Paris
       shortname: par
       description: Paris PoP.
+      parent: emea
