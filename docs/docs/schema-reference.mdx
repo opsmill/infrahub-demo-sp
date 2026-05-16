@@ -215,7 +215,7 @@ by the generator and the Streamlit catalog:
 
 | Pool name | Kind | Purpose | Allocation unit |
 |---|---|---|---|
-| `vpn_id_pool` | `CoreNumberPool` | Globally unique VPN IDs | Integer (default range 100–65000) |
+| `vpn_id_pool` | `CoreNumberPool` | Globally unique VPN IDs | Integer (range 200–9999; values 100–199 are reserved for bootstrap-seeded L3VPNs) |
 | `pe_loopback_pool` | `CoreIPPrefixPool` | Loopback /32 addresses | /32 from `10.0.0.0/24` |
 | `backbone_p2p_pool` | `CoreIPPrefixPool` | Backbone p2p /31 links | /31 from `10.1.0.0/16` |
 | `pe_ce_pool` | `CoreIPPrefixPool` | PE-CE /30 links per L3VPN site | /30 from `10.100.0.0/16` |

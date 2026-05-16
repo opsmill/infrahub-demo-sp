@@ -27,7 +27,11 @@ spec:
     - name: vpn_id_pool
       node: ServiceL3Vpn
       node_attribute: vpn_id
-      start_range: 100
+      # vpn_id values 100–199 are reserved for bootstrap-seeded L3VPNs
+      # (loaded via `infrahubctl object load`, not via this pool). The
+      # pool tracks only its own allocations, so starting at 200 prevents
+      # the catalog from handing out an id that already exists on disk.
+      start_range: 200
       end_range: 9999
 
 ---
