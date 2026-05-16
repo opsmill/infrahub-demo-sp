@@ -16,7 +16,7 @@ import os
 import sys
 import urllib.request
 
-from infrahub_sdk.client_sync import InfrahubClientSync
+from infrahub_sdk import InfrahubClientSync
 
 
 def main() -> int:
