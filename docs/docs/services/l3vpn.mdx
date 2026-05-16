@@ -169,18 +169,3 @@ service {
     exit
 }
 ```
-
----
-
-## Decommissioning an L3VPN
-
-Decommissioning is not automated in v1. The operator must:
-
-1. Set `ServiceL3Vpn.status` to `decommissioned` and each `ServiceL3VpnSite.status`
-   to `decommissioned` on a feature branch.
-2. Manually free the `pe_interface` (set status back to `free`).
-3. Delete or retain the `IpamVRF`, IP addresses, and BGP sessions as policy
-   requires.
-4. Open a proposed change and merge.
-
-A future `DecommissionL3VpnGenerator` could automate these steps.

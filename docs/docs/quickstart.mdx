@@ -15,8 +15,8 @@ This page gets you from clone to a running demo in about 10 minutes.
 ## 1. Clone and install
 
 ```bash
-git clone https://github.com/opsmill/sp-demo-mpls-l3vpn.git
-cd sp-demo-mpls-l3vpn
+git clone https://github.com/opsmill/infrahub-demo-sp.git
+cd infrahub-demo-sp
 cp .env.example .env
 uv sync
 ```
@@ -41,11 +41,14 @@ Backbones**, and **MPLS** (ISIS / LDP / MP-BGP processes).
 
 ## 4. Start the Streamlit Service Catalog
 
+Set `INFRAHUB_SERVICE_CATALOG="true"` in `.env`, then run:
+
 ```bash
-uv run invoke start --catalog --build
+uv run invoke start
 ```
 
-Visit http://localhost:8501. Create your first L3VPN.
+Every `invoke start` / `invoke init` will now also build and start the
+Streamlit sidecar. Visit http://localhost:8501. Create your first L3VPN.
 
 ## 5. (Optional) Bring up the containerlab
 
