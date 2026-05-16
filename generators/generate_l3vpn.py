@@ -52,7 +52,7 @@ class L3VpnGenerator(InfrahubGenerator):
         vpn_id = int(vpn["vpn_id"]["value"])
         rd = f"{backbone_asn}:{vpn_id}"
 
-        if vpn["vrf"]:
+        if vpn.get("vrf") and vpn["vrf"].get("node"):
             return await self.client.get(
                 kind="IpamVRF",
                 id=vpn["vrf"]["node"]["id"],
