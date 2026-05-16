@@ -71,7 +71,7 @@ query PE($device: String!) {
       }
     }
   }
-  ServiceL3VpnSite(pe__name__value: $device) {
+  ServiceL3VpnSite(pe_device__name__value: $device) {
     edges {
       node {
         name { value }
