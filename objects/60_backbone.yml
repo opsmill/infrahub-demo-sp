@@ -230,6 +230,12 @@ spec:
         kind: IpamIPAddress
         data:
           - address: 10.1.0.11/31
+    # Free customer-facing interfaces — allocated to L3VPN sites by the
+    # generate_l3vpn generator (status=free is its allocation filter).
+    - {name: Ethernet4, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-lon-arista}
+    - {name: Ethernet4, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-fra-cisco}
+    - {name: Ethernet4, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-ams-juniper}
+    - {name: Ethernet4, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-par-nokia}
 
 ---
 # Backbone p2p prefixes (6 × /31 from 10.1.0.0/16)

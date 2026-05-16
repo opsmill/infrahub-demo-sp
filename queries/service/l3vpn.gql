@@ -30,6 +30,6 @@ query L3Vpn($name: String!) {
     }
   }
   TopologyMplsBackbone(name__value: "mpls-backbone-1") {
-    edges { node { asn { node { asn { value } } } } }
+    edges { node { asn { node { id asn { value } } } } }
   }
 }
