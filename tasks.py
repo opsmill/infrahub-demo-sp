@@ -290,7 +290,11 @@ def bootstrap(c: Context) -> None:
     # in `Error` state, requiring a manual re-trigger.
     _step("Running the L3VPN generator")
     c.run("uv run python scripts/run_generator.py generate_l3vpn", pty=True)
-    _success("Generator complete")
+    _success("L3VPN generator complete")
+
+    _step("Running the SD-WAN generator")
+    c.run("uv run python scripts/run_generator.py generate_sdwan", pty=True)
+    _success("SD-WAN generator complete")
 
     # Now that the generator has materialized the data the templates
     # depend on, regenerate every artifact — Infrahub's earlier
