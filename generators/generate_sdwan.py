@@ -64,7 +64,8 @@ class SdwanGenerator(InfrahubGenerator):
                 existing_member_ids.add(edge.id)
 
         if edges_to_add:
-            group.members.add(edges_to_add)
+            for edge_id in edges_to_add:
+                group.members.add(edge_id)
             await group.save(allow_upsert=True)
 
         svc_obj = await self.client.get(kind="ServiceSdwan", id=svc["id"], branch=self.branch)
