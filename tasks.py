@@ -24,7 +24,7 @@ COMPOSE_PROJECT = "sp-demo"
 INFRAHUB_VERSION = os.getenv("INFRAHUB_VERSION", "stable")
 INFRAHUB_SERVICE_CATALOG = os.getenv("INFRAHUB_SERVICE_CATALOG", "false").lower() == "true"
 INFRAHUB_GIT_LOCAL = os.getenv("INFRAHUB_GIT_LOCAL", "false").lower() == "true"
-INFRAHUB_DATASET = os.getenv("INFRAHUB_DATASET", "sterling-financial")
+INFRAHUB_DATASET = os.getenv("INFRAHUB_DATASET", "financial")
 LOCAL_COMPOSE_FILE = REPO_ROOT / "docker-compose.yml"
 OVERRIDE_FILE = REPO_ROOT / "docker-compose.override.yml"
 
@@ -228,8 +228,8 @@ def bootstrap(c: Context) -> None:
     ``INFRAHUB_GIT_LOCAL`` env var.
 
     The customer-facing overlay is selected by the ``INFRAHUB_DATASET``
-    env var (default: ``sterling-financial``). Choices live under
-    ``objects/datasets/``; ship with ``sterling-financial`` and ``isp``.
+    env var (default: ``financial``). Choices live under
+    ``objects/datasets/``; ship with ``financial`` and ``isp``.
     """
     paths = _dataset_files(INFRAHUB_DATASET)
     _banner(f"invoke bootstrap (dataset: {INFRAHUB_DATASET})", border="cyan")
@@ -286,7 +286,7 @@ def init_demo(c: Context) -> None:
     """Destroy, start, and bootstrap the demo end-to-end.
 
     The customer-facing dataset is selected by the ``INFRAHUB_DATASET``
-    env var (default ``sterling-financial``); see ``.env.example``.
+    env var (default ``financial``); see ``.env.example``.
     """
     _banner(
         "invoke init",

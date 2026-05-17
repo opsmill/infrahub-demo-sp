@@ -73,7 +73,7 @@ command). `uv run invoke info` prints the resolved values.
 | `INFRAHUB_UI_URL` | `http://localhost:8000` | Used by the Streamlit catalog for "open in Infrahub" links |
 | `INFRAHUB_GIT_LOCAL` | `false` | `true` registers a `CoreRepository` pointed at the bind-mounted `/upstream` (no GitHub clone needed). `false` registers a `CoreReadOnlyRepository` against the public GitHub repository |
 | `INFRAHUB_SERVICE_CATALOG` | `false` | `true` builds + starts the Streamlit sidecar on every `invoke start` / `invoke init` |
-| `INFRAHUB_DATASET` | `sterling-financial` | Customer-facing tenant overlay loaded on top of the shared backbone. One subdirectory of `objects/datasets/`. Ships with `sterling-financial` (internal bank, 8 division tenants, `trading-floor-vpn`) and `isp` (Lumina Networks pan-European ISP, 8 customer tenants, `kestrel-bank-mpls`) |
+| `INFRAHUB_DATASET` | `financial` | Customer-facing tenant overlay loaded on top of the shared backbone. One subdirectory of `objects/datasets/`. Ships with `financial` (internal bank, 8 division tenants, `trading-floor-vpn`) and `isp` (Lumina Networks pan-European ISP, 8 customer tenants, `kestrel-bank-mpls`) |
 | `INFRAHUB_PORT` | `8000` | Override the Infrahub server port |
 | `PREFECT_PORT` | `4200` | Override the Prefect task-manager port |
 | `STREAMLIT_PORT` | `8501` | Override the Streamlit catalog port |
