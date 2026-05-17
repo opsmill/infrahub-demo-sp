@@ -41,23 +41,32 @@ class SdwanGenerator(InfrahubGenerator):
         vendor = svc["vendor"]["value"]
         if vendor not in _VENDOR_TABLE:
             raise RuntimeError(f"Unknown SD-WAN vendor {vendor!r}")
-        platform, device_type, manufacturer, edge_group = _VENDOR_TABLE[vendor]
+        platform, device_type, manufacturer, edge_group_name = _VENDOR_TABLE[vendor]
 
-        group = await self.client.get(
+        group: Any = await self.client.get(
             kind="CoreStandardGroup",
-            name__value=edge_group,
+            name__value=edge_group_name,
             branch=self.branch,
         )
+        await group.members.fetch()
+        existing_member_ids = {p.id for p in group.members.peers}
 
+        edges_to_add: list[str] = []
         for site_edge in svc["sites"]["edges"]:
-            await self._materialise_site(
+            edge = await self._materialise_site(
                 site_edge["node"],
                 svc_name=svc["name"]["value"],
                 platform=platform,
                 device_type=device_type,
                 manufacturer=manufacturer,
-                edge_group=group,
             )
+            if edge.id not in existing_member_ids:
+                edges_to_add.append(edge.id)
+                existing_member_ids.add(edge.id)
+
+        if edges_to_add:
+            group.members.add(edges_to_add)
+            await group.save(allow_upsert=True)
 
         svc_obj = await self.client.get(kind="ServiceSdwan", id=svc["id"], branch=self.branch)
         svc_obj.status.value = "active"  # type: ignore[union-attr]
@@ -70,9 +79,11 @@ class SdwanGenerator(InfrahubGenerator):
         platform: str,
         device_type: str,
         manufacturer: str,
-        edge_group: Any,
-    ) -> None:
-        """Create edge + LAN IP for one ServiceSdwanSite if not yet materialised."""
+    ) -> Any:
+        """Create edge + LAN IP for one ServiceSdwanSite if not yet materialised.
+
+        Returns the edge DcimDevice node so the caller can manage group membership.
+        """
         site_obj = await self.client.get(kind="ServiceSdwanSite", id=site["id"], branch=self.branch)
         location_name = site["location"]["node"]["shortname"]["value"]
 
@@ -97,12 +108,6 @@ class SdwanGenerator(InfrahubGenerator):
             )
             site_obj.sdwan_edge = edge
 
-        # Ensure the device is a member of the vendor-specific edge group.
-        await edge_group.members.fetch()
-        if edge.id not in [p.id for p in edge_group.members.peers]:
-            edge_group.members.add([edge.id])
-            await edge_group.save(allow_upsert=True)
-
         has_lan = site.get("lan_address") and site["lan_address"].get("node")
         if not has_lan:
             lan_subnet_str = site["lan_subnet"]["node"]["prefix"]["value"]
@@ -117,3 +122,4 @@ class SdwanGenerator(InfrahubGenerator):
 
         site_obj.status.value = "active"  # type: ignore[union-attr]
         await site_obj.save(allow_upsert=True)
+        return edge
