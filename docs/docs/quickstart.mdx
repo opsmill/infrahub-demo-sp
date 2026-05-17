@@ -21,6 +21,11 @@ cp .env.example .env
 uv sync
 ```
 
+Open `.env` and review the values — see [Configuration](#configuration)
+below for what each variable does. The defaults are fine for a local
+demo; you typically only edit `INFRAHUB_SERVICE_CATALOG` (to enable the
+Streamlit sidecar) and `INFRAHUB_DATASET` (to switch tenant theme).
+
 ## 2. Start Infrahub and bootstrap data
 
 ```bash
@@ -28,8 +33,9 @@ uv run invoke init
 ```
 
 This destroys any prior state, starts the containers, loads the schemas,
-the menu, all bootstrap objects (4 PEs, full backbone, resource pools),
-and generates schema protocol bindings.
+the menu, all bootstrap objects (4 PEs, full backbone, resource pools,
+plus the selected customer-facing dataset), and generates schema
+protocol bindings.
 
 Wait ~30 s after the containers come up before bootstrap runs.
 
@@ -53,6 +59,33 @@ Streamlit sidecar. Visit http://localhost:8501. Create your first L3VPN.
 ## 5. (Optional) Bring up the containerlab
 
 See [`lab/containerlab`](./lab/containerlab.mdx).
+
+## Configuration
+
+All configurable behaviour is driven by environment variables in `.env`
+(loaded with `set -a; source .env; set +a` before any `uv run invoke`
+command). `uv run invoke info` prints the resolved values.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `INFRAHUB_ADDRESS` | `http://localhost:8000` | Where the SDK / Streamlit catalog reach the server |
+| `INFRAHUB_API_TOKEN` | demo token | Authentication. Rotate before any non-local use |
+| `INFRAHUB_UI_URL` | `http://localhost:8000` | Used by the Streamlit catalog for "open in Infrahub" links |
+| `INFRAHUB_GIT_LOCAL` | `false` | `true` registers a `CoreRepository` pointed at the bind-mounted `/upstream` (no GitHub clone needed). `false` registers a `CoreReadOnlyRepository` against the public GitHub repository |
+| `INFRAHUB_SERVICE_CATALOG` | `false` | `true` builds + starts the Streamlit sidecar on every `invoke start` / `invoke init` |
+| `INFRAHUB_DATASET` | `sterling-financial` | Customer-facing tenant overlay loaded on top of the shared backbone. One subdirectory of `objects/datasets/`. Ships with `sterling-financial` (internal bank, 8 division tenants, `trading-floor-vpn`) and `isp` (Lumina Networks pan-European ISP, 8 customer tenants, `kestrel-bank-mpls`) |
+| `INFRAHUB_PORT` | `8000` | Override the Infrahub server port |
+| `PREFECT_PORT` | `4200` | Override the Prefect task-manager port |
+| `STREAMLIT_PORT` | `8501` | Override the Streamlit catalog port |
+
+To switch dataset:
+
+```bash
+# in .env
+INFRAHUB_DATASET="isp"
+```
+
+…then `uv run invoke init` to wipe and reload from the new dataset.
 
 ## Troubleshooting
 

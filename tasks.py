@@ -24,6 +24,7 @@ COMPOSE_PROJECT = "sp-demo"
 INFRAHUB_VERSION = os.getenv("INFRAHUB_VERSION", "stable")
 INFRAHUB_SERVICE_CATALOG = os.getenv("INFRAHUB_SERVICE_CATALOG", "false").lower() == "true"
 INFRAHUB_GIT_LOCAL = os.getenv("INFRAHUB_GIT_LOCAL", "false").lower() == "true"
+INFRAHUB_DATASET = os.getenv("INFRAHUB_DATASET", "sterling-financial")
 LOCAL_COMPOSE_FILE = REPO_ROOT / "docker-compose.yml"
 OVERRIDE_FILE = REPO_ROOT / "docker-compose.override.yml"
 
@@ -150,6 +151,7 @@ def info(c: Context) -> None:
         f"[cyan]Infrahub:[/cyan]        {INFRAHUB_VERSION}\n"
         f"[cyan]Infrahub SDK:[/cyan]    {sdk_version}\n"
         f"[cyan]Compose source:[/cyan] {_compose_source()}\n"
+        f"[cyan]Dataset:[/cyan]         {INFRAHUB_DATASET}\n"
         f"[cyan]Local git:[/cyan]      {'enabled' if INFRAHUB_GIT_LOCAL else 'disabled'}\n"
         f"[cyan]Service catalog:[/cyan] {'enabled' if INFRAHUB_SERVICE_CATALOG else 'disabled'}"
     )
@@ -192,7 +194,6 @@ def destroy(c: Context) -> None:
 
 
 DATASETS_DIR = REPO_ROOT / "objects" / "datasets"
-DEFAULT_DATASET = "sterling-financial"
 
 
 def _dataset_files(dataset: str) -> list[Path]:
@@ -217,7 +218,7 @@ def _dataset_files(dataset: str) -> list[Path]:
 
 
 @task
-def bootstrap(c: Context, dataset: str = DEFAULT_DATASET) -> None:
+def bootstrap(c: Context) -> None:
     """Load schemas, menus, and bootstrap object data into Infrahub.
 
     A ``CoreRepository`` (local mount at ``/upstream``) or
@@ -226,12 +227,12 @@ def bootstrap(c: Context, dataset: str = DEFAULT_DATASET) -> None:
     definitions, generators, and checks. Selection is driven by the
     ``INFRAHUB_GIT_LOCAL`` env var.
 
-    ``--dataset`` selects which customer-facing overlay to layer onto
-    the shared backbone. Currently ``sterling-financial`` (default) or
-    ``isp``. See ``objects/datasets/`` for what each provides.
+    The customer-facing overlay is selected by the ``INFRAHUB_DATASET``
+    env var (default: ``sterling-financial``). Choices live under
+    ``objects/datasets/``; ship with ``sterling-financial`` and ``isp``.
     """
-    paths = _dataset_files(dataset)
-    _banner(f"invoke bootstrap --dataset {dataset}", border="cyan")
+    paths = _dataset_files(INFRAHUB_DATASET)
+    _banner(f"invoke bootstrap (dataset: {INFRAHUB_DATASET})", border="cyan")
 
     _step("Loading schemas")
     c.run("uv run infrahubctl schema load schemas/", pty=True)
@@ -281,16 +282,17 @@ def bootstrap(c: Context, dataset: str = DEFAULT_DATASET) -> None:
 
 
 @task(name="init")
-def init_demo(c: Context, dataset: str = DEFAULT_DATASET) -> None:
+def init_demo(c: Context) -> None:
     """Destroy, start, and bootstrap the demo end-to-end.
 
-    ``--dataset`` is forwarded to ``bootstrap``; see ``invoke bootstrap --help``
-    for the available datasets.
+    The customer-facing dataset is selected by the ``INFRAHUB_DATASET``
+    env var (default ``sterling-financial``); see ``.env.example``.
     """
     _banner(
         "invoke init",
         body=(
-            f"[bold]Full reset of the infrahub-demo-sp stack[/bold]\n[dim]Dataset:[/dim] {dataset}"
+            "[bold]Full reset of the infrahub-demo-sp stack[/bold]\n"
+            f"[dim]Dataset:[/dim] {INFRAHUB_DATASET}"
         ),
         border="magenta",
     )
@@ -298,7 +300,7 @@ def init_demo(c: Context, dataset: str = DEFAULT_DATASET) -> None:
     start(c, build=True)
     _wait("Waiting 30s for containers to settle")
     _sleep_with_progress(30, "containers warming up")
-    bootstrap(c, dataset=dataset)
+    bootstrap(c)
     console.print()
     _banner(
         "infrahub-demo-sp ready",
