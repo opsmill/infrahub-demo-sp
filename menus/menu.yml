@@ -18,6 +18,13 @@ spec:
             kind: ServiceL3Vpn
             order_weight: 1100
 
+          - namespace: Service
+            name: Sdwan
+            label: SD-WAN
+            icon: mdi:lan-connect
+            kind: ServiceSdwan
+            order_weight: 1200
+
     # ===================== BACKBONE =====================
     - namespace: Mpls
       name: Backbone
