@@ -1,0 +1,45 @@
+---
+# Customer-facing prefixes for the Treasury Branch SD-WAN.
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: IpamPrefix
+  data:
+    - {prefix: 10.250.10.0/24, description: Treasury — London branch LAN, status: active, role: public}
+    - {prefix: 10.250.20.0/24, description: Treasury — Frankfurt branch LAN, status: active, role: public}
+    - {prefix: 10.250.30.0/24, description: Treasury — Amsterdam branch LAN, status: active, role: public}
+
+---
+# Default bootstrap SD-WAN service (hub-spoke, Viptela).
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: ServiceSdwan
+  data:
+    - name: treasury-branch-sdwan
+      description: Treasury Ops branch SD-WAN — hub London + spokes Frankfurt and Amsterdam.
+      service_id: 100
+      vendor: viptela
+      topology: hub-spoke
+      status: draft
+      tenant:
+        kind: OrganizationTenant
+        data:
+          name: treasury-ops
+      member_of_groups:
+        - sdwans
+      sites:
+        kind: ServiceSdwanSite
+        data:
+          - name: hub-london
+            role: hub
+            location: lon
+            lan_subnet: ["10.250.10.0/24", "default"]
+          - name: spoke-frankfurt
+            role: spoke
+            location: fra
+            lan_subnet: ["10.250.20.0/24", "default"]
+          - name: spoke-amsterdam
+            role: spoke
+            location: ams
+            lan_subnet: ["10.250.30.0/24", "default"]
