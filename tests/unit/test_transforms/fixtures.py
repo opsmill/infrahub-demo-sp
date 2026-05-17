@@ -174,3 +174,95 @@ def pe_fixture_with_site(name: str, loopback: str, net_id: str) -> dict:
 
     fixture["ServiceL3VpnSite"] = {"edges": [{"node": site_node}]}
     return fixture
+
+
+def sdwan_edge_data(
+    *,
+    device_name: str = "treasury-branch-sdwan-hub-london-edge",
+    platform: str = "cisco_viptela",
+    location: str = "lon",
+    site_name: str = "hub-london",
+    site_role: str = "hub",
+    lan_subnet: str = "10.250.10.0/24",
+    lan_address: str = "10.250.10.1/24",
+    service_name: str = "treasury-branch-sdwan",
+    service_id: int = 100,
+    vendor: str = "viptela",
+    topology: str = "hub-spoke",
+    tenant: str = "treasury-ops",
+    sibling_sites: list[tuple[str, str, str]] | None = None,
+) -> dict:
+    """Build a sample SD-WAN edge transform input payload.
+
+    Args:
+        device_name: Hostname of the edge device.
+        platform: Platform name string (e.g. ``"cisco_viptela"``).
+        location: Location shortname (e.g. ``"lon"``).
+        site_name: SD-WAN site name (e.g. ``"hub-london"``).
+        site_role: Site role (e.g. ``"hub"`` or ``"spoke"``).
+        lan_subnet: LAN subnet prefix (e.g. ``"10.250.10.0/24"``).
+        lan_address: LAN interface address in CIDR (e.g. ``"10.250.10.1/24"``).
+        service_name: SD-WAN service name.
+        service_id: Numeric service identifier used for site-id and system-ip.
+        vendor: SD-WAN vendor string (e.g. ``"viptela"``).
+        topology: Overlay topology type (e.g. ``"hub-spoke"`` or ``"full-mesh"``).
+        tenant: Tenant name for organization-name.
+        sibling_sites: ``[(name, location_shortname, lan_subnet), ...]``
+            entries representing peer sites in the same service.
+
+    Returns:
+        Dict shaped like the ``sdwan_edge`` GraphQL query response.
+    """
+    sibling_sites = sibling_sites or []
+    sibling_edges = [
+        {
+            "node": {
+                "name": {"value": sn},
+                "location": {"node": {"shortname": {"value": loc}}},
+                "lan_subnet": {"node": {"prefix": {"value": lan}}},
+            }
+        }
+        for sn, loc, lan in sibling_sites
+    ]
+    return {
+        "DcimDevice": {
+            "edges": [
+                {
+                    "node": {
+                        "id": "edge-id",
+                        "name": {"value": device_name},
+                        "platform": {"node": {"name": {"value": platform}}},
+                        "location": {
+                            "node": {
+                                "name": {"value": location.upper()},
+                                "shortname": {"value": location},
+                            }
+                        },
+                    }
+                }
+            ]
+        },
+        "ServiceSdwanSite": {
+            "edges": [
+                {
+                    "node": {
+                        "id": "site-id",
+                        "name": {"value": site_name},
+                        "role": {"value": site_role},
+                        "lan_subnet": {"node": {"prefix": {"value": lan_subnet}}},
+                        "lan_address": {"node": {"address": {"value": lan_address}}},
+                        "sdwan": {
+                            "node": {
+                                "name": {"value": service_name},
+                                "service_id": {"value": service_id},
+                                "vendor": {"value": vendor},
+                                "topology": {"value": topology},
+                                "tenant": {"node": {"name": {"value": tenant}}},
+                                "sites": {"edges": sibling_edges},
+                            }
+                        },
+                    }
+                }
+            ]
+        },
+    }
