@@ -1,0 +1,41 @@
+query SdwanEdge($device: String!) {
+  DcimDevice(name__value: $device) {
+    edges {
+      node {
+        id
+        name { value }
+        platform { node { name { value } } }
+        location { node { name { value } shortname { value } } }
+      }
+    }
+  }
+  ServiceSdwanSite(sdwan_edge__name__value: $device) {
+    edges {
+      node {
+        id
+        name { value }
+        role { value }
+        lan_subnet { node { prefix { value } } }
+        lan_address { node { address { value } } }
+        sdwan {
+          node {
+            name { value }
+            service_id { value }
+            vendor { value }
+            topology { value }
+            tenant { node { name { value } } }
+            sites {
+              edges {
+                node {
+                  name { value }
+                  location { node { shortname { value } } }
+                  lan_subnet { node { prefix { value } } }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
