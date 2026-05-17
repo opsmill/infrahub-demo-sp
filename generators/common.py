@@ -121,7 +121,7 @@ async def find_or_create_device(
         role=role,
         status="active",
         platform={"hfid": [platform_name]},
-        device_type=device_type_name,
+        device_type={"hfid": [device_type_name]},
         location={"hfid": [location_hfid]},
     )
     await device.save(allow_upsert=True)
