@@ -19,11 +19,12 @@ dashboard = st.Page(
     "pages/0_Dashboard.py", title="Dashboard", icon="📊", default=True, url_path="dashboard"
 )
 create_l3vpn = st.Page("pages/1_Create_L3VPN.py", title="Create L3VPN", icon="🔗")
+create_sdwan = st.Page("pages/2_Create_SDWAN.py", title="Create SD-WAN", icon="🛰️")
 
 pg = st.navigation(
     {
         "": [dashboard],
-        "Service Catalog": [create_l3vpn],
+        "Service Catalog": [create_l3vpn, create_sdwan],
     }
 )
 
