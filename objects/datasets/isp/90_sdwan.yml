@@ -1,0 +1,45 @@
+---
+# Customer-facing prefixes for the Flo Streaming overlay.
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: IpamPrefix
+  data:
+    - {prefix: 10.250.10.0/24, description: Flo Streaming — London PoP LAN, status: active, role: public}
+    - {prefix: 10.250.20.0/24, description: Flo Streaming — Frankfurt PoP LAN, status: active, role: public}
+    - {prefix: 10.250.30.0/24, description: Flo Streaming — Paris PoP LAN, status: active, role: public}
+
+---
+# Default bootstrap SD-WAN service (full-mesh, Viptela).
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: ServiceSdwan
+  data:
+    - name: flo-streaming-overlay
+      description: Flo Streaming any-to-any overlay across three European PoPs.
+      service_id: 100
+      vendor: viptela
+      topology: full-mesh
+      status: draft
+      tenant:
+        kind: OrganizationTenant
+        data:
+          name: flo-streaming
+      member_of_groups:
+        - sdwans
+      sites:
+        kind: ServiceSdwanSite
+        data:
+          - name: pop-london
+            role: spoke
+            location: lon
+            lan_subnet: ["10.250.10.0/24", "default"]
+          - name: pop-frankfurt
+            role: spoke
+            location: fra
+            lan_subnet: ["10.250.20.0/24", "default"]
+          - name: pop-paris
+            role: spoke
+            location: par
+            lan_subnet: ["10.250.30.0/24", "default"]
