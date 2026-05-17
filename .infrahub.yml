@@ -18,6 +18,10 @@ queries:
   - {name: l3vpn_site_subnet, file_path: queries/validation/l3vpn_site_subnet.gql}
   - {name: pe_interface_alloc, file_path: queries/validation/pe_interface_alloc.gql}
   - {name: backbone_session_count, file_path: queries/validation/backbone_session_count.gql}
+  - {name: sdwan, file_path: queries/service/sdwan.gql}
+  - {name: sdwan_edge, file_path: queries/config/sdwan_edge.gql}
+  - {name: sdwan_id_overlap, file_path: queries/validation/sdwan_id_overlap.gql}
+  - {name: sdwan_site_subnet, file_path: queries/validation/sdwan_site_subnet.gql}
 python_transforms:
   - {name: pe_arista_eos, class_name: PeAristaEos, file_path: transforms/pe_arista_eos.py}
   - {name: pe_cisco_iosxr, class_name: PeCiscoIosXr, file_path: transforms/pe_cisco_iosxr.py}
@@ -25,6 +29,8 @@ python_transforms:
   - {name: pe_nokia_sros, class_name: PeNokiaSrOs, file_path: transforms/pe_nokia_sros.py}
   - {name: pe_nokia_srlinux, class_name: PeNokiaSrLinux, file_path: transforms/pe_nokia_srlinux.py}
   - {name: clab_topology, class_name: ClabTopology, file_path: transforms/clab_topology.py}
+  - {name: sdwan_viptela, class_name: SdwanViptela, file_path: transforms/sdwan_viptela.py}
+  - {name: sdwan_versa, class_name: SdwanVersa, file_path: transforms/sdwan_versa.py}
 jinja2_transforms: []
 artifact_definitions:
   - name: pe-arista-eos-config
@@ -63,6 +69,18 @@ artifact_definitions:
     targets: topologies_mpls
     transformation: clab_topology
     parameters: {name: name__value}
+  - name: sdwan-viptela-config
+    artifact_name: sdwan-viptela
+    content_type: text/plain
+    targets: sdwan_viptela_edges
+    transformation: sdwan_viptela
+    parameters: {device: name__value}
+  - name: sdwan-versa-config
+    artifact_name: sdwan-versa
+    content_type: text/plain
+    targets: sdwan_versa_edges
+    transformation: sdwan_versa
+    parameters: {device: name__value}
 generator_definitions:
   - name: generate_l3vpn
     file_path: generators/generate_l3vpn.py
@@ -71,8 +89,17 @@ generator_definitions:
     class_name: L3VpnGenerator
     parameters:
       name: name__value
+  - name: generate_sdwan
+    file_path: generators/generate_sdwan.py
+    targets: sdwans
+    query: sdwan
+    class_name: SdwanGenerator
+    parameters:
+      name: name__value
 check_definitions:
   - {name: l3vpn_overlap, class_name: L3VpnOverlapCheck, file_path: checks/l3vpn_overlap.py, targets: l3vpns}
   - {name: l3vpn_site_subnet, class_name: L3VpnSiteSubnetCheck, file_path: checks/l3vpn_site_subnet.py, targets: l3vpns}
   - {name: pe_interface_alloc, class_name: PeInterfaceAllocCheck, file_path: checks/pe_interface_alloc.py, targets: pes}
   - {name: backbone_session_count, class_name: BackboneSessionCountCheck, file_path: checks/backbone_session_count.py, targets: pes}
+  - {name: sdwan_id_overlap, class_name: SdwanIdOverlapCheck, file_path: checks/sdwan_id_overlap.py, targets: sdwans}
+  - {name: sdwan_site_subnet, class_name: SdwanSiteSubnetCheck, file_path: checks/sdwan_site_subnet.py, targets: sdwans}
