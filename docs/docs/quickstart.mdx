@@ -56,6 +56,12 @@ uv run invoke start
 Every `invoke start` / `invoke init` will now also build and start the
 Streamlit sidecar. Visit http://localhost:8501. Create your first L3VPN.
 
+The Service Catalog also exposes a second wizard — **Create SD-WAN
+service** — for provisioning Cisco Viptela or Versa Networks SD-WAN
+overlays. The flow mirrors Create L3VPN: pick vendor and topology, list
+the sites, submit. See [services/sdwan](./services/sdwan.mdx) for the
+lifecycle, vendor differences, and known gaps.
+
 ## 5. (Optional) Bring up the containerlab
 
 See [`lab/containerlab`](./lab/containerlab.mdx).

@@ -22,6 +22,7 @@ const sidebars: SidebarsConfig = {
       label: 'Services',
       items: [
         'services/l3vpn',
+        'services/sdwan',
       ],
     },
     {
