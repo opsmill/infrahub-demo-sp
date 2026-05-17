@@ -20,3 +20,11 @@ spec:
     # bootstrap creates it empty so transforms / generators can target it.
     - name: l3vpns
       description: All ServiceL3Vpn rows (auto-populated as services are created).
+    # SD-WAN groups: auto-populated as ServiceSdwan and SD-WAN edge devices are created;
+    # bootstrap creates them empty so transforms / generators can target them.
+    - name: sdwans
+      description: All ServiceSdwan rows (auto-populated as services are created).
+    - name: sdwan_viptela_edges
+      description: All Cisco Viptela SD-WAN edge devices (artifact target).
+    - name: sdwan_versa_edges
+      description: All Versa Networks SD-WAN edge devices (artifact target).
