@@ -9,6 +9,7 @@ import uuid
 from typing import Any
 
 import streamlit as st
+from infrahub_sdk.exceptions import GraphQLError
 from utils import client_for, run_async
 from utils.validators import validate_create_sdwan_form
 
@@ -71,6 +72,24 @@ if submitted:
             st.error(e)
         st.stop()
 
+    # Pre-flight: refuse subnets that already exist in Infrahub before opening a
+    # branch — saves the user from orphaned half-created services. Belt and
+    # braces: the try/except below catches the same collision on a real race.
+    requested_subnets = [s["lan_subnet"] for s in sites]
+    existing_prefixes = run_async(
+        client_main.filters(kind="IpamPrefix", prefix__values=requested_subnets)
+    )
+    existing_subnets = {p.prefix.value for p in existing_prefixes}
+    collisions = [s for s in requested_subnets if s in existing_subnets]
+    if collisions:
+        for c in collisions:
+            st.error(
+                f"LAN subnet `{c}` already exists in Infrahub (probably from a "
+                "bootstrap-seeded service). Pick a different CIDR, or delete the "
+                "existing IpamPrefix first."
+            )
+        st.stop()
+
     with st.spinner("Opening branch and creating objects..."):
         branch_name = f"sdwan/{uuid.uuid4().hex[:8]}"
         branch = run_async(client_main.branch.create(branch_name, sync_with_git=False))
@@ -103,7 +122,17 @@ if submitted:
                     role="public",
                 )
             )
-            run_async(lan.save())
+            try:
+                run_async(lan.save())
+            except GraphQLError as exc:
+                if "prefix-ip_namespace" in str(exc):
+                    st.error(
+                        f"LAN subnet `{s['lan_subnet']}` for site `{s['name']}` already "
+                        "exists in Infrahub (probably from a bootstrap-seeded service). "
+                        "Pick a different CIDR, or delete the existing IpamPrefix first."
+                    )
+                    st.stop()
+                raise
             site_obj = run_async(
                 client.create(
                     kind="ServiceSdwanSite",
