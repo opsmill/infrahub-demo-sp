@@ -1,0 +1,10 @@
+query SdwanIdOverlap {
+  ServiceSdwan {
+    edges {
+      node {
+        name { value }
+        service_id { value }
+      }
+    }
+  }
+}
