@@ -36,8 +36,10 @@ spec:
     - name: sdwan_id_pool
       node: ServiceSdwan
       node_attribute: service_id
-      # service_id 100-199 reserved for bootstrap-seeded SD-WAN services.
-      # Catalog allocations start at 200.
+      # service_id values 100–199 are reserved for bootstrap-seeded SD-WAN
+      # services (loaded via `infrahubctl object load`, not via this pool).
+      # The pool tracks only its own allocations, so starting at 200 prevents
+      # the catalog from handing out an id that already exists on disk.
       start_range: 200
       end_range: 9999
 
