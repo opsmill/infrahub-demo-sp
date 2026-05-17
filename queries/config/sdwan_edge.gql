@@ -5,7 +5,6 @@ query SdwanEdge($device: String!) {
         id
         name { value }
         platform { node { name { value } } }
-        location { node { name { value } shortname { value } } }
       }
     }
   }
