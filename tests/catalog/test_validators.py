@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from service_catalog.utils.validators import (
     validate_create_l3vpn_form,
+    validate_create_sdwan_form,
 )
 
 
@@ -106,5 +107,109 @@ def test_happy_path_returns_empty() -> None:
             _site(name="lon", pe="pe-lon-arista", subnet="10.10.0.0/24"),
             _site(name="par", pe="pe-par-nokia", subnet="10.20.0.0/24"),
         ],
+    )
+    assert errors == []
+
+
+def _ok_sdwan_sites() -> list[dict]:
+    return [
+        {"name": "hub", "role": "hub", "location": "lon", "lan_subnet": "10.250.10.0/24"},
+        {"name": "spoke-a", "role": "spoke", "location": "fra", "lan_subnet": "10.250.20.0/24"},
+    ]
+
+
+def test_sdwan_minimum_two_sites_required() -> None:
+    errors = validate_create_sdwan_form(
+        name="x",
+        tenant="t",
+        vendor="viptela",
+        topology="hub-spoke",
+        sites=[_ok_sdwan_sites()[0]],
+    )
+    assert any("at least two sites" in e.lower() for e in errors)
+
+
+def test_sdwan_hub_required_when_hub_spoke() -> None:
+    sites = [
+        {"name": "a", "role": "spoke", "location": "lon", "lan_subnet": "10.250.10.0/24"},
+        {"name": "b", "role": "spoke", "location": "fra", "lan_subnet": "10.250.20.0/24"},
+    ]
+    errors = validate_create_sdwan_form(
+        name="x",
+        tenant="t",
+        vendor="viptela",
+        topology="hub-spoke",
+        sites=sites,
+    )
+    assert any("hub" in e.lower() for e in errors)
+
+
+def test_sdwan_unique_site_names_required() -> None:
+    sites = [
+        {"name": "dup", "role": "hub", "location": "lon", "lan_subnet": "10.250.10.0/24"},
+        {"name": "dup", "role": "spoke", "location": "fra", "lan_subnet": "10.250.20.0/24"},
+    ]
+    errors = validate_create_sdwan_form(
+        name="x",
+        tenant="t",
+        vendor="viptela",
+        topology="hub-spoke",
+        sites=sites,
+    )
+    assert any("unique" in e.lower() and "name" in e.lower() for e in errors)
+
+
+def test_sdwan_unique_location_required() -> None:
+    sites = [
+        {"name": "hub", "role": "hub", "location": "lon", "lan_subnet": "10.250.10.0/24"},
+        {"name": "spoke", "role": "spoke", "location": "lon", "lan_subnet": "10.250.20.0/24"},
+    ]
+    errors = validate_create_sdwan_form(
+        name="x",
+        tenant="t",
+        vendor="viptela",
+        topology="hub-spoke",
+        sites=sites,
+    )
+    assert any("location" in e.lower() for e in errors)
+
+
+def test_sdwan_overlapping_lan_subnets() -> None:
+    sites = [
+        {"name": "hub", "role": "hub", "location": "lon", "lan_subnet": "10.250.0.0/16"},
+        {"name": "spoke", "role": "spoke", "location": "fra", "lan_subnet": "10.250.10.0/24"},
+    ]
+    errors = validate_create_sdwan_form(
+        name="x",
+        tenant="t",
+        vendor="viptela",
+        topology="hub-spoke",
+        sites=sites,
+    )
+    assert any("overlap" in e.lower() for e in errors)
+
+
+def test_sdwan_garbage_cidr_caught() -> None:
+    sites = [
+        {"name": "hub", "role": "hub", "location": "lon", "lan_subnet": "not-a-cidr"},
+        {"name": "spoke", "role": "spoke", "location": "fra", "lan_subnet": "10.250.20.0/24"},
+    ]
+    errors = validate_create_sdwan_form(
+        name="x",
+        tenant="t",
+        vendor="viptela",
+        topology="hub-spoke",
+        sites=sites,
+    )
+    assert any("valid" in e.lower() and "cidr" in e.lower() for e in errors)
+
+
+def test_sdwan_happy_path() -> None:
+    errors = validate_create_sdwan_form(
+        name="x",
+        tenant="t",
+        vendor="viptela",
+        topology="hub-spoke",
+        sites=_ok_sdwan_sites(),
     )
     assert errors == []
