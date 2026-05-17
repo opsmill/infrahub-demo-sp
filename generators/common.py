@@ -88,7 +88,6 @@ async def find_or_create_device(
     name: str,
     platform_name: str,
     device_type_name: str,
-    manufacturer_name: str,
     location_hfid: str,
     role: str,
     branch: str,
@@ -105,7 +104,6 @@ async def find_or_create_device(
         name: Device name (typically ``<service>-<site>-edge``).
         platform_name: HFID of the DcimPlatform (e.g. ``cisco_viptela``).
         device_type_name: HFID of the DcimDeviceType (e.g. ``cEdge-1000``).
-        manufacturer_name: HFID of the OrganizationManufacturer.
         location_hfid: HFID of the LocationSite (e.g. ``lon``).
         role: Role enum value (e.g. ``cpe``).
         branch: Branch on which to create.
@@ -123,7 +121,7 @@ async def find_or_create_device(
         role=role,
         status="active",
         platform={"hfid": [platform_name]},
-        device_type=[device_type_name, manufacturer_name],
+        device_type=device_type_name,
         location={"hfid": [location_hfid]},
     )
     await device.save(allow_upsert=True)

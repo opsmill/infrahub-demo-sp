@@ -18,10 +18,10 @@ from .common import find_or_create_device
 
 LOG = logging.getLogger(__name__)
 
-# Vendor → (platform name, device-type name, manufacturer name, edge group name)
-_VENDOR_TABLE: dict[str, tuple[str, str, str, str]] = {
-    "viptela": ("cisco_viptela", "cEdge-1000", "Cisco", "sdwan_viptela_edges"),
-    "versa": ("versa_flexvnf", "FlexVNF-200", "Versa Networks", "sdwan_versa_edges"),
+# Vendor → (platform name, device-type name, edge group name)
+_VENDOR_TABLE: dict[str, tuple[str, str, str]] = {
+    "viptela": ("cisco_viptela", "cEdge-1000", "sdwan_viptela_edges"),
+    "versa": ("versa_flexvnf", "FlexVNF-200", "sdwan_versa_edges"),
 }
 
 
@@ -41,7 +41,7 @@ class SdwanGenerator(InfrahubGenerator):
         vendor = svc["vendor"]["value"]
         if vendor not in _VENDOR_TABLE:
             raise RuntimeError(f"Unknown SD-WAN vendor {vendor!r}")
-        platform, device_type, manufacturer, edge_group_name = _VENDOR_TABLE[vendor]
+        platform, device_type, edge_group_name = _VENDOR_TABLE[vendor]
 
         group: Any = await self.client.get(
             kind="CoreStandardGroup",
@@ -58,7 +58,6 @@ class SdwanGenerator(InfrahubGenerator):
                 svc_name=svc["name"]["value"],
                 platform=platform,
                 device_type=device_type,
-                manufacturer=manufacturer,
             )
             if edge.id not in existing_member_ids:
                 edges_to_add.append(edge.id)
@@ -78,7 +77,6 @@ class SdwanGenerator(InfrahubGenerator):
         svc_name: str,
         platform: str,
         device_type: str,
-        manufacturer: str,
     ) -> Any:
         """Create edge + LAN IP for one ServiceSdwanSite if not yet materialised.
 
@@ -101,7 +99,6 @@ class SdwanGenerator(InfrahubGenerator):
                 name=edge_name,
                 platform_name=platform,
                 device_type_name=device_type,
-                manufacturer_name=manufacturer,
                 location_hfid=location_name,
                 role="cpe",
                 branch=self.branch,
