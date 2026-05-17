@@ -1,0 +1,17 @@
+query SdwanSiteSubnet {
+  ServiceSdwan {
+    edges {
+      node {
+        name { value }
+        sites {
+          edges {
+            node {
+              name { value }
+              lan_subnet { node { prefix { value } } }
+            }
+          }
+        }
+      }
+    }
+  }
+}
