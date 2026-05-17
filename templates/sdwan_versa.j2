@@ -1,0 +1,14 @@
+{% set device = data.DcimDevice.edges[0].node %}
+{% set site = data.ServiceSdwanSite.edges[0].node %}
+{% set svc = site.sdwan.node %}
+{% set tenant = svc.tenant.node %}
+# Versa VOS config for {{ device.name.value }}
+# topology: {{ svc.topology.value }} / site-id {{ svc.service_id.value }}
+set orgs org-services {{ tenant.name.value }} appliance-owner true
+set orgs org-services {{ tenant.name.value }} routing-instances default-RI
+set orgs org-services {{ tenant.name.value }} virtual-router LAN routing-instance default-RI
+set orgs org-services {{ tenant.name.value }} virtual-router LAN interfaces vni-0/1.0 ip-address {{ site.lan_address.node.address.value }}
+# peer sites:
+{% for peer_edge in svc.sites.edges %}
+#  - {{ peer_edge.node.name.value }} ({{ peer_edge.node.location.node.shortname.value }}, lan {{ peer_edge.node.lan_subnet.node.prefix.value }})
+{% endfor %}
