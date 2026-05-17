@@ -24,3 +24,13 @@ spec:
       height: 3
       manufacturer: Nokia
       platform: nokia_sros
+    - name: cEdge-1000
+      part_number: ISR1100-4G
+      height: 1
+      manufacturer: Cisco
+      platform: cisco_viptela
+    - name: FlexVNF-200
+      part_number: VFlex-200
+      height: 1
+      manufacturer: Versa Networks
+      platform: versa_flexvnf

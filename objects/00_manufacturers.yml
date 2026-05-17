@@ -12,3 +12,5 @@ spec:
       description: Juniper Networks
     - name: Nokia
       description: Nokia
+    - name: Versa Networks
+      description: Versa Networks

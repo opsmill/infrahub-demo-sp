@@ -40,3 +40,19 @@ spec:
       ansible_network_os: nokia.sros
       # SR OS substitutes to SR Linux in the lab. See clab_topology transform.
       containerlab_os: srl
+
+    - name: cisco_viptela
+      description: Cisco SD-WAN (Viptela cEdge / IOS-XE SD-WAN)
+      manufacturer: Cisco
+      nornir_platform: cisco_xe
+      napalm_driver: ios
+      netmiko_device_type: cisco_xe
+      ansible_network_os: cisco.ios.ios
+      # No clab image — SD-WAN edges are not lab-deployable in v1
+
+    - name: versa_flexvnf
+      description: Versa Networks VOS (FlexVNF)
+      manufacturer: Versa Networks
+      nornir_platform: versa_vos
+      ansible_network_os: versa.vos.versa
+      # No clab image
