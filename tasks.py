@@ -25,6 +25,7 @@ INFRAHUB_VERSION = os.getenv("INFRAHUB_VERSION", "stable")
 INFRAHUB_SERVICE_CATALOG = os.getenv("INFRAHUB_SERVICE_CATALOG", "false").lower() == "true"
 INFRAHUB_GIT_LOCAL = os.getenv("INFRAHUB_GIT_LOCAL", "false").lower() == "true"
 INFRAHUB_DATASET = os.getenv("INFRAHUB_DATASET", "financial")
+INFRAHUB_ENTERPRISE = os.getenv("INFRAHUB_ENTERPRISE", "false").lower() == "true"
 LOCAL_COMPOSE_FILE = REPO_ROOT / "docker-compose.yml"
 OVERRIDE_FILE = REPO_ROOT / "docker-compose.override.yml"
 
@@ -93,7 +94,8 @@ def _compose_base() -> str:
         if OVERRIDE_FILE.exists():
             cmd += f" -f {OVERRIDE_FILE}"
         return cmd
-    cmd = f"curl -sf https://infrahub.opsmill.io/{INFRAHUB_VERSION} | {base} -f -"
+    edition_path = f"enterprise/{INFRAHUB_VERSION}" if INFRAHUB_ENTERPRISE else INFRAHUB_VERSION
+    cmd = f"curl -sf https://infrahub.opsmill.io/{edition_path} | {base} -f -"
     if OVERRIDE_FILE.exists():
         cmd += f" -f {OVERRIDE_FILE}"
     return cmd
@@ -109,7 +111,8 @@ def _compose_source() -> str:
     """Human-readable description of where the base compose file comes from."""
     if LOCAL_COMPOSE_FILE.exists():
         return "Local (docker-compose.yml)"
-    return f"infrahub.opsmill.io ({INFRAHUB_VERSION})"
+    edition = "Enterprise" if INFRAHUB_ENTERPRISE else "Community"
+    return f"infrahub.opsmill.io ({edition} {INFRAHUB_VERSION})"
 
 
 def _task_summary(t: object) -> str:
@@ -168,10 +171,12 @@ def info(c: Context) -> None:
         sdk_version = importlib.metadata.version("infrahub-sdk")
     except importlib.metadata.PackageNotFoundError:
         sdk_version = "unknown"
+    edition = "Enterprise" if INFRAHUB_ENTERPRISE else "Community"
     body = (
         f"[cyan]Project:[/cyan]          {COMPOSE_PROJECT}\n"
         f"[cyan]Infrahub running:[/cyan] {_running_infrahub_version()}\n"
         f"[cyan]Infrahub SDK:[/cyan]     {sdk_version}\n"
+        f"[cyan]Edition:[/cyan]          {edition} [dim](INFRAHUB_ENTERPRISE env var)[/dim]\n"
         f"[cyan]Compose tag:[/cyan]      {INFRAHUB_VERSION} [dim](INFRAHUB_VERSION env var)[/dim]\n"
         f"[cyan]Compose source:[/cyan]   {_compose_source()}\n"
         f"[cyan]Dataset:[/cyan]          {INFRAHUB_DATASET}\n"
