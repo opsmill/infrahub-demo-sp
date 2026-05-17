@@ -1,0 +1,29 @@
+query Sdwan($name: String!) {
+  ServiceSdwan(name__value: $name) {
+    edges {
+      node {
+        id
+        name { value }
+        service_id { value }
+        vendor { value }
+        topology { value }
+        status { value }
+        tenant { node { id name { value } } }
+        sites {
+          edges {
+            node {
+              id
+              name { value }
+              role { value }
+              status { value }
+              location { node { id name { value } shortname { value } } }
+              lan_subnet { node { id prefix { value } } }
+              lan_address { node { id address { value } } }
+              sdwan_edge { node { id name { value } } }
+            }
+          }
+        }
+      }
+    }
+  }
+}
