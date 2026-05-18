@@ -5,6 +5,69 @@ slug: /
 
 This page gets you from clone to a running demo in about 10 minutes.
 
+## What you get out of the box
+
+A multi-vendor MPLS backbone for **Sterling Financial** (the default `financial`
+dataset), plus two pre-provisioned customer services that demonstrate the L3VPN
+and SD-WAN catalog flows end to end.
+
+```mermaid
+flowchart TB
+    subgraph backbone["MPLS Backbone — Sterling Financial · AS 65000"]
+        direction LR
+        pe_lon["pe-lon-arista<br/>Arista EOS<br/>10.0.0.1"]
+        pe_fra["pe-fra-cisco<br/>Cisco IOS-XR<br/>10.0.0.2"]
+        pe_ams["pe-ams-juniper<br/>Juniper Junos<br/>10.0.0.3"]
+        pe_par["pe-par-nokia<br/>Nokia SR OS<br/>10.0.0.4"]
+        pe_lon --- pe_fra & pe_ams & pe_par
+        pe_fra --- pe_ams & pe_par
+        pe_ams --- pe_par
+    end
+
+    subgraph l3vpn["L3VPN: trading-floor-vpn — tenant: markets-trading"]
+        direction LR
+        ce_lon["Trading London<br/>10.200.10.0/24"]
+        ce_fra["Trading Frankfurt<br/>10.200.20.0/24"]
+        ce_ams["Trading Amsterdam<br/>10.200.30.0/24"]
+        ce_par["Trading Paris<br/>10.200.40.0/24"]
+    end
+
+    pe_lon -. "VRF · eBGP" .-> ce_lon
+    pe_fra -. "VRF · eBGP" .-> ce_fra
+    pe_ams -. "VRF · eBGP" .-> ce_ams
+    pe_par -. "VRF · eBGP" .-> ce_par
+
+    subgraph sdwan["SD-WAN: treasury-branch-sdwan — tenant: treasury-ops · hub-spoke · Cisco Viptela"]
+        direction LR
+        hub_lon["hub-london<br/>cEdge-1000<br/>10.250.10.0/24"]
+        sp_fra["spoke-frankfurt<br/>cEdge-1000<br/>10.250.20.0/24"]
+        sp_ams["spoke-amsterdam<br/>cEdge-1000<br/>10.250.30.0/24"]
+        hub_lon ==> sp_fra
+        hub_lon ==> sp_ams
+    end
+
+    classDef pe fill:#1ba0d7,stroke:#0a7ba5,color:#fff
+    classDef ce fill:#A9DFBF,stroke:#5d8d6f
+    classDef edge fill:#FFE7BA,stroke:#a8772f
+    class pe_lon,pe_fra,pe_ams,pe_par pe
+    class ce_lon,ce_fra,ce_ams,ce_par ce
+    class hub_lon,sp_fra,sp_ams edge
+```
+
+**Backbone:** four PE routers, one per vendor (Arista, Cisco, Juniper, Nokia),
+running ISIS + LDP + iBGP/VPNv4 in a single AS.
+
+**L3VPN service (`trading-floor-vpn`):** a `markets-trading` tenant L3VPN
+attached to all four PEs via eBGP, with one customer prefix per site in the
+`10.200.0.0/16` supernet.
+
+**SD-WAN service (`treasury-branch-sdwan`):** a `treasury-ops` hub-spoke overlay
+on Cisco Viptela cEdge-1000 appliances at three of the same sites, with LAN
+prefixes in the `10.250.0.0/16` supernet.
+
+Both services are created on `invoke init` and you can build more from the
+[Streamlit Service Catalog](#4-start-the-streamlit-service-catalog).
+
 ## Prerequisites
 
 - Docker / Docker Compose
