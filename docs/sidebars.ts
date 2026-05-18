@@ -6,7 +6,17 @@ const sidebars: SidebarsConfig = {
       type: 'category',
       label: 'Getting started',
       items: [
+        'readme',
         'quickstart',
+      ],
+    },
+    {
+      type: 'category',
+      label: 'Tutorials',
+      items: [
+        'services/l3vpn',
+        'services/sdwan',
+        'lab/containerlab',
       ],
     },
     {
@@ -15,21 +25,6 @@ const sidebars: SidebarsConfig = {
       items: [
         'architecture',
         'schema-reference',
-      ],
-    },
-    {
-      type: 'category',
-      label: 'Services',
-      items: [
-        'services/l3vpn',
-        'services/sdwan',
-      ],
-    },
-    {
-      type: 'category',
-      label: 'Lab',
-      items: [
-        'lab/containerlab',
       ],
     },
     {

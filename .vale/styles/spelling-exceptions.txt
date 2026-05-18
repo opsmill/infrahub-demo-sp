@@ -3,6 +3,7 @@ ASNs
 Arista
 Async
 BGP
+CLIs
 Containerlab
 Containerlab's
 Dcim
@@ -12,6 +13,7 @@ Dockerfile
 Docusaurus
 ENIs
 FQDNs
+Financial
 FlexVNF
 Fortinet
 Hostname
@@ -30,6 +32,8 @@ POP
 POPs
 Palo
 Pydantic
+RDs
+RTs
 Rumdl
 SDN
 Streamlit
@@ -58,6 +62,7 @@ datacenter
 direnv
 dmz
 dns
+enums
 env
 envrc
 evolvability
@@ -65,6 +70,7 @@ extranet
 hostname
 http
 https
+isp
 loopback
 loopbacks
 mermaid
