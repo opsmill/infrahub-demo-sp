@@ -157,17 +157,62 @@ if submitted:
             time.sleep(2)
 
         # Trigger artifact regeneration on the branch so the proposed change
-        # shows real per-edge config diffs. Infrahub doesn't automatically
-        # re-render artifacts whose template's query data changed; we have
-        # to nudge each definition.
-        for definition in run_async(client.all(kind="CoreArtifactDefinition")):
-            url = f"{client.address}/api/artifact/generate/{definition.id}?branch={branch_name}"
+        # shows real per-edge config diffs. The /api/artifact/generate endpoint
+        # returns 200 immediately and the work happens async server-side, so
+        # poll for the expected artifacts and re-POST any that don't show up
+        # within the timeout (handles a race where the regen request beats the
+        # generator's group-membership write to the read replica).
+        sdwan_edge_group = "sdwan_viptela_edges" if vendor == "viptela" else "sdwan_versa_edges"
+        sdwan_def_name = "sdwan-viptela-config" if vendor == "viptela" else "sdwan-versa-config"
+        artifact_definitions = run_async(client.all(kind="CoreArtifactDefinition"))
+
+        def _post_definition(def_id: str) -> None:
+            url = f"{client.address}/api/artifact/generate/{def_id}?branch={branch_name}"
             request = urllib.request.Request(
                 url,
                 method="POST",
                 headers={"X-INFRAHUB-KEY": os.environ["INFRAHUB_API_TOKEN"]},
             )
             urllib.request.urlopen(request).read()
+
+        for definition in artifact_definitions:
+            _post_definition(definition.id)
+
+        # Confirm the SD-WAN edge artifacts (one per site) actually materialised.
+        # Re-POST once if they're still missing after the first wait window.
+        edge_group_obj = run_async(
+            client.get(kind="CoreStandardGroup", name__value=sdwan_edge_group)
+        )
+        run_async(edge_group_obj.members.fetch())
+        expected_edge_count = len(edge_group_obj.members.peers)
+        sdwan_def = next(d for d in artifact_definitions if d.name.value == sdwan_def_name)
+
+        def _count_sdwan_artifacts() -> int:
+            return len(
+                run_async(
+                    client.filters(
+                        kind="CoreArtifact",
+                        definition__ids=[sdwan_def.id],
+                    )
+                )
+            )
+
+        deadline = time.monotonic() + 90
+        reposted = False
+        while time.monotonic() < deadline:
+            if _count_sdwan_artifacts() >= expected_edge_count:
+                break
+            time.sleep(3)
+            if not reposted and time.monotonic() > deadline - 60:
+                _post_definition(sdwan_def.id)
+                reposted = True
+        else:
+            st.warning(
+                f"Only {_count_sdwan_artifacts()} of {expected_edge_count} "
+                f"`{sdwan_def_name}` artifacts had materialised when we gave up "
+                "polling. The proposed change will open anyway — re-trigger "
+                "artifact generation from the Infrahub UI if any are missing."
+            )
 
         pc = run_async(
             client_main.create(
