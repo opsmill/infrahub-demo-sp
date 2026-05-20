@@ -90,3 +90,15 @@ async def test_renders_backbone_link_between_arista_and_nokia() -> None:
     parsed = yaml.safe_load(rendered)
     links = parsed["topology"]["links"]
     assert any(("pe-lon-arista" in str(link) and "pe-par-nokia" in str(link)) for link in links)
+
+
+@pytest.mark.asyncio
+async def test_mgmt_subnet_does_not_overlap_sp_demo_network() -> None:
+    """mgmt.ipv4-subnet sits outside 172.20.0.0/16 (sp-demo compose network)."""
+    rendered = await ClabTopology.__new__(ClabTopology).transform(FIXTURE)
+    parsed = yaml.safe_load(rendered)
+    assert "mgmt" in parsed, "mgmt block must be set to avoid clab's default 172.20.20.0/24"
+    subnet = parsed["mgmt"]["ipv4-subnet"]
+    assert not subnet.startswith("172.20."), (
+        f"clab mgmt subnet {subnet} overlaps the sp-demo compose network 172.20.0.0/16"
+    )
