@@ -183,3 +183,13 @@ async def test_srl_uses_ethernet_1_naming_in_clab_links() -> None:
     assert any("pe-par-nokia:ethernet-1/1" in s for s in _link_strings(parsed))
     # PE-CE link from Nokia — Ethernet4 → ethernet-1/4
     assert any("pe-par-nokia:ethernet-1/4" in s for s in _link_strings(parsed))
+
+
+@pytest.mark.asyncio
+async def test_each_labbed_pe_has_startup_config_path() -> None:
+    """Every labbed PE node references a per-device startup-config file."""
+    rendered = await ClabTopology.__new__(ClabTopology).transform(FIXTURE)
+    parsed = yaml.safe_load(rendered)
+    nodes = parsed["topology"]["nodes"]
+    assert nodes["pe-lon-arista"]["startup-config"] == "devices/pe-lon-arista.cfg"
+    assert nodes["pe-par-nokia"]["startup-config"] == "devices/pe-par-nokia.cfg"
