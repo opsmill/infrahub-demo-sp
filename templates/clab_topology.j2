@@ -54,6 +54,7 @@ topology:
 {% for pe in labbed_pes %}
     {{ pe.name.value }}:
       kind: {{ pe.platform.node.containerlab_os.value }}
+      startup-config: devices/{{ pe.name.value }}.cfg
 {% endfor %}
 {# Skip sites whose generator hasn't materialized PE/CE addresses or interfaces yet. #}
 {% set materialized_sites = data.ServiceL3VpnSite.edges

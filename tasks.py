@@ -387,6 +387,7 @@ def docs(c: Context) -> None:
 
 LAB_DIR = REPO_ROOT / "lab"
 LAB_TOPO = LAB_DIR / "mpls-backbone.clab.yml"
+LAB_DEVICES_DIR = LAB_DIR / "devices"
 
 
 def _fetch_artifact(c: Context, artifact_name: str, dest: Path) -> None:
@@ -409,12 +410,19 @@ lab = Collection("lab")
 
 @task(name="deploy")
 def lab_deploy(c: Context) -> None:
-    """Fetch the clab topology artifact and run containerlab deploy."""
+    """Fetch the clab topology artifact + per-PE configs, then deploy."""
     _banner("invoke lab.deploy", border="cyan")
     LAB_DIR.mkdir(exist_ok=True)
+    LAB_DEVICES_DIR.mkdir(exist_ok=True)
     _step(f"Fetching clab-mpls-topology → {LAB_TOPO.relative_to(REPO_ROOT)}")
     _fetch_artifact(c, "clab-mpls-topology", LAB_TOPO)
     _success("Topology artifact fetched")
+    _step(f"Fetching per-PE startup configs → {LAB_DEVICES_DIR.relative_to(REPO_ROOT)}/")
+    c.run(
+        f"uv run python scripts/fetch_lab_configs.py --out-dir {shlex.quote(str(LAB_DEVICES_DIR))}",
+        pty=True,
+    )
+    _success("Per-PE configs fetched")
     _step("Running containerlab deploy")
     c.run(f"containerlab deploy --topo {LAB_TOPO}", pty=True)
     _success("Lab deployed")
