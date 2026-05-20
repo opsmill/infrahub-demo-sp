@@ -42,7 +42,9 @@ topology:
 
   kinds:
     ceos:
-      image: ceos:4.32.0F
+      # OpsMill-hosted public mirror; the upstream Arista cEOS image
+      # is gated by login. Matches the image used by infrahub-demo-dc.
+      image: registry.opsmill.io/external/ceos-image:4.29.0.2F
     srl:
       image: ghcr.io/nokia/srlinux:23.10
     linux:
