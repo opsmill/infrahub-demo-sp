@@ -6,6 +6,18 @@
 {% set _ = labbed_pes.append(pe_edge.node) %}
 {% endif %}
 {% endfor %}
+{# Translate an Infrahub interface name (e.g. "Ethernet4") to the form clab
+   needs for the link endpoint, based on the container kind.
+   - ceos: data ports are eth1, eth2, ... (clab maps eth<N> ↔ Ethernet<N>)
+   - srl:  data ports must match ethernet-L/P (we use line card 1)
+   - other kinds (linux): pass the name through. #}
+{% macro clab_iface(name, kind) -%}
+{%- set port = name | replace('Ethernet', '') -%}
+{%- if kind == 'ceos' -%}eth{{ port }}
+{%- elif kind == 'srl' -%}ethernet-1/{{ port }}
+{%- else -%}{{ name }}
+{%- endif -%}
+{% endmacro %}
 # Containerlab topology for the {{ backbone.name.value }} backbone.
 # Only PEs whose platform has containerlab_os set are included.
 # Nokia SR OS is substituted to SR Linux (`srl`) because the lab uses
@@ -71,14 +83,15 @@ topology:
 {% endif %}
 {% endfor %}
 {% if arista[0] and nokia[0] %}
-    - endpoints: ["{{ arista[0].name.value }}:eth3", "{{ nokia[0].name.value }}:eth1"]
+    - endpoints: ["{{ arista[0].name.value }}:{{ clab_iface('Ethernet3', 'ceos') }}", "{{ nokia[0].name.value }}:{{ clab_iface('Ethernet1', 'srl') }}"]
 {% endif %}
 {% for site_edge in materialized_sites %}
 {% set site = site_edge.node %}
 {% set pe_platform = site.pe_device.node.platform.node.name.value %}
+{% set pe_kind = site.pe_device.node.platform.node.containerlab_os.value %}
 {% if pe_platform in ['arista_eos', 'nokia_sros'] %}
     - endpoints:
-        - "{{ site.pe_device.node.name.value }}:{{ site.pe_interface.node.name.value }}"
+        - "{{ site.pe_device.node.name.value }}:{{ clab_iface(site.pe_interface.node.name.value, pe_kind) }}"
         - "ce-{{ site.l3vpn.node.name.value }}-{{ site.pe_device.node.name.value }}:eth1"
 {% endif %}
 {% endfor %}

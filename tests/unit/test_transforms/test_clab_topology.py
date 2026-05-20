@@ -64,6 +64,58 @@ FIXTURE = {
 }
 
 
+def _fixture_with_sites() -> dict:
+    """Fixture extended with two PE-CE sites (Arista cEOS + Nokia SR Linux)."""
+    import copy
+
+    fixture = copy.deepcopy(FIXTURE)
+    fixture["ServiceL3VpnSite"] = {
+        "edges": [
+            {
+                "node": {
+                    "name": {"value": "london"},
+                    "pe_device": {
+                        "node": {
+                            "name": {"value": "pe-lon-arista"},
+                            "platform": {
+                                "node": {
+                                    "name": {"value": "arista_eos"},
+                                    "containerlab_os": {"value": "ceos"},
+                                }
+                            },
+                        }
+                    },
+                    "pe_interface": {"node": {"name": {"value": "Ethernet4"}}},
+                    "pe_address": {"node": {"address": {"value": "10.100.0.1/30"}}},
+                    "ce_address": {"node": {"address": {"value": "10.100.0.2/30"}}},
+                    "l3vpn": {"node": {"name": {"value": "trading-floor-vpn"}}},
+                }
+            },
+            {
+                "node": {
+                    "name": {"value": "paris"},
+                    "pe_device": {
+                        "node": {
+                            "name": {"value": "pe-par-nokia"},
+                            "platform": {
+                                "node": {
+                                    "name": {"value": "nokia_sros"},
+                                    "containerlab_os": {"value": "srl"},
+                                }
+                            },
+                        }
+                    },
+                    "pe_interface": {"node": {"name": {"value": "Ethernet4"}}},
+                    "pe_address": {"node": {"address": {"value": "10.100.4.1/30"}}},
+                    "ce_address": {"node": {"address": {"value": "10.100.4.2/30"}}},
+                    "l3vpn": {"node": {"name": {"value": "trading-floor-vpn"}}},
+                }
+            },
+        ]
+    }
+    return fixture
+
+
 @pytest.mark.asyncio
 async def test_includes_labbed_pes_only() -> None:
     """Lab includes Arista cEOS + Nokia SR Linux; excludes Cisco / Juniper."""
@@ -102,3 +154,32 @@ async def test_mgmt_subnet_does_not_overlap_sp_demo_network() -> None:
     assert not subnet.startswith("172.20."), (
         f"clab mgmt subnet {subnet} overlaps the sp-demo compose network 172.20.0.0/16"
     )
+
+
+def _link_strings(parsed: dict) -> list[str]:
+    return [str(link) for link in parsed["topology"]["links"]]
+
+
+@pytest.mark.asyncio
+async def test_arista_uses_eth_naming_in_clab_links() -> None:
+    """cEOS link endpoints must use ethN (clab maps eth<N> ↔ Ethernet<N>)."""
+    rendered = await ClabTopology.__new__(ClabTopology).transform(_fixture_with_sites())
+    parsed = yaml.safe_load(rendered)
+    # Backbone link arista-nokia
+    assert any("pe-lon-arista:eth3" in s for s in _link_strings(parsed))
+    # PE-CE link from Arista — Ethernet4 → eth4
+    assert any("pe-lon-arista:eth4" in s for s in _link_strings(parsed))
+    # No raw EthernetN should appear anywhere
+    for s in _link_strings(parsed):
+        assert "Ethernet" not in s, f"raw Ethernet name leaked into clab link: {s}"
+
+
+@pytest.mark.asyncio
+async def test_srl_uses_ethernet_1_naming_in_clab_links() -> None:
+    """SR Linux link endpoints must match the ethernet-1/N pattern."""
+    rendered = await ClabTopology.__new__(ClabTopology).transform(_fixture_with_sites())
+    parsed = yaml.safe_load(rendered)
+    # Backbone link nokia side
+    assert any("pe-par-nokia:ethernet-1/1" in s for s in _link_strings(parsed))
+    # PE-CE link from Nokia — Ethernet4 → ethernet-1/4
+    assert any("pe-par-nokia:ethernet-1/4" in s for s in _link_strings(parsed))
