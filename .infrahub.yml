@@ -12,6 +12,7 @@ menus:
 
 queries:
   - {name: l3vpn, file_path: queries/service/l3vpn.gql}
+  - {name: l3vpn_intent, file_path: queries/service/l3vpn_intent.gql}
   - {name: pe, file_path: queries/config/pe.gql}
   - {name: clab_topology, file_path: queries/topology/clab.gql}
   - {name: l3vpn_overlap, file_path: queries/validation/l3vpn_overlap.gql}
@@ -19,9 +20,12 @@ queries:
   - {name: pe_interface_alloc, file_path: queries/validation/pe_interface_alloc.gql}
   - {name: backbone_session_count, file_path: queries/validation/backbone_session_count.gql}
   - {name: sdwan, file_path: queries/service/sdwan.gql}
+  - {name: sdwan_intent, file_path: queries/service/sdwan_intent.gql}
   - {name: sdwan_edge, file_path: queries/config/sdwan_edge.gql}
   - {name: sdwan_id_overlap, file_path: queries/validation/sdwan_id_overlap.gql}
   - {name: sdwan_site_subnet, file_path: queries/validation/sdwan_site_subnet.gql}
+  - {name: intent_immutability, file_path: queries/validation/intent_immutability.gql}
+  - {name: intent_pool_capacity, file_path: queries/validation/intent_pool_capacity.gql}
 python_transforms:
   - {name: pe_arista_eos, class_name: PeAristaEos, file_path: transforms/pe_arista_eos.py}
   - {name: pe_cisco_iosxr, class_name: PeCiscoIosXr, file_path: transforms/pe_cisco_iosxr.py}
@@ -82,18 +86,26 @@ artifact_definitions:
     transformation: sdwan_versa
     parameters: {device: name__value}
 generator_definitions:
+  # Both generators run on every proposed-change preview AND once more
+  # on merge — so the realised graph is reviewable in the PC diff and
+  # is re-materialised cleanly on main. (Defaults are already True for
+  # both flags; they're listed explicitly to make the intent obvious.)
   - name: generate_l3vpn
     file_path: generators/generate_l3vpn.py
-    targets: l3vpns
-    query: l3vpn
+    targets: l3vpn_intents
+    query: l3vpn_intent
     class_name: L3VpnGenerator
+    execute_in_proposed_change: true
+    execute_after_merge: true
     parameters:
       name: name__value
   - name: generate_sdwan
     file_path: generators/generate_sdwan.py
-    targets: sdwans
-    query: sdwan
+    targets: sdwan_intents
+    query: sdwan_intent
     class_name: SdwanGenerator
+    execute_in_proposed_change: true
+    execute_after_merge: true
     parameters:
       name: name__value
 check_definitions:
@@ -103,3 +115,6 @@ check_definitions:
   - {name: backbone_session_count, class_name: BackboneSessionCountCheck, file_path: checks/backbone_session_count.py, targets: pes}
   - {name: sdwan_id_overlap, class_name: SdwanIdOverlapCheck, file_path: checks/sdwan_id_overlap.py, targets: sdwans}
   - {name: sdwan_site_subnet, class_name: SdwanSiteSubnetCheck, file_path: checks/sdwan_site_subnet.py, targets: sdwans}
+  # Global intent guards — no `targets:`, run on every proposed change.
+  - {name: intent_immutability, class_name: IntentImmutabilityCheck, file_path: checks/intent_immutability.py}
+  - {name: intent_pool_capacity, class_name: IntentPoolCapacityCheck, file_path: checks/intent_pool_capacity.py}

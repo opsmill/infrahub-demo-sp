@@ -1,0 +1,47 @@
+query SdwanIntent($name: String!) {
+  ServiceSdwanIntent(name__value: $name) {
+    edges {
+      node {
+        id
+        name { value }
+        description { value }
+        band { value }
+        vendor { value }
+        topology { value }
+        status { value }
+        failure_message { value }
+        tenant { node { id name { value } } }
+        sites {
+          edges {
+            node {
+              id
+              name { value }
+              role { value }
+              location { node { id name { value } shortname { value } } }
+              lan_subnet { node { id prefix { value } } }
+            }
+          }
+        }
+        realised_service {
+          node {
+            id
+            name { value }
+            service_id { value }
+            sites {
+              edges {
+                node {
+                  id
+                  name { value }
+                  location { node { id name { value } shortname { value } } }
+                  lan_subnet { node { id prefix { value } } }
+                  lan_address { node { id address { value } } }
+                  sdwan_edge { node { id name { value } } }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

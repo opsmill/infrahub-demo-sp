@@ -13,27 +13,27 @@ spec:
     - {prefix: 10.200.40.0/24, description: Kestrel Bank — Paris branch LAN, status: active, role: public}
 
 ---
-# ServiceL3Vpn + 4 branch sites (one per PE). Joining the l3vpns group
-# fires generate_l3vpn, which materialises the VRF, RTs, PE-CE /30
-# allocations, and PE-CE eBGP sessions.
+# ServiceL3VpnIntent + 4 branch sites (one per PE). Joining the
+# l3vpn_intents generator-target group fires generate_l3vpn, which
+# allocates the vpn_id from the isp pool, materialises VRF/RTs/PE-CE
+# /30s, sets up PE-CE eBGP, and links the realised ServiceL3Vpn back.
 apiVersion: infrahub.app/v1
 kind: Object
 spec:
-  kind: ServiceL3Vpn
+  kind: ServiceL3VpnIntent
   data:
     - name: kestrel-bank-mpls
       description: Kestrel Bank branch MPLS VPN — interconnects four European branches over the Lumina backbone.
-      vpn_id: 100
+      band: isp
       address_family: ipv4
-      status: draft
       tenant:
         kind: OrganizationTenant
         data:
           name: kestrel-bank
       member_of_groups:
-        - l3vpns
+        - l3vpn_intents
       sites:
-        kind: ServiceL3VpnSite
+        kind: ServiceL3VpnIntentSite
         data:
           - name: london-branch
             pe_device: pe-lon-arista

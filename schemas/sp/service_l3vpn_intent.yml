@@ -2,12 +2,25 @@
 # yaml-language-server: $schema=https://schema.infrahub.app/infrahub/schema/latest.json
 version: "1.0"
 
+# Intent layer for L3VPN provisioning.
+#
+# A ServiceL3VpnIntent carries the user-facing request (which sites,
+# which tenant, which routing protocol). The generator turns the intent
+# into a realised ServiceL3Vpn + ServiceL3VpnSite graph, allocates a
+# vpn_id from the band-scoped pool, and drives status:
+#   draft -> in-delivery -> active   (success)
+#                        -> failed   (with failure_message)
+#
+# Once an intent is `active`, the immutability check blocks edits to
+# any tracked field on a branch — users must create a new intent
+# rather than mutate a live one.
+
 nodes:
-  - name: L3Vpn
+  - name: L3VpnIntent
     namespace: Service
-    description: A Layer-3 VPN service offered to a tenant.
-    label: L3 VPN
-    icon: mdi:vpn
+    description: A user-facing request to provision an L3VPN service.
+    label: L3VPN Intent
+    icon: mdi:vpn-outline
     include_in_menu: false
     human_friendly_id:
       - name__value
@@ -23,11 +36,20 @@ nodes:
         kind: Text
         optional: true
         order_weight: 1100
-      - name: vpn_id
-        kind: Number
-        unique: true
+      - name: band
+        kind: Dropdown
         order_weight: 1200
-        description: "Allocated from vpn_id_pool. Used to derive RD/RT."
+        description: "Selects which vpn_id pool the generator draws from."
+        choices:
+          - name: financial
+            label: Financial
+            color: "#A9CCE3"
+          - name: isp
+            label: ISP
+            color: "#CDEACC"
+          - name: internal
+            label: Internal
+            color: "#FFF2CC"
       - name: address_family
         kind: Dropdown
         default_value: "ipv4"
@@ -39,62 +61,64 @@ nodes:
             label: IPv4 + IPv6
       - name: status
         kind: Dropdown
-        default_value: "provisioning"
+        default_value: "draft"
         order_weight: 1400
-        description: "Realised-service status. User lifecycle lives on the source intent."
+        description: "Lifecycle state driven by the generator. Branch-aware."
         choices:
-          - name: provisioning
-            label: Provisioning
+          - name: draft
+            label: Draft
             color: "#FFF2CC"
+          - name: in_delivery
+            label: In Delivery
+            color: "#F5CBA7"
           - name: active
             label: Active
             color: "#A9DFBF"
-          - name: decommissioned
-            label: Decommissioned
-            color: "#D3D3D3"
+          - name: failed
+            label: Failed
+            color: "#F1948A"
+      - name: failure_message
+        kind: Text
+        optional: true
+        order_weight: 1500
+        description: "Human-readable error written by the generator on hard failure."
     relationships:
       - name: tenant
         peer: OrganizationGeneric
         cardinality: one
         optional: false
         kind: Attribute
-        order_weight: 1500
-      - name: vrf
-        peer: IpamVRF
-        cardinality: one
-        optional: true
-        kind: Attribute
         order_weight: 1600
       - name: sites
-        identifier: l3vpn__site
-        peer: ServiceL3VpnSite
+        identifier: l3vpn_intent__site
+        peer: ServiceL3VpnIntentSite
         cardinality: many
         optional: true
         kind: Component
         order_weight: 1700
-      - name: source_intent
+      - name: realised_service
         identifier: l3vpn_intent__realised
-        peer: ServiceL3VpnIntent
+        peer: ServiceL3Vpn
         cardinality: one
         optional: true
         kind: Attribute
         order_weight: 1800
-        description: "Back-pointer to the intent that produced this service."
+        description: "Set by the generator when the intent reaches `active`."
 
-  - name: L3VpnSite
+  - name: L3VpnIntentSite
     namespace: Service
-    description: A single PE attachment of an L3VPN to a customer subnet.
-    label: L3VPN Site
-    icon: mdi:office-building-marker
+    description: One PE attachment requested by an L3VPN intent.
+    label: L3VPN Intent Site
+    icon: mdi:office-building-marker-outline
     include_in_menu: false
-    menu_placement: ServiceL3Vpn
+    menu_placement: ServiceL3VpnIntent
     human_friendly_id:
       - name__value
     display_label: name__value
     order_by:
       - name__value
     uniqueness_constraints:
-      - [l3vpn, name__value]
+      - [intent, name__value]
     attributes:
       - name: name
         kind: Text
@@ -120,24 +144,10 @@ nodes:
         kind: JSON
         optional: true
         order_weight: 1500
-      - name: status
-        kind: Dropdown
-        default_value: "provisioning"
-        order_weight: 1200
-        choices:
-          - name: provisioning
-            label: Provisioning
-            color: "#FFF2CC"
-          - name: active
-            label: Active
-            color: "#A9DFBF"
-          - name: decommissioned
-            label: Decommissioned
-            color: "#D3D3D3"
     relationships:
-      - name: l3vpn
-        identifier: l3vpn__site
-        peer: ServiceL3Vpn
+      - name: intent
+        identifier: l3vpn_intent__site
+        peer: ServiceL3VpnIntent
         cardinality: one
         optional: false
         kind: Parent
@@ -148,29 +158,9 @@ nodes:
         optional: false
         kind: Attribute
         order_weight: 1100
-      - name: pe_interface
-        peer: InterfacePhysical
-        cardinality: one
-        optional: true
-        kind: Attribute
-        order_weight: 1150
       - name: customer_subnet
         peer: IpamPrefix
         cardinality: one
         optional: false
         kind: Attribute
         order_weight: 1600
-      - name: pe_address
-        identifier: l3vpnsite__pe_address
-        peer: IpamIPAddress
-        cardinality: one
-        optional: true
-        kind: Attribute
-        order_weight: 1700
-      - name: ce_address
-        identifier: l3vpnsite__ce_address
-        peer: IpamIPAddress
-        cardinality: one
-        optional: true
-        kind: Attribute
-        order_weight: 1800

@@ -12,15 +12,29 @@ spec:
       children:
         data:
           - namespace: Service
+            name: L3VpnIntent
+            label: L3VPN Intents
+            icon: mdi:vpn-outline
+            kind: ServiceL3VpnIntent
+            order_weight: 1050
+
+          - namespace: Service
             name: L3Vpn
-            label: L3 VPNs
+            label: Realised L3 VPNs
             icon: mdi:vpn
             kind: ServiceL3Vpn
             order_weight: 1100
 
           - namespace: Service
+            name: SdwanIntent
+            label: SD-WAN Intents
+            icon: mdi:lan-pending
+            kind: ServiceSdwanIntent
+            order_weight: 1150
+
+          - namespace: Service
             name: Sdwan
-            label: SD-WAN
+            label: Realised SD-WANs
             icon: mdi:lan-connect
             kind: ServiceSdwan
             order_weight: 1200

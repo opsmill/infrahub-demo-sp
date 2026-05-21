@@ -1,0 +1,38 @@
+---
+# Q2 branch A — two intents (one per branch) crowd the same PE.
+# Pairs with q2_oversubscribed_branch_b.yml. Both intents add a single
+# site to `pe-lon-arista`; if the PE only has a small number of free
+# customer-facing interfaces seeded, the second branch to merge trips
+# the `pe_interface_alloc` check.
+
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: IpamPrefix
+  data:
+    - {prefix: 10.211.10.0/24, description: Q2-A — London LAN, status: active, role: public}
+
+---
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: ServiceL3VpnIntent
+  data:
+    - name: cust-q2-a
+      description: Q2 scenario, branch A — shares pe-lon-arista with branch B.
+      band: internal
+      address_family: ipv4
+      tenant:
+        kind: OrganizationTenant
+        data:
+          name: markets-trading
+      member_of_groups:
+        - l3vpn_intents
+      sites:
+        kind: ServiceL3VpnIntentSite
+        data:
+          - name: london
+            pe_device: pe-lon-arista
+            customer_subnet: ["10.211.10.0/24", "default"]
+            routing_protocol: ebgp
+            bgp_peer_asn: 65210

@@ -1,0 +1,33 @@
+---
+# Q2 branch B — see q2_oversubscribed_branch_a.yml.
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: IpamPrefix
+  data:
+    - {prefix: 10.211.20.0/24, description: Q2-B — London LAN, status: active, role: public}
+
+---
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: ServiceL3VpnIntent
+  data:
+    - name: cust-q2-b
+      description: Q2 scenario, branch B — shares pe-lon-arista with branch A.
+      band: internal
+      address_family: ipv4
+      tenant:
+        kind: OrganizationTenant
+        data:
+          name: treasury-ops
+      member_of_groups:
+        - l3vpn_intents
+      sites:
+        kind: ServiceL3VpnIntentSite
+        data:
+          - name: london
+            pe_device: pe-lon-arista
+            customer_subnet: ["10.211.20.0/24", "default"]
+            routing_protocol: ebgp
+            bgp_peer_asn: 65211

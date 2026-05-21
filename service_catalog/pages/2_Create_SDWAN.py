@@ -1,4 +1,13 @@
-"""Create SD-WAN service wizard form."""
+"""Create SD-WAN intent wizard form.
+
+Creates a ServiceSdwanIntent on a fresh proposed-change branch. The
+generator (registered with execute_in_proposed_change=true) fires
+automatically — allocates service_id from the band-scoped pool,
+materialises one edge device per site, assigns LAN IPs, and links the
+realised ServiceSdwan back. The catalog polls until the intent flips
+to `active` (or `failed`), kicks off artifact rendering, and opens
+the proposed change.
+"""
 
 from __future__ import annotations
 
@@ -27,6 +36,12 @@ with st.form("create_sdwan"):
     name = st.text_input("Name", placeholder="acme-overlay")
     description = st.text_input("Description (optional)")
     tenant = st.selectbox("Tenant", options=tenant_names)
+    band = st.radio(
+        "Pool band",
+        options=["financial", "isp", "internal"],
+        horizontal=True,
+        help="Selects which service_id pool the generator draws from.",
+    )
     vendor = st.radio("Vendor", options=["viptela", "versa"], horizontal=True)
     topology = st.radio("Topology", options=["full-mesh", "hub-spoke"], horizontal=True)
 
@@ -57,7 +72,7 @@ with st.form("create_sdwan"):
             }
         )
 
-    submitted = st.form_submit_button("Create SD-WAN service", type="primary")
+    submitted = st.form_submit_button("Create SD-WAN intent", type="primary")
 
 if submitted:
     errors = validate_create_sdwan_form(
@@ -73,8 +88,7 @@ if submitted:
         st.stop()
 
     # Pre-flight: refuse subnets that already exist in Infrahub before opening a
-    # branch — saves the user from orphaned half-created services. Belt and
-    # braces: the try/except below catches the same collision on a real race.
+    # branch — saves the user from orphaned half-created intents.
     requested_subnets = [s["lan_subnet"] for s in sites]
     existing_prefixes = run_async(
         client_main.filters(kind="IpamPrefix", prefix__values=requested_subnets)
@@ -90,28 +104,28 @@ if submitted:
             )
         st.stop()
 
-    with st.spinner("Opening branch and creating objects..."):
+    with st.spinner("Opening branch and creating intent..."):
         branch_name = f"sdwan/{uuid.uuid4().hex[:8]}"
         branch = run_async(client_main.branch.create(branch_name, sync_with_git=False))
         client = client_for(branch=branch_name)
 
-        sdwan_id_pool = run_async(client.get(kind="CoreNumberPool", name__value="sdwan_id_pool"))
-        sdwans_group = run_async(client.get(kind="CoreStandardGroup", name__value="sdwans"))
+        intents_group = run_async(
+            client.get(kind="CoreGeneratorGroup", name__value="sdwan_intents")
+        )
 
-        svc = run_async(
+        intent = run_async(
             client.create(
-                kind="ServiceSdwan",
+                kind="ServiceSdwanIntent",
                 name=name,
                 description=description,
-                service_id=sdwan_id_pool,
+                band=band,
                 vendor=vendor,
                 topology=topology,
                 tenant={"hfid": [tenant]},
-                member_of_groups=[sdwans_group.id],
+                member_of_groups=[intents_group.id],
             )
         )
-        run_async(svc.save())
-        service_id = int(svc.service_id.value)
+        run_async(intent.save())
 
         for s in sites:
             lan = run_async(
@@ -135,9 +149,9 @@ if submitted:
                 raise
             site_obj = run_async(
                 client.create(
-                    kind="ServiceSdwanSite",
+                    kind="ServiceSdwanIntentSite",
                     name=s["name"],
-                    sdwan=svc,
+                    intent=intent,
                     role=s["role"],
                     location={"hfid": [s["location"]]},
                     lan_subnet=lan,
@@ -145,23 +159,23 @@ if submitted:
             )
             run_async(site_obj.save())
 
-        # Wait for the SD-WAN generator (auto-fired by group membership) to
-        # materialise the edge devices / LAN IPs before kicking off artifact
-        # rendering, otherwise per-edge configs render against stale data.
-        def _is_active() -> bool:
-            v = run_async(client.get(kind="ServiceSdwan", name__value=name))
-            return v.status.value == "active"
+        # Poll the intent for active/failed.
+        def _intent_status() -> tuple[str, str | None]:
+            i = run_async(client.get(kind="ServiceSdwanIntent", name__value=name))
+            return i.status.value, i.failure_message.value or None
 
         deadline = time.monotonic() + 120
-        while not _is_active() and time.monotonic() < deadline:
+        status, failure = _intent_status()
+        while status not in {"active", "failed"} and time.monotonic() < deadline:
             time.sleep(2)
+            status, failure = _intent_status()
+
+        if status == "failed":
+            st.error(f"Generator reported failure: {failure or 'no message'}")
+            st.stop()
 
         # Trigger artifact regeneration on the branch so the proposed change
-        # shows real per-edge config diffs. The /api/artifact/generate endpoint
-        # returns 200 immediately and the work happens async server-side, so
-        # poll for the expected artifacts and re-POST any that don't show up
-        # within the timeout (handles a race where the regen request beats the
-        # generator's group-membership write to the read replica).
+        # shows real per-edge config diffs.
         sdwan_edge_group = "sdwan_viptela_edges" if vendor == "viptela" else "sdwan_versa_edges"
         sdwan_def_name = "sdwan-viptela-config" if vendor == "viptela" else "sdwan-versa-config"
         artifact_definitions = run_async(client.all(kind="CoreArtifactDefinition"))
@@ -178,8 +192,7 @@ if submitted:
         for definition in artifact_definitions:
             _post_definition(definition.id)
 
-        # Confirm the SD-WAN edge artifacts (one per site) actually materialised.
-        # Re-POST once if they're still missing after the first wait window.
+        # Confirm the per-edge artifacts actually materialised.
         edge_group_obj = run_async(
             client.get(kind="CoreStandardGroup", name__value=sdwan_edge_group)
         )
@@ -214,6 +227,11 @@ if submitted:
                 "artifact generation from the Infrahub UI if any are missing."
             )
 
+        intent_final = run_async(client.get(kind="ServiceSdwanIntent", name__value=name))
+        run_async(intent_final.realised_service.fetch())
+        realised = intent_final.realised_service.peer
+        service_id = int(realised.service_id.value) if realised else None
+
         pc = run_async(
             client_main.create(
                 kind="CoreProposedChange",
@@ -225,7 +243,8 @@ if submitted:
         run_async(pc.save())
 
     ui_url = os.environ.get("INFRAHUB_UI_URL", "http://localhost:8000")
-    st.success(f"Branch `{branch_name}` opened, service_id={service_id}.")
+    sid_msg = f", service_id={service_id}" if service_id is not None else ""
+    st.success(f"Branch `{branch_name}` opened{sid_msg}.")
     st.markdown(
         f"**Next step:** review the diff and the validation pipeline in Infrahub, "
         f"then merge the proposed change.\n\n"

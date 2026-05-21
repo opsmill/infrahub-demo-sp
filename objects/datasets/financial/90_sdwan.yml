@@ -10,26 +10,28 @@ spec:
     - {prefix: 10.250.30.0/24, description: Treasury — Amsterdam branch LAN, status: active, role: public}
 
 ---
-# Default bootstrap SD-WAN service (hub-spoke, Viptela).
+# Default bootstrap SD-WAN intent (hub-spoke, Viptela). Joining the
+# sdwan_intents generator group fires generate_sdwan, which allocates a
+# service_id from the financial pool, creates per-site edges, and links
+# the realised ServiceSdwan back to this intent.
 apiVersion: infrahub.app/v1
 kind: Object
 spec:
-  kind: ServiceSdwan
+  kind: ServiceSdwanIntent
   data:
     - name: treasury-branch-sdwan
       description: Treasury Ops branch SD-WAN — hub London + spokes Frankfurt and Amsterdam.
-      service_id: 100
+      band: financial
       vendor: viptela
       topology: hub-spoke
-      status: draft
       tenant:
         kind: OrganizationTenant
         data:
           name: treasury-ops
       member_of_groups:
-        - sdwans
+        - sdwan_intents
       sites:
-        kind: ServiceSdwanSite
+        kind: ServiceSdwanIntentSite
         data:
           - name: hub-london
             role: hub

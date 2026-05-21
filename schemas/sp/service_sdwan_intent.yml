@@ -2,12 +2,15 @@
 # yaml-language-server: $schema=https://schema.infrahub.app/infrahub/schema/latest.json
 version: "1.0"
 
+# Intent layer for SD-WAN provisioning. See service_l3vpn_intent.yml
+# for the full pattern — same state machine, same band semantics.
+
 nodes:
-  - name: Sdwan
+  - name: SdwanIntent
     namespace: Service
-    description: An SD-WAN service offered to a tenant.
-    label: SD-WAN
-    icon: mdi:lan-connect
+    description: A user-facing request to provision an SD-WAN service.
+    label: SD-WAN Intent
+    icon: mdi:lan-pending
     include_in_menu: false
     human_friendly_id:
       - name__value
@@ -23,11 +26,20 @@ nodes:
         kind: Text
         optional: true
         order_weight: 1100
-      - name: service_id
-        kind: Number
-        unique: true
+      - name: band
+        kind: Dropdown
         order_weight: 1200
-        description: "Allocated from sdwan_id_pool. Used for SD-WAN site-id derivation."
+        description: "Selects which service_id pool the generator draws from."
+        choices:
+          - name: financial
+            label: Financial
+            color: "#A9CCE3"
+          - name: isp
+            label: ISP
+            color: "#CDEACC"
+          - name: internal
+            label: Internal
+            color: "#FFF2CC"
       - name: vendor
         kind: Dropdown
         default_value: "viptela"
@@ -50,56 +62,64 @@ nodes:
             label: Hub and Spoke
       - name: status
         kind: Dropdown
-        default_value: "provisioning"
+        default_value: "draft"
         order_weight: 1500
-        description: "Realised-service status. User lifecycle lives on the source intent."
+        description: "Lifecycle state driven by the generator. Branch-aware."
         choices:
-          - name: provisioning
-            label: Provisioning
+          - name: draft
+            label: Draft
             color: "#FFF2CC"
+          - name: in_delivery
+            label: In Delivery
+            color: "#F5CBA7"
           - name: active
             label: Active
             color: "#A9DFBF"
-          - name: decommissioned
-            label: Decommissioned
-            color: "#D3D3D3"
+          - name: failed
+            label: Failed
+            color: "#F1948A"
+      - name: failure_message
+        kind: Text
+        optional: true
+        order_weight: 1600
+        description: "Human-readable error written by the generator on hard failure."
     relationships:
       - name: tenant
         peer: OrganizationGeneric
         cardinality: one
         optional: false
         kind: Attribute
-        order_weight: 1600
+        order_weight: 1700
       - name: sites
-        identifier: sdwan__site
-        peer: ServiceSdwanSite
+        identifier: sdwan_intent__site
+        peer: ServiceSdwanIntentSite
         cardinality: many
         optional: true
         kind: Component
-        order_weight: 1700
-      - name: source_intent
+        order_weight: 1800
+      - name: realised_service
         identifier: sdwan_intent__realised
-        peer: ServiceSdwanIntent
+        peer: ServiceSdwan
         cardinality: one
         optional: true
         kind: Attribute
-        order_weight: 1800
-        description: "Back-pointer to the intent that produced this service."
+        order_weight: 1900
+        description: "Set by the generator when the intent reaches `active`."
 
-  - name: SdwanSite
+  - name: SdwanIntentSite
     namespace: Service
-    description: A single SD-WAN site (one customer location with one edge device).
-    label: SD-WAN Site
-    icon: mdi:office-building-marker
+    description: One site requested by an SD-WAN intent.
+    label: SD-WAN Intent Site
+    icon: mdi:office-building-marker-outline
     include_in_menu: false
-    menu_placement: ServiceSdwan
+    menu_placement: ServiceSdwanIntent
     human_friendly_id:
       - name__value
     display_label: name__value
     order_by:
       - name__value
     uniqueness_constraints:
-      - [sdwan, name__value]
+      - [intent, name__value]
     attributes:
       - name: name
         kind: Text
@@ -118,24 +138,10 @@ nodes:
           - name: branch
             label: Branch
             color: "#D2B4DE"
-      - name: status
-        kind: Dropdown
-        default_value: "provisioning"
-        order_weight: 1200
-        choices:
-          - name: provisioning
-            label: Provisioning
-            color: "#FFF2CC"
-          - name: active
-            label: Active
-            color: "#A9DFBF"
-          - name: decommissioned
-            label: Decommissioned
-            color: "#D3D3D3"
     relationships:
-      - name: sdwan
-        identifier: sdwan__site
-        peer: ServiceSdwan
+      - name: intent
+        identifier: sdwan_intent__site
+        peer: ServiceSdwanIntent
         cardinality: one
         optional: false
         kind: Parent
@@ -152,15 +158,3 @@ nodes:
         optional: false
         kind: Attribute
         order_weight: 1400
-      - name: lan_address
-        peer: IpamIPAddress
-        cardinality: one
-        optional: true
-        kind: Attribute
-        order_weight: 1500
-      - name: sdwan_edge
-        peer: DcimDevice
-        cardinality: one
-        optional: true
-        kind: Attribute
-        order_weight: 1600

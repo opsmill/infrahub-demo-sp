@@ -1,4 +1,13 @@
-"""Create L3VPN wizard form."""
+"""Create L3VPN intent wizard form.
+
+Creates a ServiceL3VpnIntent on a fresh proposed-change branch. The
+generator (registered with execute_in_proposed_change=true) fires
+automatically against the new intent — allocating vpn_id from the
+band-scoped pool, materialising VRF/RTs/PE-CE interfaces/IPs, and
+linking the realised ServiceL3Vpn back. The catalog polls until the
+intent flips to `active` (or `failed`) and then opens the proposed
+change for review.
+"""
 
 from __future__ import annotations
 
@@ -28,6 +37,12 @@ with st.form("create_l3vpn"):
     name = st.text_input("Name", placeholder="acme-prod")
     description = st.text_input("Description (optional)")
     tenant = st.selectbox("Tenant", options=tenant_names)
+    band = st.radio(
+        "Pool band",
+        options=["financial", "isp", "internal"],
+        horizontal=True,
+        help="Selects which vpn_id pool the generator draws from.",
+    )
     address_family = st.radio("Address family", options=["ipv4", "ipv4_ipv6"], horizontal=True)
 
     st.subheader("Sites")
@@ -73,7 +88,7 @@ with st.form("create_l3vpn"):
             }
         )
 
-    submitted = st.form_submit_button("Create L3VPN", type="primary")
+    submitted = st.form_submit_button("Create L3VPN intent", type="primary")
 
 if submitted:
     errors = validate_create_l3vpn_form(name=name, tenant=tenant, sites=sites)
@@ -82,30 +97,28 @@ if submitted:
             st.error(e)
         st.stop()
 
-    with st.spinner("Opening branch and creating objects..."):
+    with st.spinner("Opening branch and creating intent..."):
         branch_name = f"service/l3vpn-{uuid.uuid4().hex[:8]}"
         branch = run_async(client_main.branch.create(branch_name, sync_with_git=False))
         client = client_for(branch=branch_name)
 
-        vpn_id_pool = run_async(client.get(kind="CoreNumberPool", name__value="vpn_id_pool"))
-        # `l3vpns` is the target group the `generate_l3vpn` generator runs
-        # against; without membership the catalog-created VPN is invisible
-        # to the generator and downstream artifact/check pipeline.
-        l3vpns_group = run_async(client.get(kind="CoreStandardGroup", name__value="l3vpns"))
+        # The generator picks up new intents via this group's membership.
+        intents_group = run_async(
+            client.get(kind="CoreGeneratorGroup", name__value="l3vpn_intents")
+        )
 
-        vpn = run_async(
+        intent = run_async(
             client.create(
-                kind="ServiceL3Vpn",
+                kind="ServiceL3VpnIntent",
                 name=name,
                 description=description,
-                vpn_id=vpn_id_pool,
+                band=band,
                 address_family=address_family,
                 tenant={"hfid": [tenant]},
-                member_of_groups=[l3vpns_group.id],
+                member_of_groups=[intents_group.id],
             )
         )
-        run_async(vpn.save())
-        vpn_id = int(vpn.vpn_id.value)
+        run_async(intent.save())
 
         for s in sites:
             cust = run_async(
@@ -119,9 +132,9 @@ if submitted:
             run_async(cust.save())
             site_obj = run_async(
                 client.create(
-                    kind="ServiceL3VpnSite",
+                    kind="ServiceL3VpnIntentSite",
                     name=s["name"],
-                    l3vpn=vpn,
+                    intent=intent,
                     pe_device={"hfid": [s["pe"]]},
                     customer_subnet=cust,
                     routing_protocol=s["routing_protocol"],
@@ -131,22 +144,26 @@ if submitted:
             )
             run_async(site_obj.save())
 
-        # Wait for the L3VPN generator (auto-fired by group membership) to
-        # materialize the VRF / interfaces / IPs before triggering artifact
-        # rendering, otherwise downstream artifacts render against stale data
-        # and the proposed change shows no diff against main.
-        def _is_active() -> bool:
-            v = run_async(client.get(kind="ServiceL3Vpn", name__value=name))
-            return v.status.value == "active"
+        # Wait for the generator to finish materialising the realised
+        # service. The intent flips to `active` (success) or `failed`
+        # (with failure_message set). Don't kick off artifact rendering
+        # if the intent failed — surface the error instead.
+        def _intent_status() -> tuple[str, str | None]:
+            i = run_async(client.get(kind="ServiceL3VpnIntent", name__value=name))
+            return i.status.value, i.failure_message.value or None
 
         deadline = time.monotonic() + 120
-        while not _is_active() and time.monotonic() < deadline:
+        status, failure = _intent_status()
+        while status not in {"active", "failed"} and time.monotonic() < deadline:
             time.sleep(2)
+            status, failure = _intent_status()
 
-        # Trigger artifact regeneration on the branch so the proposed change
-        # shows real per-PE config diffs. Infrahub doesn't automatically
-        # re-render artifacts whose template's query data changed; we have
-        # to nudge each definition.
+        if status == "failed":
+            st.error(f"Generator reported failure: {failure or 'no message'}")
+            st.stop()
+
+        # Trigger artifact regeneration so the proposed change shows
+        # real per-PE config diffs.
         for definition in run_async(client.all(kind="CoreArtifactDefinition")):
             url = f"{client.address}/api/artifact/generate/{definition.id}?branch={branch_name}"
             request = urllib.request.Request(
@@ -155,6 +172,12 @@ if submitted:
                 headers={"X-INFRAHUB-KEY": os.environ["INFRAHUB_API_TOKEN"]},
             )
             urllib.request.urlopen(request).read()
+
+        # Pull the realised service so we can show the user the vpn_id.
+        intent_final = run_async(client.get(kind="ServiceL3VpnIntent", name__value=name))
+        run_async(intent_final.realised_service.fetch())
+        realised = intent_final.realised_service.peer
+        vpn_id = int(realised.vpn_id.value) if realised else None
 
         pc = run_async(
             client_main.create(
@@ -167,7 +190,8 @@ if submitted:
         run_async(pc.save())
 
     ui_url = os.environ.get("INFRAHUB_UI_URL", "http://localhost:8000")
-    st.success(f"Branch `{branch_name}` opened, vpn_id={vpn_id}.")
+    vpn_msg = f", vpn_id={vpn_id}" if vpn_id is not None else ""
+    st.success(f"Branch `{branch_name}` opened{vpn_msg}.")
     st.markdown(
         f"**Next step:** review the diff and the validation pipeline in Infrahub, "
         f"then merge the proposed change.\n\n"

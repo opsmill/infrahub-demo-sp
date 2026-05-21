@@ -10,26 +10,28 @@ spec:
     - {prefix: 10.250.30.0/24, description: Flo Streaming — Paris PoP LAN, status: active, role: public}
 
 ---
-# Default bootstrap SD-WAN service (full-mesh, Viptela).
+# Default bootstrap SD-WAN intent (full-mesh, Viptela). Joining the
+# sdwan_intents generator group fires generate_sdwan, which allocates a
+# service_id from the isp pool, creates per-site edges, and links the
+# realised ServiceSdwan back to this intent.
 apiVersion: infrahub.app/v1
 kind: Object
 spec:
-  kind: ServiceSdwan
+  kind: ServiceSdwanIntent
   data:
     - name: flo-streaming-overlay
       description: Flo Streaming any-to-any overlay across three European PoPs.
-      service_id: 100
+      band: isp
       vendor: viptela
       topology: full-mesh
-      status: draft
       tenant:
         kind: OrganizationTenant
         data:
           name: flo-streaming
       member_of_groups:
-        - sdwans
+        - sdwan_intents
       sites:
-        kind: ServiceSdwanSite
+        kind: ServiceSdwanIntentSite
         data:
           - name: pop-london
             role: spoke

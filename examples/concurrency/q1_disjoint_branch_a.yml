@@ -1,0 +1,44 @@
+---
+# Q1 branch A — disjoint L3VPN intent.
+# Pairs with q1_disjoint_branch_b.yml. The two intents share nothing
+# (different tenants, different PE sites, different LAN subnets) so
+# they must merge cleanly with distinct vpn_ids drawn from the same
+# `internal` pool.
+
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: IpamPrefix
+  data:
+    - {prefix: 10.210.10.0/24, description: Q1-A — London LAN, status: active, role: public}
+    - {prefix: 10.210.20.0/24, description: Q1-A — Frankfurt LAN, status: active, role: public}
+
+---
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: ServiceL3VpnIntent
+  data:
+    - name: cust-q1-a
+      description: Q1 scenario, branch A — disjoint with branch B.
+      band: internal
+      address_family: ipv4
+      tenant:
+        kind: OrganizationTenant
+        data:
+          name: markets-trading
+      member_of_groups:
+        - l3vpn_intents
+      sites:
+        kind: ServiceL3VpnIntentSite
+        data:
+          - name: london
+            pe_device: pe-lon-arista
+            customer_subnet: ["10.210.10.0/24", "default"]
+            routing_protocol: ebgp
+            bgp_peer_asn: 65200
+          - name: frankfurt
+            pe_device: pe-fra-cisco
+            customer_subnet: ["10.210.20.0/24", "default"]
+            routing_protocol: ebgp
+            bgp_peer_asn: 65200

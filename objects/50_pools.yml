@@ -24,24 +24,44 @@ kind: Object
 spec:
   kind: CoreNumberPool
   data:
-    - name: vpn_id_pool
+    # vpn_id pools are scoped by intent band. The band on each
+    # ServiceL3VpnIntent selects which pool the generator draws from;
+    # pre-merge the pool-capacity check verifies the chosen band has
+    # room. IDs 100–999 are reserved for bootstrap-seeded VPNs (one
+    # per dataset overlay), so pool ranges start at 1000.
+    - name: vpn_id_pool_financial
       node: ServiceL3Vpn
       node_attribute: vpn_id
-      # vpn_id values 100–199 are reserved for bootstrap-seeded L3VPNs
-      # (loaded via `infrahubctl object load`, not via this pool). The
-      # pool tracks only its own allocations, so starting at 200 prevents
-      # the catalog from handing out an id that already exists on disk.
-      start_range: 200
-      end_range: 9999
-    - name: sdwan_id_pool
+      start_range: 1000
+      end_range: 1999
+    - name: vpn_id_pool_isp
+      node: ServiceL3Vpn
+      node_attribute: vpn_id
+      start_range: 2000
+      end_range: 2999
+    - name: vpn_id_pool_internal
+      node: ServiceL3Vpn
+      node_attribute: vpn_id
+      start_range: 3000
+      end_range: 3999
+
+    # service_id pools mirror the L3VPN layout: one per band, with
+    # seeded SD-WANs reserved below 1000.
+    - name: sdwan_id_pool_financial
       node: ServiceSdwan
       node_attribute: service_id
-      # service_id values 100–199 are reserved for bootstrap-seeded SD-WAN
-      # services (loaded via `infrahubctl object load`, not via this pool).
-      # The pool tracks only its own allocations, so starting at 200 prevents
-      # the catalog from handing out an id that already exists on disk.
-      start_range: 200
-      end_range: 9999
+      start_range: 1000
+      end_range: 1999
+    - name: sdwan_id_pool_isp
+      node: ServiceSdwan
+      node_attribute: service_id
+      start_range: 2000
+      end_range: 2999
+    - name: sdwan_id_pool_internal
+      node: ServiceSdwan
+      node_attribute: service_id
+      start_range: 3000
+      end_range: 3999
 
 ---
 apiVersion: infrahub.app/v1

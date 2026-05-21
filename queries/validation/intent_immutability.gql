@@ -1,0 +1,51 @@
+query IntentImmutability {
+  ServiceL3VpnIntent {
+    edges {
+      node {
+        id
+        name { value }
+        description { value }
+        band { value }
+        address_family { value }
+        status { value }
+        tenant { node { name { value } } }
+        sites {
+          edges {
+            node {
+              name { value }
+              routing_protocol { value }
+              bgp_peer_asn { value }
+              static_routes { value }
+              pe_device { node { name { value } } }
+              customer_subnet { node { prefix { value } } }
+            }
+          }
+        }
+      }
+    }
+  }
+  ServiceSdwanIntent {
+    edges {
+      node {
+        id
+        name { value }
+        description { value }
+        band { value }
+        vendor { value }
+        topology { value }
+        status { value }
+        tenant { node { name { value } } }
+        sites {
+          edges {
+            node {
+              name { value }
+              role { value }
+              location { node { name { value } } }
+              lan_subnet { node { prefix { value } } }
+            }
+          }
+        }
+      }
+    }
+  }
+}

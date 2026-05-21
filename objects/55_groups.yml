@@ -28,3 +28,18 @@ spec:
       description: All Cisco Viptela SD-WAN edge devices (artifact target).
     - name: sdwan_versa_edges
       description: All Versa Networks SD-WAN edge devices (artifact target).
+
+---
+# Generator-target groups for the intent-driven service catalog.
+# Every ServiceL3VpnIntent / ServiceSdwanIntent auto-enrols (via the
+# Streamlit catalog or the examples/ fixtures) so the generator fires
+# on intent create + on every change.
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: CoreGeneratorGroup
+  data:
+    - name: l3vpn_intents
+      description: All ServiceL3VpnIntent rows (drives generate_l3vpn).
+    - name: sdwan_intents
+      description: All ServiceSdwanIntent rows (drives generate_sdwan).

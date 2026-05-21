@@ -1,0 +1,52 @@
+query IntentPoolCapacity {
+  ServiceL3VpnIntent {
+    edges {
+      node {
+        id
+        name { value }
+        band { value }
+        status { value }
+        realised_service { node { id vpn_id { value } } }
+      }
+    }
+  }
+  ServiceSdwanIntent {
+    edges {
+      node {
+        id
+        name { value }
+        band { value }
+        status { value }
+        realised_service { node { id service_id { value } } }
+      }
+    }
+  }
+  ServiceL3Vpn {
+    edges {
+      node {
+        id
+        name { value }
+        vpn_id { value }
+      }
+    }
+  }
+  ServiceSdwan {
+    edges {
+      node {
+        id
+        name { value }
+        service_id { value }
+      }
+    }
+  }
+  CoreNumberPool {
+    edges {
+      node {
+        id
+        name { value }
+        start_range { value }
+        end_range { value }
+      }
+    }
+  }
+}

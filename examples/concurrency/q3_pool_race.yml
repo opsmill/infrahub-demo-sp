@@ -1,0 +1,69 @@
+---
+# Q3 — pool race. A single branch creates many intents at once, all
+# drawing from the same band's vpn_id pool. Run the generator and
+# confirm that every intent gets a distinct vpn_id; the pool-capacity
+# check confirms the band has room. Repeat against a parallel branch
+# to demonstrate that two branches do not collide either.
+
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: IpamPrefix
+  data:
+    - {prefix: 10.212.10.0/24, description: Q3 — LAN 1, status: active, role: public}
+    - {prefix: 10.212.20.0/24, description: Q3 — LAN 2, status: active, role: public}
+    - {prefix: 10.212.30.0/24, description: Q3 — LAN 3, status: active, role: public}
+    - {prefix: 10.212.40.0/24, description: Q3 — LAN 4, status: active, role: public}
+    - {prefix: 10.212.50.0/24, description: Q3 — LAN 5, status: active, role: public}
+
+---
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: ServiceL3VpnIntent
+  data:
+    - name: cust-q3-001
+      description: Q3 burst intent 1
+      band: internal
+      tenant: {kind: OrganizationTenant, data: {name: markets-trading}}
+      member_of_groups: [l3vpn_intents]
+      sites:
+        kind: ServiceL3VpnIntentSite
+        data:
+          - {name: amsterdam, pe_device: pe-ams-juniper, customer_subnet: ["10.212.10.0/24", "default"], routing_protocol: connected}
+    - name: cust-q3-002
+      description: Q3 burst intent 2
+      band: internal
+      tenant: {kind: OrganizationTenant, data: {name: markets-trading}}
+      member_of_groups: [l3vpn_intents]
+      sites:
+        kind: ServiceL3VpnIntentSite
+        data:
+          - {name: paris, pe_device: pe-par-nokia, customer_subnet: ["10.212.20.0/24", "default"], routing_protocol: connected}
+    - name: cust-q3-003
+      description: Q3 burst intent 3
+      band: internal
+      tenant: {kind: OrganizationTenant, data: {name: treasury-ops}}
+      member_of_groups: [l3vpn_intents]
+      sites:
+        kind: ServiceL3VpnIntentSite
+        data:
+          - {name: amsterdam, pe_device: pe-ams-juniper, customer_subnet: ["10.212.30.0/24", "default"], routing_protocol: connected}
+    - name: cust-q3-004
+      description: Q3 burst intent 4
+      band: internal
+      tenant: {kind: OrganizationTenant, data: {name: treasury-ops}}
+      member_of_groups: [l3vpn_intents]
+      sites:
+        kind: ServiceL3VpnIntentSite
+        data:
+          - {name: paris, pe_device: pe-par-nokia, customer_subnet: ["10.212.40.0/24", "default"], routing_protocol: connected}
+    - name: cust-q3-005
+      description: Q3 burst intent 5
+      band: internal
+      tenant: {kind: OrganizationTenant, data: {name: markets-trading}}
+      member_of_groups: [l3vpn_intents]
+      sites:
+        kind: ServiceL3VpnIntentSite
+        data:
+          - {name: amsterdam, pe_device: pe-ams-juniper, customer_subnet: ["10.212.50.0/24", "default"], routing_protocol: connected}

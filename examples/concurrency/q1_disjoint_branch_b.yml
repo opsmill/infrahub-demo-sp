@@ -1,0 +1,39 @@
+---
+# Q1 branch B — see q1_disjoint_branch_a.yml for the scenario.
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: IpamPrefix
+  data:
+    - {prefix: 10.210.30.0/24, description: Q1-B — Amsterdam LAN, status: active, role: public}
+    - {prefix: 10.210.40.0/24, description: Q1-B — Paris LAN, status: active, role: public}
+
+---
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: ServiceL3VpnIntent
+  data:
+    - name: cust-q1-b
+      description: Q1 scenario, branch B — disjoint with branch A.
+      band: internal
+      address_family: ipv4
+      tenant:
+        kind: OrganizationTenant
+        data:
+          name: treasury-ops
+      member_of_groups:
+        - l3vpn_intents
+      sites:
+        kind: ServiceL3VpnIntentSite
+        data:
+          - name: amsterdam
+            pe_device: pe-ams-juniper
+            customer_subnet: ["10.210.30.0/24", "default"]
+            routing_protocol: ebgp
+            bgp_peer_asn: 65201
+          - name: paris
+            pe_device: pe-par-nokia
+            customer_subnet: ["10.210.40.0/24", "default"]
+            routing_protocol: ebgp
+            bgp_peer_asn: 65201

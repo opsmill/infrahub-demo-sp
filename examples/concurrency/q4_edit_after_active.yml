@@ -1,0 +1,45 @@
+---
+# Q4 — edit-after-active.
+#
+# Run order:
+#   1. Load this file on a branch (e.g. `pc/q4-setup`), run the generator,
+#      and merge. The intent reaches `active` on main.
+#   2. Create a second branch (e.g. `pc/q4-edit`), edit the intent
+#      (e.g. flip the band from `internal` to `isp`, or change a site's
+#      pe_device).
+#   3. Open a proposed change — the `intent_immutability` check should
+#      fire with a `tracked field(s) changed` error and block the merge.
+#
+# To change anything in an active intent, create a new intent instead.
+
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: IpamPrefix
+  data:
+    - {prefix: 10.213.10.0/24, description: Q4 — LAN, status: active, role: public}
+
+---
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: ServiceL3VpnIntent
+  data:
+    - name: cust-q4
+      description: Q4 scenario — immutability after active.
+      band: internal
+      address_family: ipv4
+      tenant:
+        kind: OrganizationTenant
+        data:
+          name: markets-trading
+      member_of_groups:
+        - l3vpn_intents
+      sites:
+        kind: ServiceL3VpnIntentSite
+        data:
+          - name: amsterdam
+            pe_device: pe-ams-juniper
+            customer_subnet: ["10.213.10.0/24", "default"]
+            routing_protocol: ebgp
+            bgp_peer_asn: 65240
