@@ -13,6 +13,14 @@
 !
 hostname {{ device.name.value }}
 !
+! Demo-only: admin user so the lab cEOS container accepts SSH password
+! auth and `invoke lab.push-arista` can reach it. Replace before any
+! non-local use.
+username admin privilege 15 role network-admin secret 0 admin
+!
+management api http-commands
+   no shutdown
+!
 {% for iface in device.interfaces.edges if iface.node.name.value == 'Loopback0' %}
 interface Loopback0
    description Router-ID / iBGP source

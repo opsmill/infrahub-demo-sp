@@ -153,3 +153,12 @@ async def test_renders_l3vpn_vrf_block_when_site_present() -> None:
     )
     assert "vrf instance acme-prod" in rendered
     assert "rd 65000:100" in rendered
+
+
+@pytest.mark.asyncio
+async def test_renders_admin_user_so_lab_ssh_works() -> None:
+    """Template emits an admin user so `invoke lab.push-arista` can SSH in."""
+    rendered = await PeAristaEos.__new__(PeAristaEos).transform(FIXTURE)
+    assert "username admin" in rendered
+    assert "role network-admin" in rendered
+    assert "secret 0 admin" in rendered
