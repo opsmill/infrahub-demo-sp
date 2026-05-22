@@ -424,7 +424,7 @@ def lab_deploy(c: Context) -> None:
     )
     _success("Per-PE configs fetched")
     _step("Running containerlab deploy")
-    c.run(f"containerlab deploy --topo {LAB_TOPO}", pty=True)
+    c.run(f"containerlab deploy --reconfigure --topo {LAB_TOPO}", pty=True)
     _success("Lab deployed")
 
 
