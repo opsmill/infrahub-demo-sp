@@ -8,6 +8,7 @@ import shlex
 import time
 from pathlib import Path
 
+import yaml
 from invoke.collection import Collection
 from invoke.context import Context
 from invoke.tasks import task
@@ -458,9 +459,14 @@ def lab_push_arista(c: Context) -> None:
     _step(f"Fetching pe-arista-eos → {arista_cfg.relative_to(REPO_ROOT)}")
     _fetch_artifact(c, "pe-arista-eos", arista_cfg)
     _success("Artifact fetched")
-    _step("Pushing config to clab-pe-lon-arista")
+    # containerlab DNS-registers each node as clab-<lab-name>-<node-name>,
+    # not clab-<node-name>. The lab name lives in the rendered topology
+    # YAML, so parse it here rather than hard-code it.
+    lab_name = yaml.safe_load(LAB_TOPO.read_text())["name"]
+    host = f"clab-{lab_name}-pe-lon-arista"
+    _step(f"Pushing config to {host}")
     c.run(
-        f"uv run python scripts/push_arista.py {shlex.quote(str(arista_cfg))} pe-lon-arista",
+        f"uv run python scripts/push_arista.py {shlex.quote(str(arista_cfg))} {shlex.quote(host)}",
         pty=True,
     )
     _success("Config pushed")
