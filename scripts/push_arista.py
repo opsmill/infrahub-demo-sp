@@ -16,10 +16,13 @@ WAIT_POLL_INTERVAL_SECONDS = 3
 # cEOS accepts SSH a few seconds before it's done loading the startup-config
 # (hostname, AAA, etc.). Give it a beat before issuing commands so the first
 # `configure terminal` doesn't race the prompt that netmiko expects to see.
-POST_SSH_SETTLE_SECONDS = 10
+POST_SSH_SETTLE_SECONDS = 30
 # cEOS's first config-mode entry can be sluggish under containerlab — bump the
-# read timeout well past netmiko's default 10s.
-CONFIG_READ_TIMEOUT_SECONDS = 60
+# read timeout well past netmiko's default 10s. Note: send_config_set's
+# read_timeout kwarg does NOT propagate to the internal config_mode() call,
+# so we call config_mode() explicitly with this timeout below.
+CONFIG_READ_TIMEOUT_SECONDS = 90
+SESSION_LOG_PATH = Path("lab/push-arista.log")
 
 
 def _wait_for_ssh(host: str) -> None:
@@ -65,16 +68,24 @@ def main(config_path: str, host: str) -> int:
     _wait_for_ssh(host)
     print(f"SSH accepted; letting cEOS settle for {POST_SSH_SETTLE_SECONDS}s…")
     time.sleep(POST_SSH_SETTLE_SECONDS)
+    SESSION_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = ConnectHandler(
         device_type="arista_eos",
         host=host,
         username="admin",
         password="admin",
+        session_log=str(SESSION_LOG_PATH),
+        # Conservative pacing; cEOS under containerlab is sluggish on first
+        # interaction and netmiko's defaults are tuned for real hardware.
+        global_delay_factor=2,
     )
+    print(f"Entering config mode (read_timeout={CONFIG_READ_TIMEOUT_SECONDS}s)…")
+    conn.config_mode(read_timeout=CONFIG_READ_TIMEOUT_SECONDS)
     conn.send_config_set(text.splitlines(), read_timeout=CONFIG_READ_TIMEOUT_SECONDS)
     conn.save_config()
     conn.disconnect()
     print(f"Pushed {len(text.splitlines())} lines to {host}.")
+    print(f"Session log: {SESSION_LOG_PATH}")
     return 0
 
 
