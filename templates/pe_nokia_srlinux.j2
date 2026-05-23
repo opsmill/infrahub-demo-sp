@@ -57,8 +57,10 @@ set / network-instance default interface {{ srl_iface(iface.node.name.value) }}.
 set / network-instance default interface {{ srl_iface(iface.node.name.value) }}.0
 {% endfor %}
 
+{# SR Linux's level-capability enum is L1 / L2 / L1L2 — not the LEVELN form. #}
+{% set srl_levels = {'level-1': 'L1', 'level-2': 'L2', 'level-1-2': 'L1L2'} %}
 set / network-instance default protocols isis instance i1 admin-state enable
-set / network-instance default protocols isis instance i1 level-capability {{ isis.level.value | replace('-', '') | upper }}
+set / network-instance default protocols isis instance i1 level-capability {{ srl_levels[isis.level.value] }}
 set / network-instance default protocols isis instance i1 net [ {{ isis.net_id.value }} ]
 {% for iface in device.interfaces.edges if iface.node.name.value == 'Loopback0' %}
 set / network-instance default protocols isis instance i1 interface {{ srl_iface(iface.node.name.value) }}.0 admin-state enable

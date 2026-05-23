@@ -81,7 +81,9 @@ def pe_fixture(name: str, loopback: str, net_id: str) -> dict:
                 {
                     "node": {
                         "area_id": {"value": "49.0001"},
-                        "level": {"value": "level-2-only"},
+                        # Matches the schema's Dropdown choices (level-1, level-2, level-1-2).
+                        # The Cisco IOS-XR template hard-codes 'level-2-only' separately.
+                        "level": {"value": "level-2"},
                         "net_id": {"value": net_id},
                         "interfaces": {"edges": []},
                     }

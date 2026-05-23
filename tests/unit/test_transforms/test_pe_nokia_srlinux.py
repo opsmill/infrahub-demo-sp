@@ -48,6 +48,19 @@ async def test_renders_isis_instance_and_net_id() -> None:
 
 
 @pytest.mark.asyncio
+async def test_isis_level_capability_uses_srl_enum() -> None:
+    """SR Linux's level-capability enum is L1 / L2 / L1L2 — not LEVELN.
+
+    Previously the template did `replace('-', '') | upper`, producing
+    `LEVEL2` from `level-2`, and clab's srl postdeploy rejected it with:
+        Wrong value for 'value': Got 'LEVEL2' expected L1|L1L2|L2
+    """
+    rendered = await PeNokiaSrLinux.__new__(PeNokiaSrLinux).transform(FIXTURE)
+    assert "level-capability L2" in rendered
+    assert "LEVEL2" not in rendered
+
+
+@pytest.mark.asyncio
 async def test_renders_l3vpn_ip_vrf_when_site_present() -> None:
     """A site attached to an L3VPN materialises an ip-vrf network-instance."""
     rendered = await PeNokiaSrLinux.__new__(PeNokiaSrLinux).transform(

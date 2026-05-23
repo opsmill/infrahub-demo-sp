@@ -53,16 +53,21 @@ def _wait_for_port(host: str, port: int) -> None:
 
 
 def _strip_comments_and_blanks(text: str) -> list[str]:
-    """Drop bang/hash comments and empty lines from the config block.
+    """Drop bang/hash comments, empty lines, and CLI session markers.
 
     cEOS's eAPI ``runCmds`` rejects ``!`` comments and blank lines because
     they aren't real commands. The CLI accepts them as no-ops; eAPI is
     stricter.
+
+    Also drops standalone ``end`` / ``exit`` lines — they're terminal-session
+    markers that the template emits for human readability, but eAPI manages
+    mode transitions itself and rejects them with ``Invalid input (at token
+    0: 'end')``.
     """
     lines: list[str] = []
     for raw in text.splitlines():
-        stripped = raw.strip()
-        if not stripped or stripped.startswith("!"):
+        stripped = raw.strip().lower()
+        if not stripped or stripped.startswith("!") or stripped in {"end", "exit"}:
             continue
         lines.append(raw)
     return lines
@@ -92,7 +97,8 @@ def main(config_path: str, host: str) -> int:
         "method": "runCmds",
         "params": {
             "version": 1,
-            "cmds": ["enable", "configure", *commands, "end", "write memory"],
+            # eAPI auto-handles mode transitions; no explicit `end` needed.
+            "cmds": ["enable", "configure", *commands, "write memory"],
             "format": "json",
         },
         "id": "push_arista",
