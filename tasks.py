@@ -424,8 +424,19 @@ def lab_deploy(c: Context) -> None:
         pty=True,
     )
     _success("Per-PE configs fetched")
+    # clab 0.71.1's `deploy --reconfigure` doesn't always clear the lab-tracking
+    # metadata cleanly — we've seen it destroy the containers then error with
+    # "The 'mpls-backbone-1' lab has already been deployed" on the deploy phase.
+    # Run an explicit destroy --cleanup first (tolerant — ok if there's nothing
+    # to destroy), then deploy without --reconfigure.
+    _step("Tearing down any prior lab state")
+    c.run(
+        f"containerlab destroy --cleanup --topo {LAB_TOPO}",
+        pty=True,
+        warn=True,
+    )
     _step("Running containerlab deploy")
-    c.run(f"containerlab deploy --reconfigure --topo {LAB_TOPO}", pty=True)
+    c.run(f"containerlab deploy --topo {LAB_TOPO}", pty=True)
     _success("Lab deployed")
 
 
