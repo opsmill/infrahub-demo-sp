@@ -193,3 +193,17 @@ async def test_each_labbed_pe_has_startup_config_path() -> None:
     nodes = parsed["topology"]["nodes"]
     assert nodes["pe-lon-arista"]["startup-config"] == "devices/pe-lon-arista.cfg"
     assert nodes["pe-par-nokia"]["startup-config"] == "devices/pe-par-nokia.cfg"
+
+
+@pytest.mark.asyncio
+async def test_ce_default_route_uses_replace_not_add() -> None:
+    """CE linux exec uses 'ip route replace default' — 'add' errors when the
+    container already has a default route via the clab management bridge."""
+    rendered = await ClabTopology.__new__(ClabTopology).transform(_fixture_with_sites())
+    parsed = yaml.safe_load(rendered)
+    ce_node = next(
+        node for name, node in parsed["topology"]["nodes"].items() if name.startswith("ce-")
+    )
+    exec_cmds = ce_node["exec"]
+    assert any(cmd.startswith("ip route replace default via ") for cmd in exec_cmds), exec_cmds
+    assert not any(cmd.startswith("ip route add default ") for cmd in exec_cmds), exec_cmds

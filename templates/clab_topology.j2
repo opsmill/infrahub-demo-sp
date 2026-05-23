@@ -70,7 +70,10 @@ topology:
       kind: linux
       exec:
         - ip addr add {{ site.ce_address.node.address.value }} dev eth1
-        - ip route add default via {{ site.pe_address.node.address.value.split('/')[0] }}
+        # 'replace' instead of 'add' — the container already has a default
+        # route via the clab management bridge (eth0) at startup; 'add'
+        # errors with RTNETLINK File exists. 'replace' is idempotent.
+        - ip route replace default via {{ site.pe_address.node.address.value.split('/')[0] }}
 {% endif %}
 {% endfor %}
 
