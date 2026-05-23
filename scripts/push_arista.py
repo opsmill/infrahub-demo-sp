@@ -13,6 +13,13 @@ from netmiko import ConnectHandler
 SSH_PORT = 22
 WAIT_TIMEOUT_SECONDS = 180
 WAIT_POLL_INTERVAL_SECONDS = 3
+# cEOS accepts SSH a few seconds before it's done loading the startup-config
+# (hostname, AAA, etc.). Give it a beat before issuing commands so the first
+# `configure terminal` doesn't race the prompt that netmiko expects to see.
+POST_SSH_SETTLE_SECONDS = 10
+# cEOS's first config-mode entry can be sluggish under containerlab — bump the
+# read timeout well past netmiko's default 10s.
+CONFIG_READ_TIMEOUT_SECONDS = 60
 
 
 def _wait_for_ssh(host: str) -> None:
@@ -56,13 +63,15 @@ def main(config_path: str, host: str) -> int:
     text = Path(config_path).read_text(encoding="utf-8")
     print(f"Waiting for SSH on {host}:{SSH_PORT} (up to {WAIT_TIMEOUT_SECONDS}s)…")
     _wait_for_ssh(host)
+    print(f"SSH accepted; letting cEOS settle for {POST_SSH_SETTLE_SECONDS}s…")
+    time.sleep(POST_SSH_SETTLE_SECONDS)
     conn = ConnectHandler(
         device_type="arista_eos",
         host=host,
         username="admin",
         password="admin",
     )
-    conn.send_config_set(text.splitlines())
+    conn.send_config_set(text.splitlines(), read_timeout=CONFIG_READ_TIMEOUT_SECONDS)
     conn.save_config()
     conn.disconnect()
     print(f"Pushed {len(text.splitlines())} lines to {host}.")
