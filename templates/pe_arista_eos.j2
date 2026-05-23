@@ -72,15 +72,17 @@ mpls ldp
    no shutdown
 !
 {# Per-VRF instances #}
+{# Modern Arista EOS: 'vrf instance' is just the declaration.
+   rd and route-target configuration goes under 'router bgp / vrf <name>'
+   below, not here. EOS will reject 'route-target' inside 'vrf instance'
+   with 'Invalid input (at token 0: route-target)'. #}
 {% set seen_vpns = [] %}
 {% for site_edge in sites %}
 {% set vpn = site_edge.node.l3vpn.node %}
 {% if vpn.name.value not in seen_vpns %}
 {% set _ = seen_vpns.append(vpn.name.value) %}
 vrf instance {{ vpn.vrf.node.name.value }}
-   rd {{ vpn.vrf.node.vrf_rd.value }}
-   route-target import {{ vpn.vrf.node.import_rt.node.name.value }}
-   route-target export {{ vpn.vrf.node.export_rt.node.name.value }}
+   description L3VPN {{ vpn.name.value }} (vpn-id {{ vpn.vpn_id.value }})
 !
 {% endif %}
 {% endfor %}
@@ -110,6 +112,9 @@ router bgp {{ device.asn.node.asn.value }}
 {% set _ = seen_vpns.append(vpn.name.value) %}
 router bgp {{ device.asn.node.asn.value }}
    vrf {{ vpn.vrf.node.name.value }}
+      rd {{ vpn.vrf.node.vrf_rd.value }}
+      route-target import {{ vpn.vrf.node.import_rt.node.name.value }}
+      route-target export {{ vpn.vrf.node.export_rt.node.name.value }}
 {% for s in sites if s.node.l3vpn.node.name.value == vpn.name.value %}
 {% if s.node.routing_protocol.value == 'ebgp' %}
       neighbor {{ m.ip_only(s.node.ce_address.node.address.value) }} remote-as {{ s.node.bgp_peer_asn.value }}

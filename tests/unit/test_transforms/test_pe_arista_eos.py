@@ -180,3 +180,23 @@ async def test_renders_eapi_http_for_push_arista() -> None:
     assert "management api http-commands" in rendered
     assert "protocol http" in rendered
     assert "no protocol https" in rendered
+
+
+@pytest.mark.asyncio
+async def test_route_target_is_under_router_bgp_not_vrf_instance() -> None:
+    """Modern Arista EOS rejects route-target inside `vrf instance` —
+    it belongs under `router bgp <asn> / vrf <name>`. EOS errors with:
+        Invalid input (at token 0: 'route-target')
+    """
+    rendered = await PeAristaEos.__new__(PeAristaEos).transform(
+        pe_fixture_with_site("pe-lon-arista", "10.0.0.1/32", "49.0001.0100.0000.0001.00")
+    )
+    # The vrf instance block must NOT contain route-target lines.
+    vrf_instance_section = rendered.split("vrf instance acme-prod")[1].split("!", 1)[0]
+    assert "route-target" not in vrf_instance_section, (
+        "route-target must not appear under vrf instance — Arista rejects it.\n"
+        f"vrf instance block was:\n{vrf_instance_section}"
+    )
+    # And the bgp vrf block must contain them.
+    assert "route-target import 65000:100" in rendered
+    assert "route-target export 65000:100" in rendered
