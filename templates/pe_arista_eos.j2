@@ -21,6 +21,9 @@ username admin privilege 15 role network-admin secret 0 admin
 management api http-commands
    no shutdown
 !
+management ssh
+   no shutdown
+!
 {% for iface in device.interfaces.edges if iface.node.name.value == 'Loopback0' %}
 interface Loopback0
    description Router-ID / iBGP source

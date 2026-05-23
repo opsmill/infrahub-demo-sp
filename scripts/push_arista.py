@@ -3,10 +3,41 @@
 from __future__ import annotations
 
 import argparse
+import socket
 import sys
+import time
 from pathlib import Path
 
 from netmiko import ConnectHandler
+
+SSH_PORT = 22
+WAIT_TIMEOUT_SECONDS = 180
+WAIT_POLL_INTERVAL_SECONDS = 3
+
+
+def _wait_for_ssh(host: str) -> None:
+    """Block until ``host:22`` accepts a TCP connection.
+
+    cEOS takes 1-3 minutes after `containerlab deploy` returns before
+    its SSHD is listening; netmiko's connect raises immediately on a
+    refused connection, so poll the socket first.
+
+    Raises:
+        TimeoutError: If SSH never opens within ``WAIT_TIMEOUT_SECONDS``.
+    """
+    deadline = time.monotonic() + WAIT_TIMEOUT_SECONDS
+    last_err: Exception | None = None
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection((host, SSH_PORT), timeout=2):
+                return
+        except OSError as exc:
+            last_err = exc
+            time.sleep(WAIT_POLL_INTERVAL_SECONDS)
+    raise TimeoutError(
+        f"{host}:{SSH_PORT} never accepted TCP within {WAIT_TIMEOUT_SECONDS}s "
+        f"(last error: {last_err!r})"
+    )
 
 
 def main(config_path: str, host: str) -> int:
@@ -23,6 +54,8 @@ def main(config_path: str, host: str) -> int:
         Exit code (0 on success).
     """
     text = Path(config_path).read_text(encoding="utf-8")
+    print(f"Waiting for SSH on {host}:{SSH_PORT} (up to {WAIT_TIMEOUT_SECONDS}s)…")
+    _wait_for_ssh(host)
     conn = ConnectHandler(
         device_type="arista_eos",
         host=host,
