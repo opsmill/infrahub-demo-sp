@@ -16,7 +16,7 @@
 {%- endmacro %}
 # SR Linux configuration for {{ device.name.value }}
 # Apply via gNMIC / CLI:  ssh admin@<clab-host> < this-file
-set / system name {{ device.name.value }}
+set / system name host-name {{ device.name.value }}
 {% for iface in device.interfaces.edges if iface.node.name.value == 'Loopback0' %}
 set / interface lo0 admin-state enable
 set / interface lo0 subinterface 0 admin-state enable
