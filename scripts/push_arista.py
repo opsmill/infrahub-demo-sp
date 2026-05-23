@@ -1,4 +1,15 @@
-"""Push a config file to a running clab cEOS node over netmiko."""
+"""Push a config file to a running clab cEOS node via eAPI (JSON-RPC).
+
+We deliberately avoid netmiko / SSH here. cEOS under containerlab is
+slow on first interaction and netmiko's ``config_mode`` hard-codes a
+10s read timeout that can't be tuned from outside; eAPI's
+``runCmds`` method is a single HTTPS POST and far more reliable.
+
+The Arista template already emits ``management api http-commands /
+no shutdown`` for the demo, so HTTPS on port 443 comes up alongside
+SSH. This script waits for the port, then POSTs the config block
+inside a ``configure`` session and saves it.
+"""
 
 from __future__ import annotations
 
@@ -8,94 +19,114 @@ import sys
 import time
 from pathlib import Path
 
-from netmiko import ConnectHandler
+import requests
+import urllib3
 
-SSH_PORT = 22
+EAPI_PORT = 443
 WAIT_TIMEOUT_SECONDS = 180
 WAIT_POLL_INTERVAL_SECONDS = 3
-# cEOS accepts SSH a few seconds before it's done loading the startup-config
-# (hostname, AAA, etc.). Give it a beat before issuing commands so the first
-# `configure terminal` doesn't race the prompt that netmiko expects to see.
-POST_SSH_SETTLE_SECONDS = 30
-# cEOS's first config-mode entry can be sluggish under containerlab — bump the
-# read timeout well past netmiko's default 10s. send_config_set's read_timeout
-# kwarg does NOT propagate to its internal config_mode() call, so use
-# ConnectHandler(read_timeout_override=...) to set the new default for every
-# read_until_pattern call (including the one inside config_mode).
-CONFIG_READ_TIMEOUT_SECONDS = 90
-SESSION_LOG_PATH = Path("lab/push-arista.log")
+# cEOS accepts TCP a few seconds before eAPI is responsive. Let the
+# startup-config finish loading before we POST commands.
+POST_PORT_SETTLE_SECONDS = 15
+HTTP_TIMEOUT_SECONDS = 120
 
 
-def _wait_for_ssh(host: str) -> None:
-    """Block until ``host:22`` accepts a TCP connection.
-
-    cEOS takes 1-3 minutes after `containerlab deploy` returns before
-    its SSHD is listening; netmiko's connect raises immediately on a
-    refused connection, so poll the socket first.
+def _wait_for_port(host: str, port: int) -> None:
+    """Block until ``host:port`` accepts a TCP connection.
 
     Raises:
-        TimeoutError: If SSH never opens within ``WAIT_TIMEOUT_SECONDS``.
+        TimeoutError: If the port never opens within ``WAIT_TIMEOUT_SECONDS``.
     """
     deadline = time.monotonic() + WAIT_TIMEOUT_SECONDS
     last_err: Exception | None = None
     while time.monotonic() < deadline:
         try:
-            with socket.create_connection((host, SSH_PORT), timeout=2):
+            with socket.create_connection((host, port), timeout=2):
                 return
         except OSError as exc:
             last_err = exc
             time.sleep(WAIT_POLL_INTERVAL_SECONDS)
     raise TimeoutError(
-        f"{host}:{SSH_PORT} never accepted TCP within {WAIT_TIMEOUT_SECONDS}s "
+        f"{host}:{port} never accepted TCP within {WAIT_TIMEOUT_SECONDS}s "
         f"(last error: {last_err!r})"
     )
 
 
+def _strip_comments_and_blanks(text: str) -> list[str]:
+    """Drop bang/hash comments and empty lines from the config block.
+
+    cEOS's eAPI ``runCmds`` rejects ``!`` comments and blank lines because
+    they aren't real commands. The CLI accepts them as no-ops; eAPI is
+    stricter.
+    """
+    lines: list[str] = []
+    for raw in text.splitlines():
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("!"):
+            continue
+        lines.append(raw)
+    return lines
+
+
 def main(config_path: str, host: str) -> int:
-    """Push ``config_path`` to the cEOS device reachable at ``host``.
+    """Push ``config_path`` to the cEOS device reachable at ``host`` via eAPI.
 
     Args:
         config_path: Path to the rendered configuration file.
-        host: SSH hostname for the running clab container. containerlab
+        host: Hostname for the running clab container. containerlab
             registers each node as ``clab-<lab-name>-<node-name>`` in
-            its embedded DNS, so the lab task is responsible for
-            assembling the full hostname before invoking this script.
+            its embedded DNS.
 
     Returns:
         Exit code (0 on success).
     """
     text = Path(config_path).read_text(encoding="utf-8")
-    print(f"Waiting for SSH on {host}:{SSH_PORT} (up to {WAIT_TIMEOUT_SECONDS}s)…")
-    _wait_for_ssh(host)
-    print(f"SSH accepted; letting cEOS settle for {POST_SSH_SETTLE_SECONDS}s…")
-    time.sleep(POST_SSH_SETTLE_SECONDS)
-    SESSION_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = ConnectHandler(
-        device_type="arista_eos",
-        host=host,
-        username="admin",
-        password="admin",
-        session_log=str(SESSION_LOG_PATH),
-        # Conservative pacing; cEOS under containerlab is sluggish on first
-        # interaction and netmiko's defaults are tuned for real hardware.
-        global_delay_factor=2,
-        # New default for every internal read_until_pattern call, including
-        # the one inside config_mode() that was tripping the original
-        # 10s ReadTimeout.
-        read_timeout_override=CONFIG_READ_TIMEOUT_SECONDS,
+    commands = _strip_comments_and_blanks(text)
+    print(f"Waiting for eAPI on {host}:{EAPI_PORT} (up to {WAIT_TIMEOUT_SECONDS}s)…")
+    _wait_for_port(host, EAPI_PORT)
+    print(f"Port open; letting cEOS settle for {POST_PORT_SETTLE_SECONDS}s…")
+    time.sleep(POST_PORT_SETTLE_SECONDS)
+
+    # cEOS-lab self-signs its eAPI cert.
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    payload = {
+        "jsonrpc": "2.0",
+        "method": "runCmds",
+        "params": {
+            "version": 1,
+            "cmds": ["enable", "configure", *commands, "end", "write memory"],
+            "format": "json",
+        },
+        "id": "push_arista",
+    }
+    print(f"POST https://{host}:{EAPI_PORT}/command-api  ({len(commands)} cmds)…")
+    resp = requests.post(
+        f"https://{host}:{EAPI_PORT}/command-api",
+        auth=("admin", "admin"),
+        json=payload,
+        verify=False,
+        timeout=HTTP_TIMEOUT_SECONDS,
     )
-    print(f"Pushing config (read_timeout_override={CONFIG_READ_TIMEOUT_SECONDS}s)…")
-    conn.send_config_set(text.splitlines(), read_timeout=CONFIG_READ_TIMEOUT_SECONDS)
-    conn.save_config()
-    conn.disconnect()
-    print(f"Pushed {len(text.splitlines())} lines to {host}.")
-    print(f"Session log: {SESSION_LOG_PATH}")
+    resp.raise_for_status()
+    body = resp.json()
+    if "error" in body:
+        err = body["error"]
+        message = err.get("message", "unknown")
+        # data carries per-command results; surface the failing one.
+        bad_index = err.get("data", [{}])[-1] if err.get("data") else {}
+        print(
+            f"eAPI error: {message}\nlast result: {bad_index}",
+            file=sys.stderr,
+        )
+        return 1
+
+    print(f"Pushed {len(commands)} commands to {host} via eAPI.")
     return 0
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("config_path", help="Path to the rendered config file")
-    parser.add_argument("host", help="SSH hostname of the clab node")
+    parser.add_argument("host", help="SSH/eAPI hostname of the clab node")
     args = parser.parse_args()
     sys.exit(main(args.config_path, args.host))
