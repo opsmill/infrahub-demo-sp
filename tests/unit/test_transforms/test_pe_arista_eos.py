@@ -162,3 +162,12 @@ async def test_renders_admin_user_so_lab_ssh_works() -> None:
     assert "username admin" in rendered
     assert "role network-admin" in rendered
     assert "secret 0 admin" in rendered
+
+
+@pytest.mark.asyncio
+async def test_renders_management_ssh_no_shutdown() -> None:
+    """Template explicitly enables management SSH so cEOS's SSHD listens."""
+    rendered = await PeAristaEos.__new__(PeAristaEos).transform(FIXTURE)
+    assert "management ssh" in rendered
+    # The 'no shutdown' under management ssh — assert as a pair to lock it in.
+    assert "management ssh\n   no shutdown" in rendered
