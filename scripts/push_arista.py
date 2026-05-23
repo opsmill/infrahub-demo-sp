@@ -3,12 +3,13 @@
 We deliberately avoid netmiko / SSH here. cEOS under containerlab is
 slow on first interaction and netmiko's ``config_mode`` hard-codes a
 10s read timeout that can't be tuned from outside; eAPI's
-``runCmds`` method is a single HTTPS POST and far more reliable.
+``runCmds`` method is a single HTTP POST and far more reliable.
 
-The Arista template already emits ``management api http-commands /
-no shutdown`` for the demo, so HTTPS on port 443 comes up alongside
-SSH. This script waits for the port, then POSTs the config block
-inside a ``configure`` session and saves it.
+The Arista template emits ``management api http-commands / protocol
+http`` for the demo (HTTPS uses cEOS-lab's auto-generated self-signed
+cert which can't be negotiated against modern Python TLS). This
+script waits for port 80, then POSTs the config block inside a
+``configure`` session and saves it.
 """
 
 from __future__ import annotations
@@ -20,9 +21,8 @@ import time
 from pathlib import Path
 
 import requests
-import urllib3
 
-EAPI_PORT = 443
+EAPI_PORT = 80
 WAIT_TIMEOUT_SECONDS = 180
 WAIT_POLL_INTERVAL_SECONDS = 3
 # cEOS accepts TCP a few seconds before eAPI is responsive. Let the
@@ -87,8 +87,6 @@ def main(config_path: str, host: str) -> int:
     print(f"Port open; letting cEOS settle for {POST_PORT_SETTLE_SECONDS}s…")
     time.sleep(POST_PORT_SETTLE_SECONDS)
 
-    # cEOS-lab self-signs its eAPI cert.
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     payload = {
         "jsonrpc": "2.0",
         "method": "runCmds",
@@ -99,12 +97,11 @@ def main(config_path: str, host: str) -> int:
         },
         "id": "push_arista",
     }
-    print(f"POST https://{host}:{EAPI_PORT}/command-api  ({len(commands)} cmds)…")
+    print(f"POST http://{host}:{EAPI_PORT}/command-api  ({len(commands)} cmds)…")
     resp = requests.post(
-        f"https://{host}:{EAPI_PORT}/command-api",
+        f"http://{host}:{EAPI_PORT}/command-api",
         auth=("admin", "admin"),
         json=payload,
-        verify=False,
         timeout=HTTP_TIMEOUT_SECONDS,
     )
     resp.raise_for_status()

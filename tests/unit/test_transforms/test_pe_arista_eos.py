@@ -171,3 +171,12 @@ async def test_renders_management_ssh_no_shutdown() -> None:
     assert "management ssh" in rendered
     # The 'no shutdown' under management ssh — assert as a pair to lock it in.
     assert "management ssh\n   no shutdown" in rendered
+
+
+@pytest.mark.asyncio
+async def test_renders_eapi_http_for_push_arista() -> None:
+    """eAPI must serve HTTP for push_arista.py — HTTPS handshake fails on cEOS-lab."""
+    rendered = await PeAristaEos.__new__(PeAristaEos).transform(FIXTURE)
+    assert "management api http-commands" in rendered
+    assert "protocol http" in rendered
+    assert "no protocol https" in rendered

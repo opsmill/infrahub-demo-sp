@@ -20,6 +20,11 @@ username admin privilege 15 role network-admin secret 0 admin
 !
 management api http-commands
    no shutdown
+   ! Demo-only: enable plain HTTP so `invoke lab.push-arista` can POST
+   ! without negotiating cEOS-lab's auto-generated self-signed cert
+   ! against modern Python TLS. Disable for any non-local use.
+   protocol http
+   no protocol https
 !
 management ssh
    no shutdown
