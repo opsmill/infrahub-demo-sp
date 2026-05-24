@@ -424,17 +424,34 @@ def lab_deploy(c: Context) -> None:
         pty=True,
     )
     _success("Per-PE configs fetched")
-    # clab 0.71.1's `deploy --reconfigure` doesn't always clear the lab-tracking
-    # metadata cleanly — we've seen it destroy the containers then error with
-    # "The 'mpls-backbone-1' lab has already been deployed" on the deploy phase.
-    # Run an explicit destroy --cleanup first (tolerant — ok if there's nothing
-    # to destroy), then deploy without --reconfigure.
+    # clab 0.71.1's deploy/destroy state model is leaky: even after a
+    # successful `destroy --cleanup` there can be leftover Docker objects
+    # (the management bridge network, containers from a previous partial
+    # deploy) that make the next deploy fail with
+    #   "The 'mpls-backbone-1' lab has already been deployed."
+    # Belt-and-braces cleanup: clab destroy, then nuke any matching docker
+    # containers + the named management network.
+    lab_name = yaml.safe_load(LAB_TOPO.read_text())["name"]
     _step("Tearing down any prior lab state")
     c.run(
         f"containerlab destroy --cleanup --topo {LAB_TOPO}",
         pty=True,
         warn=True,
     )
+    # Force-remove any docker containers and the management network whose
+    # names start with `clab-<lab>-`. Run via `sh -c` so the shell expands
+    # the command substitution; `|| true` keeps the task going when nothing
+    # matches.
+    container_filter = f"name=clab-{lab_name}-"
+    c.run(
+        f"sh -c '"
+        f'orphans=$(docker ps -aq --filter "{container_filter}"); '
+        f'[ -n "$orphans" ] && docker rm -f $orphans || true'
+        f"'",
+        pty=False,
+        warn=True,
+    )
+    c.run(f"docker network rm clab-{shlex.quote(lab_name)} 2>/dev/null || true", warn=True)
     _step("Running containerlab deploy")
     c.run(f"containerlab deploy --topo {LAB_TOPO}", pty=True)
     _success("Lab deployed")
