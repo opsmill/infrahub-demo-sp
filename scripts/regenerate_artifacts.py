@@ -33,12 +33,26 @@ def _trigger_generate(client: InfrahubClientSync, definition_id: str) -> None:
         response.read()
 
 
+def _storage_ids(client: InfrahubClientSync) -> dict[str, str | None]:
+    """Snapshot ``{artifact_id: storage_id}`` across all artifacts.
+
+    storage_id flips to a new UUID when the server re-renders the
+    artifact, so it's a reliable trigger-completion signal — Ready
+    alone isn't, since artifacts stay Ready across re-render attempts.
+    """
+    return {a.id: a.storage_id.value for a in client.all(kind="CoreArtifact")}
+
+
 def main() -> int:
     """Trigger every artifact definition; wait for all artifacts to be Ready.
 
+    Reports which artifacts actually got a new storage_id (re-rendered)
+    vs which stayed the same (Infrahub is content-aware and no-ops when
+    inputs are unchanged) — that's informational, not a failure.
+
     Returns:
         Exit code (0 if every artifact is Ready before the timeout,
-        non-zero if any remain non-Ready when the timeout expires).
+        non-zero if any are stuck in a non-Ready state).
     """
     client = InfrahubClientSync()
     definitions = client.all(kind="CoreArtifactDefinition")
@@ -46,15 +60,24 @@ def main() -> int:
         print("No CoreArtifactDefinitions registered; nothing to regenerate.")
         return 0
 
+    pre_storage = _storage_ids(client)
+
     for definition in definitions:
         _trigger_generate(client, definition.id)
         print(f"queued: {definition.name.value}")
+
+    # Give the server a moment to move artifacts off Ready before polling.
+    time.sleep(POLL_INTERVAL_SECONDS)
 
     deadline = time.monotonic() + READY_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         artifacts = client.all(kind="CoreArtifact")
         if artifacts and all(a.status.value == "Ready" for a in artifacts):
-            print(f"All {len(artifacts)} artifacts Ready.")
+            rerendered = sum(1 for a in artifacts if a.storage_id.value != pre_storage.get(a.id))
+            print(
+                f"All {len(artifacts)} artifacts Ready "
+                f"({rerendered} re-rendered, {len(artifacts) - rerendered} unchanged)."
+            )
             return 0
         time.sleep(POLL_INTERVAL_SECONDS)
 

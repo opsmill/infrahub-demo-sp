@@ -415,6 +415,13 @@ def lab_deploy(c: Context) -> None:
     _banner("invoke lab.deploy", border="cyan")
     LAB_DIR.mkdir(exist_ok=True)
     LAB_DEVICES_DIR.mkdir(exist_ok=True)
+    # Re-render artifacts against the latest committed template state.
+    # Without this, a template change on main needs a manual
+    # `regenerate_artifacts.py` run before the artifact you fetch picks
+    # up the new content — easy to forget.
+    _step("Regenerating artifacts (template fixes are picked up here)")
+    c.run("uv run python scripts/regenerate_artifacts.py", pty=True)
+    _success("Artifacts re-rendered")
     _step(f"Fetching clab-mpls-topology → {LAB_TOPO.relative_to(REPO_ROOT)}")
     _fetch_artifact(c, "clab-mpls-topology", LAB_TOPO)
     _success("Topology artifact fetched")
