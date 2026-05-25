@@ -125,6 +125,48 @@ Shows container health without modifying anything.
 
 ---
 
+## Login credentials
+
+containerlab registers each node in its embedded DNS as
+`clab-<lab-name>-<node-name>`. For the bundled MPLS backbone the lab
+name is `mpls-backbone-1`, so the Arista PE is at
+`clab-mpls-backbone-1-pe-lon-arista` and the Nokia PE is at
+`clab-mpls-backbone-1-pe-par-nokia`.
+
+| Node | Image | User | Password | Notes |
+|---|---|---|---|---|
+| `pe-lon-arista` | Arista cEOS | `admin` | `admin` | Set by our startup-configuration, demo-only |
+| `pe-par-nokia` (CLI) | Nokia SR Linux | `admin` | `NokiaSrl1!` | SR Linux 22.11+ vendor default |
+| `pe-par-nokia` (shell) | Nokia SR Linux | `linuxadmin` | `NokiaSrl1!` | Shell access, same default |
+| `ce-*` (netshoot) | nicolaka/netshoot | `root` | (none) | Plain Linux containers |
+
+To reach the CLIs:
+
+```bash
+# Arista — via SSH or docker exec
+ssh admin@clab-mpls-backbone-1-pe-lon-arista
+docker exec -it clab-mpls-backbone-1-pe-lon-arista Cli
+
+# Nokia SR Linux
+ssh admin@clab-mpls-backbone-1-pe-par-nokia
+docker exec -it clab-mpls-backbone-1-pe-par-nokia sr_cli
+
+# CE Linux node
+docker exec -it clab-mpls-backbone-1-ce-trading-floor-vpn-pe-lon-arista bash
+```
+
+The cEOS password (`admin`) is set by the startup-configuration we render —
+specifically the `username admin privilege 15 role network-admin secret 0 admin`
+line in `templates/pe_arista_eos.j2`. It's **demo-only**; if you ever
+publish from this template to real Arista hardware, swap the secret
+or gate the line behind a flag.
+
+The Nokia password is the SR Linux 22.11+ default. Older SR Linux
+releases used `admin` as the password — adjust if you've pinned a
+different image tag in `templates/clab_topology.j2`.
+
+---
+
 ## Known gaps
 
 | Gap | Details |
@@ -132,7 +174,6 @@ Shows container health without modifying anything.
 | Nokia SR Linux configuration push | SR Linux uses a different CLI/API from SR OS. The Nokia configuration artifact renders SR OS syntax and cannot be applied directly to SR Linux. Configuration validation for the Nokia PE is demo-only. |
 | Cisco / Juniper PEs | IOS-XR and Junos container images require vendor licences; these PEs are absent from the v1 lab topology. |
 | CE routing | CE nodes have loopbacks but no BGP daemon configured. Confirming end-to-end L3VPN reachability requires manual CE configuration. |
-| cEOS image | The Arista cEOS image must be imported manually (`docker import`) before containerlab can start the node. |
 
 ---
 
