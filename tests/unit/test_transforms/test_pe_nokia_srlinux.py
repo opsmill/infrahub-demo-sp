@@ -48,6 +48,23 @@ async def test_renders_isis_instance_and_net_id() -> None:
 
 
 @pytest.mark.asyncio
+async def test_bgp_local_address_is_under_transport() -> None:
+    """SR Linux nests local-address under transport/, not directly under group.
+
+    Wrong: `set ... protocols bgp group ibgp-mesh local-address <ip>`
+    Right: `set ... protocols bgp group ibgp-mesh transport local-address <ip>`
+
+    Wrong form makes clab's srl postdeploy fail with:
+        Unknown token 'local-address'. Options are
+        [..., 'admin-state', 'afi-safi', 'transport', 'peer-as', ...]
+    """
+    rendered = await PeNokiaSrLinux.__new__(PeNokiaSrLinux).transform(FIXTURE)
+    assert "group ibgp-mesh transport local-address" in rendered
+    # The unscoped form must NOT appear.
+    assert "group ibgp-mesh local-address" not in rendered
+
+
+@pytest.mark.asyncio
 async def test_no_ldp_protocol_block() -> None:
     """SR Linux 23.10's protocols enum doesn't include `ldp`.
 

@@ -82,7 +82,7 @@ set / network-instance default protocols bgp router-id {{ bgp.router_id.value }}
 set / network-instance default protocols bgp group ibgp-mesh peer-as {{ device.asn.node.asn.value }}
 {% for iface in device.interfaces.edges if iface.node.name.value == 'Loopback0' %}
 {% for ip in iface.node.ip_addresses.edges %}
-set / network-instance default protocols bgp group ibgp-mesh local-address {{ m.ip_only(ip.node.address.value) }}
+set / network-instance default protocols bgp group ibgp-mesh transport local-address {{ m.ip_only(ip.node.address.value) }}
 {% endfor %}
 {% endfor %}
 set / network-instance default protocols bgp group ibgp-mesh afi-safi ipv4-unicast admin-state enable
