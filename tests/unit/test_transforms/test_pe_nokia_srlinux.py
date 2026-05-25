@@ -48,6 +48,20 @@ async def test_renders_isis_instance_and_net_id() -> None:
 
 
 @pytest.mark.asyncio
+async def test_no_ldp_protocol_block() -> None:
+    """SR Linux 23.10's protocols enum doesn't include `ldp`.
+
+    Emitting `set / network-instance default protocols ldp …` makes clab's
+    srl postdeploy fail with:
+        Unknown token 'ldp'. Options are
+        [..., 'bgp', 'bgp-evpn', 'bgp-vpn', 'isis', 'linux', 'ospf', '|']
+    SR Linux uses SR-MPLS for label distribution, not LDP.
+    """
+    rendered = await PeNokiaSrLinux.__new__(PeNokiaSrLinux).transform(FIXTURE)
+    assert "protocols ldp" not in rendered
+
+
+@pytest.mark.asyncio
 async def test_isis_level_capability_uses_srl_enum() -> None:
     """SR Linux's level-capability enum is L1 / L2 / L1L2 — not LEVELN.
 
