@@ -1,7 +1,6 @@
 {% import '_macros.j2' as m %}
 {% set device = data.DcimDevice.edges[0].node %}
 {% set isis = data.MplsIsisProcess.edges[0].node %}
-{% set ldp = data.MplsLdpProcess.edges[0].node %}
 {% set bgp = data.MplsBgpProcess.edges[0].node %}
 {% set sites = data.ServiceL3VpnSite.edges
     | selectattr('node.pe_interface.node')
@@ -71,11 +70,12 @@ set / network-instance default protocols isis instance i1 interface {{ srl_iface
 set / network-instance default protocols isis instance i1 interface {{ srl_iface(iface.node.name.value) }}.0 circuit-type point-to-point
 {% endfor %}
 
-set / network-instance default protocols ldp admin-state enable
-{% for iface in device.interfaces.edges if iface.node.role.value == 'core' %}
-set / network-instance default protocols ldp discovery interfaces interface {{ srl_iface(iface.node.name.value) }}.0
-{% endfor %}
-
+{# SR Linux 23.10's /network-instance/protocols enum is
+   {bgp, bgp-evpn, bgp-vpn, isis, ospf, linux} — it does NOT include
+   ldp. SR Linux uses SR-MPLS / segment-routing for label distribution,
+   not LDP. The production SR OS config (pe_nokia_sros.j2) renders
+   LDP correctly; the SR Linux substitute is only there to make the
+   backbone boot in clab. #}
 set / network-instance default protocols bgp admin-state enable
 set / network-instance default protocols bgp autonomous-system {{ device.asn.node.asn.value }}
 set / network-instance default protocols bgp router-id {{ bgp.router_id.value }}
