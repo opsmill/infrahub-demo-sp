@@ -12,15 +12,17 @@
 {% set net_parts = isis.net_id.value.split('.') %}
 {% set system_id = net_parts[2] ~ '.' ~ net_parts[3] ~ '.' ~ net_parts[4] %}
 # Nokia SR OS configuration for {{ device.name.value }}
+# MD-CLI / YANG-aligned syntax (no semicolons; admin-state required).
 configure {
     router "Base" {
         interface "system" {
+            admin-state enable
 {% for iface in device.interfaces.edges if iface.node.name.value == 'Loopback0' %}
 {% for ip in iface.node.ip_addresses.edges %}
             ipv4 {
                 primary {
-                    address {{ m.ip_only(ip.node.address.value) }};
-                    prefix-length 32;
+                    address {{ m.ip_only(ip.node.address.value) }}
+                    prefix-length 32
                 }
             }
 {% endfor %}
@@ -28,60 +30,71 @@ configure {
         }
 {% for iface in device.interfaces.edges if iface.node.role.value == 'core' %}
         interface "{{ iface.node.name.value }}" {
-            port {{ iface.node.name.value }};
+            admin-state enable
+            port {{ iface.node.name.value }}
 {% for ip in iface.node.ip_addresses.edges %}
             ipv4 {
                 primary {
-                    address {{ m.ip_only(ip.node.address.value) }};
-                    prefix-length 31;
+                    address {{ m.ip_only(ip.node.address.value) }}
+                    prefix-length 31
                 }
             }
 {% endfor %}
         }
 {% endfor %}
         isis 1 {
-            level-capability level-2;
-            system-id {{ system_id }};
-            area-address {{ isis.area_id.value }};
+            admin-state enable
+            level-capability level-2
+            system-id {{ system_id }}
+            area-address {{ isis.area_id.value }}
 {% for iface in device.interfaces.edges if iface.node.role.value == 'core' %}
             interface "{{ iface.node.name.value }}" {
-                interface-type point-to-point;
+                admin-state enable
+                interface-type point-to-point
             }
 {% endfor %}
             interface "system" {
-                passive;
+                admin-state enable
+                passive
             }
         }
         ldp {
+            admin-state enable
             interface-parameters {
 {% for iface in device.interfaces.edges if iface.node.role.value == 'core' %}
                 interface "{{ iface.node.name.value }}" {
+                    admin-state enable
                 }
 {% endfor %}
             }
         }
         bgp {
+            admin-state enable
             group "ibgp-mesh" {
-                type internal;
-                local-as {{ device.asn.node.asn.value }};
+                admin-state enable
+                type internal
+                local-as {{ device.asn.node.asn.value }}
 {% for iface in device.interfaces.edges if iface.node.name.value == 'Loopback0' %}
 {% for ip in iface.node.ip_addresses.edges %}
-                local-address {{ m.ip_only(ip.node.address.value) }};
+                local-address {{ m.ip_only(ip.node.address.value) }}
 {% endfor %}
 {% endfor %}
                 family {
-                    vpn-ipv4;
-                    vpn-ipv6;
+                    vpn-ipv4
+                    vpn-ipv6
                 }
 {% for session in bgp.sessions.edges if session.node.session_type.value == 'INTERNAL' %}
                 neighbor "{{ m.ip_only(session.node.remote_ip.node.address.value) }}" {
+                    admin-state enable
                 }
 {% endfor %}
             }
         }
         mpls {
+            admin-state enable
 {% for iface in device.interfaces.edges if iface.node.role.value == 'core' %}
             interface "{{ iface.node.name.value }}" {
+                admin-state enable
             }
 {% endfor %}
         }
@@ -94,29 +107,40 @@ configure {
 {% set _ = seen_vpns.append(vpn.name.value) %}
     service {
         vprn "{{ vpn.name.value }}" {
-            service-id {{ vpn.vpn_id.value }};
-            customer "1";
-            route-distinguisher {{ vpn.vrf.node.vrf_rd.value }};
+            admin-state enable
+            service-id {{ vpn.vpn_id.value }}
+            customer "1"
+            autonomous-system {{ device.asn.node.asn.value }}
+            route-distinguisher {{ vpn.vrf.node.vrf_rd.value }}
+            {#- Required for VPRN data-plane forwarding: resolve VPNv4 NH via any backbone tunnel (LDP / SR / RSVP). #}
+            auto-bind-tunnel {
+                resolution any
+            }
             vrf-target {
-                import-community "target:{{ vpn.vrf.node.import_rt.node.name.value }}";
-                export-community "target:{{ vpn.vrf.node.export_rt.node.name.value }}";
+                import-community "target:{{ vpn.vrf.node.import_rt.node.name.value }}"
+                export-community "target:{{ vpn.vrf.node.export_rt.node.name.value }}"
             }
 {% for s in sites if s.node.l3vpn.node.name.value == vpn.name.value %}
             interface "{{ s.node.pe_interface.node.name.value }}" {
+                admin-state enable
                 ipv4 {
                     primary {
-                        address {{ m.ip_only(s.node.pe_address.node.address.value) }};
-                        prefix-length 30;
+                        address {{ m.ip_only(s.node.pe_address.node.address.value) }}
+                        prefix-length 30
                     }
                 }
                 sap "{{ s.node.pe_interface.node.name.value }}:0" {
+                    admin-state enable
                 }
             }
 {% if s.node.routing_protocol.value == 'ebgp' %}
             bgp {
+                admin-state enable
                 group "ce" {
-                    peer-as {{ s.node.bgp_peer_asn.value }};
+                    admin-state enable
+                    peer-as {{ s.node.bgp_peer_asn.value }}
                     neighbor "{{ m.ip_only(s.node.ce_address.node.address.value) }}" {
+                        admin-state enable
                     }
                 }
             }

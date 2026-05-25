@@ -58,3 +58,53 @@ async def test_renders_l3vpn_vrf_block_when_site_present() -> None:
     )
     assert "vprn" in rendered
     assert "service-id 100" in rendered
+
+
+@pytest.mark.asyncio
+async def test_no_classic_cli_semicolons() -> None:
+    """SR OS MD-CLI uses braces + newlines, NOT semicolons after each leaf.
+
+    A semicolon-suffixed leaf inside a brace block is the previous template's
+    bug — the result was a hybrid that wouldn't parse under either CLI mode.
+    """
+    rendered = await PeNokiaSrOs.__new__(PeNokiaSrOs).transform(FIXTURE)
+    offenders = [
+        line
+        for line in rendered.splitlines()
+        if line.rstrip().endswith(";") and not line.strip().startswith("#")
+    ]
+    assert not offenders, f"semicolons leaked into MD-CLI output: {offenders[:3]}"
+
+
+@pytest.mark.asyncio
+async def test_router_and_isis_have_admin_state_enable() -> None:
+    """Modern SR OS MD-CLI requires admin-state explicitly on most objects."""
+    rendered = await PeNokiaSrOs.__new__(PeNokiaSrOs).transform(FIXTURE)
+    assert "isis 1 {\n            admin-state enable" in rendered
+    assert "ldp {\n            admin-state enable" in rendered
+    assert "bgp {\n            admin-state enable" in rendered
+    assert "mpls {\n            admin-state enable" in rendered
+    assert 'group "ibgp-mesh" {\n                admin-state enable' in rendered
+
+
+@pytest.mark.asyncio
+async def test_vprn_has_auto_bind_tunnel_resolution_any() -> None:
+    """Without auto-bind-tunnel the VPRN can't map VPNv4 next-hops onto
+    backbone LSPs — VPNv4 routes get exchanged but packets are dropped.
+    Matches the form in the working SR OS NETCONF example.
+    """
+    rendered = await PeNokiaSrOs.__new__(PeNokiaSrOs).transform(
+        pe_fixture_with_site("pe-nyc-nokia", "10.0.0.4/32", "49.0001.0100.0000.0004.00")
+    )
+    assert "auto-bind-tunnel {" in rendered
+    assert "resolution any" in rendered
+
+
+@pytest.mark.asyncio
+async def test_vprn_admin_state_and_local_as() -> None:
+    """vprn must declare admin-state enable + autonomous-system explicitly."""
+    rendered = await PeNokiaSrOs.__new__(PeNokiaSrOs).transform(
+        pe_fixture_with_site("pe-nyc-nokia", "10.0.0.4/32", "49.0001.0100.0000.0004.00")
+    )
+    assert 'vprn "acme-prod" {\n            admin-state enable' in rendered
+    assert "autonomous-system 65000" in rendered
