@@ -33,22 +33,31 @@ def _trigger_generate(client: InfrahubClientSync, definition_id: str) -> None:
         response.read()
 
 
-def _storage_ids(client: InfrahubClientSync) -> dict[str, str | None]:
-    """Snapshot ``{artifact_id: storage_id}`` across all artifacts.
+def _delete_existing_artifacts(client: InfrahubClientSync, definition_id: str) -> int:
+    """Delete every ``CoreArtifact`` row belonging to ``definition_id``.
 
-    storage_id flips to a new UUID when the server re-renders the
-    artifact, so it's a reliable trigger-completion signal — Ready
-    alone isn't, since artifacts stay Ready across re-render attempts.
+    Infrahub's artifact-generate endpoint dedups against existing artifacts
+    by their effective inputs — if the schema data hasn't changed, the
+    endpoint no-ops even when the *transform template* did change on disk.
+    Deleting the existing rows first forces a fresh render against the
+    current template every time.
     """
-    return {a.id: a.storage_id.value for a in client.all(kind="CoreArtifact")}
+    arts = client.filters(kind="CoreArtifact", definition__ids=[definition_id])
+    for a in arts:
+        client.execute_graphql(
+            "mutation D($id: String!) { CoreArtifactDelete(data: {id: $id}) { ok } }",
+            variables={"id": a.id},
+        )
+    return len(arts)
 
 
 def main() -> int:
-    """Trigger every artifact definition; wait for all artifacts to be Ready.
+    """Delete + re-trigger every artifact, then wait for all to be Ready.
 
-    Reports which artifacts actually got a new storage_id (re-rendered)
-    vs which stayed the same (Infrahub is content-aware and no-ops when
-    inputs are unchanged) — that's informational, not a failure.
+    Infrahub's artifact-generate endpoint dedups by effective inputs:
+    if schema data hasn't changed, it no-ops even when the *template*
+    has changed on disk. Delete-then-regenerate is the only reliable
+    way to pick up template-only changes.
 
     Returns:
         Exit code (0 if every artifact is Ready before the timeout,
@@ -60,30 +69,35 @@ def main() -> int:
         print("No CoreArtifactDefinitions registered; nothing to regenerate.")
         return 0
 
-    pre_storage = _storage_ids(client)
-
+    expected = 0
     for definition in definitions:
+        deleted = _delete_existing_artifacts(client, definition.id)
         _trigger_generate(client, definition.id)
-        print(f"queued: {definition.name.value}")
+        print(f"queued: {definition.name.value} (deleted {deleted} stale)")
+        expected += deleted
 
-    # Give the server a moment to move artifacts off Ready before polling.
+    # Give the server a moment to start creating the new artifacts.
     time.sleep(POLL_INTERVAL_SECONDS)
 
     deadline = time.monotonic() + READY_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         artifacts = client.all(kind="CoreArtifact")
-        if artifacts and all(a.status.value == "Ready" for a in artifacts):
-            rerendered = sum(1 for a in artifacts if a.storage_id.value != pre_storage.get(a.id))
-            print(
-                f"All {len(artifacts)} artifacts Ready "
-                f"({rerendered} re-rendered, {len(artifacts) - rerendered} unchanged)."
-            )
+        if (
+            len(artifacts) >= expected
+            and artifacts
+            and all(a.status.value == "Ready" for a in artifacts)
+        ):
+            print(f"All {len(artifacts)} artifacts Ready.")
             return 0
         time.sleep(POLL_INTERVAL_SECONDS)
 
     artifacts = client.all(kind="CoreArtifact")
-    stuck = [(a.name.value, a.status.value) for a in artifacts if a.status.value != "Ready"]
-    print(f"Timed out after {READY_TIMEOUT_SECONDS}s; not Ready: {stuck}", file=sys.stderr)
+    by_state = [(a.name.value, a.status.value) for a in artifacts]
+    print(
+        f"Timed out after {READY_TIMEOUT_SECONDS}s. "
+        f"Expected ≥{expected} Ready, got {len(artifacts)}: {by_state}",
+        file=sys.stderr,
+    )
     return 1
 
 
