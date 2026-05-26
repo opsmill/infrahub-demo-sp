@@ -6,7 +6,7 @@ import pytest
 
 from transforms.pe_nokia_srlinux import PeNokiaSrLinux
 
-from .fixtures import pe_fixture, pe_fixture_with_site
+from .fixtures import pe_fixture
 
 FIXTURE = pe_fixture(
     name="pe-par-nokia",
@@ -60,20 +60,29 @@ async def test_no_l3vpn_ipv4_unicast_afi_safi() -> None:
 
 
 @pytest.mark.asyncio
-async def test_bgp_local_address_is_under_transport() -> None:
-    """SR Linux nests local-address under transport/, not directly under group.
+async def test_template_is_lab_minimum_no_bgp_no_l3vpn() -> None:
+    """The srlinux template is intentionally a 'lab minimum': hostname +
+    interfaces + ISIS underlay only.
 
-    Wrong: `set ... protocols bgp group ibgp-mesh local-address <ip>`
-    Right: `set ... protocols bgp group ibgp-mesh transport local-address <ip>`
-
-    Wrong form makes clab's srl postdeploy fail with:
-        Unknown token 'local-address'. Options are
-        [..., 'admin-state', 'afi-safi', 'transport', 'peer-as', ...]
+    BGP, per-VPN ip-vrf network-instances, bgp-vpn, and PE-CE eBGP groups
+    are all skipped — every one of them tripped a different SR Linux 23.10
+    parser error during the iteration cycle. Production SR OS template
+    (pe_nokia_sros.j2) renders the real BGP/L3VPN config; this one just
+    keeps the lab node up so the backbone topology boots.
     """
     rendered = await PeNokiaSrLinux.__new__(PeNokiaSrLinux).transform(FIXTURE)
-    assert "group ibgp-mesh transport local-address" in rendered
-    # The unscoped form must NOT appear.
-    assert "group ibgp-mesh local-address" not in rendered
+    forbidden = [
+        "protocols bgp",  # no iBGP-mesh
+        "protocols bgp-vpn",  # no L3VPN signalling
+        "type ip-vrf",  # no per-VPN network-instances
+        "vxlan-interface",
+        "ldp",  # already dropped, but lock it in
+    ]
+    for needle in forbidden:
+        assert needle not in rendered, (
+            f"{needle!r} is back in the srlinux lab template — this template "
+            f"is intentionally minimum (see docstring)."
+        )
 
 
 @pytest.mark.asyncio
@@ -101,16 +110,6 @@ async def test_isis_level_capability_uses_srl_enum() -> None:
     rendered = await PeNokiaSrLinux.__new__(PeNokiaSrLinux).transform(FIXTURE)
     assert "level-capability L2" in rendered
     assert "LEVEL2" not in rendered
-
-
-@pytest.mark.asyncio
-async def test_renders_l3vpn_ip_vrf_when_site_present() -> None:
-    """A site attached to an L3VPN materialises an ip-vrf network-instance."""
-    rendered = await PeNokiaSrLinux.__new__(PeNokiaSrLinux).transform(
-        pe_fixture_with_site("pe-par-nokia", "10.0.0.4/32", "49.0001.0100.0000.0004.00")
-    )
-    assert "set / network-instance acme-prod type ip-vrf" in rendered
-    assert "route-distinguisher rd 65000:100" in rendered
 
 
 @pytest.mark.asyncio

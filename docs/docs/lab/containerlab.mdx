@@ -171,7 +171,7 @@ different image tag in `templates/clab_topology.j2`.
 
 | Gap | Details |
 |---|---|
-| Nokia SR Linux configuration push | SR Linux uses a different CLI/API from SR OS. The Nokia configuration artifact renders SR OS syntax and cannot be applied directly to SR Linux. Configuration validation for the Nokia PE is demo-only. |
+| Nokia SR Linux configuration push | SR Linux uses a different CLI/API from SR OS, and the public SR Linux 23.10 image lacks several constructs SR OS supports (LDP, `l3vpn-ipv4-unicast` afi-safi, `bgp-vpn` under `network-instance`). The dedicated `pe-nokia-srlinux` artifact intentionally renders a **lab-minimum** configuration — hostname + interfaces + ISIS underlay only. BGP and per-VPN ip-vrf signalling are skipped on the SRL lab node. The production-quality configuration lives in the `pe-nokia-sros` artifact (real SR OS syntax) and is meant for a real Nokia box. |
 | Cisco / Juniper PEs | IOS-XR and Junos container images require vendor licences; these PEs are absent from the v1 lab topology. |
 | CE routing | CE nodes have loopbacks but no BGP daemon configured. Confirming end-to-end L3VPN reachability requires manual CE configuration. |
 

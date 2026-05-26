@@ -1,7 +1,6 @@
 {% import '_macros.j2' as m %}
 {% set device = data.DcimDevice.edges[0].node %}
 {% set isis = data.MplsIsisProcess.edges[0].node %}
-{% set bgp = data.MplsBgpProcess.edges[0].node %}
 {% set sites = data.ServiceL3VpnSite.edges
     | selectattr('node.pe_interface.node')
     | selectattr('node.pe_address.node')
@@ -13,8 +12,13 @@
 {%- else -%}ethernet-1/{{ name | replace('Ethernet', '') }}
 {%- endif -%}
 {%- endmacro %}
+{% set srl_levels = {'level-1': 'L1', 'level-2': 'L2', 'level-1-2': 'L1L2'} %}
 # SR Linux configuration for {{ device.name.value }}
-# Apply via gNMIC / CLI:  ssh admin@<clab-host> < this-file
+# Lab-only minimum: hostname + interfaces + ISIS underlay. SR Linux 23.10
+# in clab is a stand-in so the backbone comes up; BGP / L3VPN / bgp-vpn
+# config lives in the production SR OS artifact (pe-nokia-sros) and is
+# intentionally NOT rendered here. See docs/docs/lab/containerlab.mdx
+# 'Known gaps' for the rationale.
 set / system name host-name {{ device.name.value }}
 {% for iface in device.interfaces.edges if iface.node.name.value == 'Loopback0' %}
 set / interface lo0 admin-state enable
@@ -36,19 +40,20 @@ set / interface {{ srl_iface(iface.node.name.value) }} subinterface 0 ipv4 addre
 {% endfor %}
 {% endfor %}
 
-{# Customer-facing interfaces (one per L3VPN site) #}
+{# Customer-facing interfaces (one per L3VPN site).
+   These get an IP but no L3VPN binding — see docstring above. #}
 {% for site_edge in sites %}
 {% set site = site_edge.node %}
 set / interface {{ srl_iface(site.pe_interface.node.name.value) }} admin-state enable
-set / interface {{ srl_iface(site.pe_interface.node.name.value) }} description "L3VPN {{ site.l3vpn.node.name.value }} - {{ site.name.value }}"
+set / interface {{ srl_iface(site.pe_interface.node.name.value) }} description "L3VPN {{ site.l3vpn.node.name.value }} - {{ site.name.value }} (no VRF in lab)"
 set / interface {{ srl_iface(site.pe_interface.node.name.value) }} subinterface 0 admin-state enable
 set / interface {{ srl_iface(site.pe_interface.node.name.value) }} subinterface 0 ipv4 admin-state enable
 set / interface {{ srl_iface(site.pe_interface.node.name.value) }} subinterface 0 ipv4 address {{ site.pe_address.node.address.value }}
 {% endfor %}
 
-{# Default network-instance: IGP + iBGP mesh #}
+{# Default network-instance: ISIS underlay only. router-id is unused
+   here (no BGP) so we omit it; ISIS uses system-id from the NET. #}
 set / network-instance default type default
-set / network-instance default router-id {{ bgp.router_id.value }}
 {% for iface in device.interfaces.edges if iface.node.name.value == 'Loopback0' %}
 set / network-instance default interface {{ srl_iface(iface.node.name.value) }}.0
 {% endfor %}
@@ -56,8 +61,6 @@ set / network-instance default interface {{ srl_iface(iface.node.name.value) }}.
 set / network-instance default interface {{ srl_iface(iface.node.name.value) }}.0
 {% endfor %}
 
-{# SR Linux's level-capability enum is L1 / L2 / L1L2 — not the LEVELN form. #}
-{% set srl_levels = {'level-1': 'L1', 'level-2': 'L2', 'level-1-2': 'L1L2'} %}
 set / network-instance default protocols isis instance i1 admin-state enable
 set / network-instance default protocols isis instance i1 level-capability {{ srl_levels[isis.level.value] }}
 set / network-instance default protocols isis instance i1 net [ {{ isis.net_id.value }} ]
@@ -68,62 +71,6 @@ set / network-instance default protocols isis instance i1 interface {{ srl_iface
 {% for iface in device.interfaces.edges if iface.node.role.value == 'core' %}
 set / network-instance default protocols isis instance i1 interface {{ srl_iface(iface.node.name.value) }}.0 admin-state enable
 set / network-instance default protocols isis instance i1 interface {{ srl_iface(iface.node.name.value) }}.0 circuit-type point-to-point
-{% endfor %}
-
-{# SR Linux 23.10's /network-instance/protocols enum is
-   {bgp, bgp-evpn, bgp-vpn, isis, ospf, linux} — it does NOT include
-   ldp. SR Linux uses SR-MPLS / segment-routing for label distribution,
-   not LDP. The production SR OS config (pe_nokia_sros.j2) renders
-   LDP correctly; the SR Linux substitute is only there to make the
-   backbone boot in clab. #}
-set / network-instance default protocols bgp admin-state enable
-set / network-instance default protocols bgp autonomous-system {{ device.asn.node.asn.value }}
-set / network-instance default protocols bgp router-id {{ bgp.router_id.value }}
-set / network-instance default protocols bgp group ibgp-mesh peer-as {{ device.asn.node.asn.value }}
-{% for iface in device.interfaces.edges if iface.node.name.value == 'Loopback0' %}
-{% for ip in iface.node.ip_addresses.edges %}
-set / network-instance default protocols bgp group ibgp-mesh transport local-address {{ m.ip_only(ip.node.address.value) }}
-{% endfor %}
-{% endfor %}
-set / network-instance default protocols bgp group ibgp-mesh afi-safi ipv4-unicast admin-state enable
-{#- SR Linux 23.10's afi-safi enum is {ipv4-unicast, ipv6-unicast, evpn} —
-    no l3vpn-ipv4-unicast yet. VPNv4 over the SRL lab substitute isn't
-    something this template can actually carry; production SR OS template
-    handles real L3VPN. Don't emit l3vpn-ipv4-unicast here. #}
-{% for session in bgp.sessions.edges if session.node.session_type.value == 'INTERNAL' %}
-{% set peer = m.ip_only(session.node.remote_ip.node.address.value) %}
-set / network-instance default protocols bgp neighbor {{ peer }} admin-state enable
-set / network-instance default protocols bgp neighbor {{ peer }} peer-group ibgp-mesh
-{% endfor %}
-
-{# Per-VPN ip-vrf network-instances + PE-CE eBGP #}
-{% set seen_vpns = [] %}
-{% for site_edge in sites %}
-{% set site = site_edge.node %}
-{% set vpn = site.l3vpn.node %}
-{% if vpn.name.value not in seen_vpns %}
-{% set _ = seen_vpns.append(vpn.name.value) %}
-
-set / network-instance {{ vpn.name.value }} type ip-vrf
-set / network-instance {{ vpn.name.value }} description "L3VPN {{ vpn.name.value }} (vpn-id {{ vpn.vpn_id.value }})"
-{% for s in sites if s.node.l3vpn.node.name.value == vpn.name.value %}
-set / network-instance {{ vpn.name.value }} interface {{ srl_iface(s.node.pe_interface.node.name.value) }}.0
-{% endfor %}
-set / network-instance {{ vpn.name.value }} vxlan-interface ""
-set / network-instance {{ vpn.name.value }} protocols bgp-vpn bgp-instance 1 route-target import-rt target:{{ vpn.vrf.node.import_rt.node.name.value }}
-set / network-instance {{ vpn.name.value }} protocols bgp-vpn bgp-instance 1 route-target export-rt target:{{ vpn.vrf.node.export_rt.node.name.value }}
-set / network-instance {{ vpn.name.value }} protocols bgp-vpn bgp-instance 1 route-distinguisher rd {{ vpn.vrf.node.vrf_rd.value }}
-set / network-instance {{ vpn.name.value }} protocols bgp admin-state enable
-set / network-instance {{ vpn.name.value }} protocols bgp autonomous-system {{ device.asn.node.asn.value }}
-set / network-instance {{ vpn.name.value }} protocols bgp router-id {{ bgp.router_id.value }}
-{% for s in sites if s.node.l3vpn.node.name.value == vpn.name.value and s.node.routing_protocol.value == 'ebgp' %}
-{% set ce = m.ip_only(s.node.ce_address.node.address.value) %}
-set / network-instance {{ vpn.name.value }} protocols bgp group ce-{{ s.node.name.value }} peer-as {{ s.node.bgp_peer_asn.value }}
-set / network-instance {{ vpn.name.value }} protocols bgp group ce-{{ s.node.name.value }} afi-safi ipv4-unicast admin-state enable
-set / network-instance {{ vpn.name.value }} protocols bgp neighbor {{ ce }} admin-state enable
-set / network-instance {{ vpn.name.value }} protocols bgp neighbor {{ ce }} peer-group ce-{{ s.node.name.value }}
-{% endfor %}
-{% endif %}
 {% endfor %}
 
 commit save
