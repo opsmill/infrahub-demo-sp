@@ -86,7 +86,10 @@ set / network-instance default protocols bgp group ibgp-mesh transport local-add
 {% endfor %}
 {% endfor %}
 set / network-instance default protocols bgp group ibgp-mesh afi-safi ipv4-unicast admin-state enable
-set / network-instance default protocols bgp group ibgp-mesh afi-safi l3vpn-ipv4-unicast admin-state enable
+{#- SR Linux 23.10's afi-safi enum is {ipv4-unicast, ipv6-unicast, evpn} —
+    no l3vpn-ipv4-unicast yet. VPNv4 over the SRL lab substitute isn't
+    something this template can actually carry; production SR OS template
+    handles real L3VPN. Don't emit l3vpn-ipv4-unicast here. #}
 {% for session in bgp.sessions.edges if session.node.session_type.value == 'INTERNAL' %}
 {% set peer = m.ip_only(session.node.remote_ip.node.address.value) %}
 set / network-instance default protocols bgp neighbor {{ peer }} admin-state enable

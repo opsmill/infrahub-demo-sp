@@ -48,6 +48,18 @@ async def test_renders_isis_instance_and_net_id() -> None:
 
 
 @pytest.mark.asyncio
+async def test_no_l3vpn_ipv4_unicast_afi_safi() -> None:
+    """SR Linux 23.10's afi-safi enum is {ipv4-unicast, ipv6-unicast, evpn}.
+
+    Emitting `afi-safi l3vpn-ipv4-unicast` makes clab's srl postdeploy fail
+    with: Invalid value 'l3vpn-ipv4-unicast': Must be
+    ipv4-unicast|ipv6-unicast|evpn
+    """
+    rendered = await PeNokiaSrLinux.__new__(PeNokiaSrLinux).transform(FIXTURE)
+    assert "l3vpn-ipv4-unicast" not in rendered
+
+
+@pytest.mark.asyncio
 async def test_bgp_local_address_is_under_transport() -> None:
     """SR Linux nests local-address under transport/, not directly under group.
 
