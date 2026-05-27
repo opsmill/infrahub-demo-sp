@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from infrahub_sdk.checks import InfrahubCheck
+from infrahub_sdk.exceptions import NodeNotFoundError
 from pybatfish.client.session import Session
 
 from checks.batfish_helpers import (
@@ -144,18 +145,16 @@ class BatfishBackboneCheck(InfrahubCheck):
             artifact = await self.client.get(
                 kind="CoreArtifact",
                 object__ids=[pe_id],
-                definition__name__value=artifact_def,
+                name__value=artifact_def,
             )
-        except Exception:  # noqa: BLE001 — SDK raises a variety of "not found" errors
+        except NodeNotFoundError:
             return None
         storage_id_attr = getattr(artifact, "storage_id", None)
         storage_id = storage_id_attr.value if storage_id_attr is not None else None
         if not storage_id:
             return None
-        body = await self.client.object_store.get(identifier=storage_id)
-        if isinstance(body, bytes):
-            return body.decode("utf-8")
-        return str(body)
+        body: str = await self.client.object_store.get(identifier=storage_id)
+        return body
 
     def _emit_findings(self, findings: list[Finding]) -> None:
         """Map findings to Infrahub log entries.
