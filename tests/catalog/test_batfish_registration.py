@@ -23,4 +23,5 @@ def test_batfish_check_registered() -> None:
     assert c["class_name"] == "BatfishBackboneCheck"
     assert c["file_path"] == "checks/batfish_backbone.py"
     assert c["targets"] == "topologies_mpls"
+    assert c["parameters"] == {"name": "name__value"}
     assert Path(c["file_path"]).exists()
