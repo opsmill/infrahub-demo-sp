@@ -83,3 +83,29 @@ def findings_from_parse_status(df: pd.DataFrame) -> list[Finding]:
             )
         )
     return findings
+
+
+def findings_from_parse_warning(df: pd.DataFrame) -> list[Finding]:
+    """Map a pybatfish ``parseWarning`` answer into ``Finding`` rows.
+
+    Args:
+        df: DataFrame with ``Filename``, ``Line``, ``Text``, ``Comment`` columns.
+
+    Returns:
+        One ``Finding`` per row, all severity ERROR.
+    """
+    findings: list[Finding] = []
+    for _, row in df.iterrows():
+        file_name = str(row["Filename"])
+        node = Path(file_name).stem
+        line = row["Line"]
+        findings.append(
+            Finding(
+                severity="error",
+                query="parseWarning",
+                node=node,
+                message=f"parse warning in {file_name} line {line}: {row['Comment']}",
+                detail=row.to_dict(),
+            )
+        )
+    return findings
