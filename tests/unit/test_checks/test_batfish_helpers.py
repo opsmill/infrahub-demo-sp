@@ -7,6 +7,7 @@ import pandas as pd
 from checks.batfish_helpers import (
     SUPPORTED_PLATFORMS,
     Finding,
+    findings_from_bgp_session_compat,
     findings_from_parse_status,
     findings_from_parse_warning,
     findings_from_undefined_references,
@@ -112,3 +113,46 @@ def test_undefined_refs_populated_yields_one_error_per_row() -> None:
     assert f.node == "pe1"
     assert "RM-EXPORT-MISSING" in f.message
     assert "route-map" in f.message
+
+
+def test_bgp_compat_all_unique_match_yields_no_findings() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "Node": "pe1",
+                "Remote_Node": "pe2",
+                "Local_AS": 65000,
+                "Remote_AS": 65000,
+                "Configured_Status": "UNIQUE_MATCH",
+            }
+        ]
+    )
+    assert findings_from_bgp_session_compat(df) == []
+
+
+def test_bgp_compat_half_open_yields_warning() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "Node": "pe1",
+                "Remote_Node": "pe2",
+                "Local_AS": 65000,
+                "Remote_AS": 65000,
+                "Configured_Status": "HALF_OPEN",
+            },
+            {
+                "Node": "pe1",
+                "Remote_Node": "pe3",
+                "Local_AS": 65000,
+                "Remote_AS": 65001,
+                "Configured_Status": "NO_MATCH_FOUND",
+            },
+        ]
+    )
+    findings = findings_from_bgp_session_compat(df)
+    assert len(findings) == 2
+    assert all(f.severity == "warning" for f in findings)
+    assert all(f.query == "bgpSessionCompatibility" for f in findings)
+    assert all(f.node == "pe1" for f in findings)
+    half_open = next(f for f in findings if "HALF_OPEN" in f.message)
+    assert "pe2" in half_open.message

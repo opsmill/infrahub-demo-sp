@@ -111,6 +111,38 @@ def findings_from_parse_warning(df: pd.DataFrame) -> list[Finding]:
     return findings
 
 
+_BGP_OK = "UNIQUE_MATCH"
+
+
+def findings_from_bgp_session_compat(df: pd.DataFrame) -> list[Finding]:
+    """Map a pybatfish ``bgpSessionCompatibility`` answer into ``Finding`` rows.
+
+    Args:
+        df: DataFrame with at least ``Node``, ``Remote_Node``, ``Configured_Status`` columns.
+
+    Returns:
+        One ``Finding`` per non-UNIQUE_MATCH row, all severity WARNING.
+    """
+    findings: list[Finding] = []
+    for _, row in df.iterrows():
+        status = str(row["Configured_Status"])
+        if status == _BGP_OK:
+            continue
+        findings.append(
+            Finding(
+                severity="warning",
+                query="bgpSessionCompatibility",
+                node=str(row["Node"]),
+                message=(
+                    f"bgp session {row['Node']} -> {row['Remote_Node']} "
+                    f"(local AS {row['Local_AS']}, remote AS {row['Remote_AS']}): {status}"
+                ),
+                detail=row.to_dict(),
+            )
+        )
+    return findings
+
+
 def findings_from_undefined_references(df: pd.DataFrame) -> list[Finding]:
     """Map a pybatfish ``undefinedReferences`` answer into ``Finding`` rows.
 
