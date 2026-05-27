@@ -22,6 +22,7 @@ queries:
   - {name: sdwan_edge, file_path: queries/config/sdwan_edge.gql}
   - {name: sdwan_id_overlap, file_path: queries/validation/sdwan_id_overlap.gql}
   - {name: sdwan_site_subnet, file_path: queries/validation/sdwan_site_subnet.gql}
+  - {name: batfish_backbone, file_path: queries/validation/batfish_backbone.gql}
 python_transforms:
   - {name: pe_arista_eos, class_name: PeAristaEos, file_path: transforms/pe_arista_eos.py}
   - {name: pe_cisco_iosxr, class_name: PeCiscoIosXr, file_path: transforms/pe_cisco_iosxr.py}
@@ -103,3 +104,9 @@ check_definitions:
   - {name: backbone_session_count, class_name: BackboneSessionCountCheck, file_path: checks/backbone_session_count.py, targets: pes}
   - {name: sdwan_id_overlap, class_name: SdwanIdOverlapCheck, file_path: checks/sdwan_id_overlap.py, targets: sdwans}
   - {name: sdwan_site_subnet, class_name: SdwanSiteSubnetCheck, file_path: checks/sdwan_site_subnet.py, targets: sdwans}
+  - name: batfish_backbone
+    class_name: BatfishBackboneCheck
+    file_path: checks/batfish_backbone.py
+    targets: topologies_mpls
+    parameters:
+      name: name__value
