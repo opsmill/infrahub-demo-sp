@@ -10,7 +10,6 @@ See ``docs/superpowers/specs/2026-05-26-batfish-mpls-ci-validation-design.md``.
 
 from __future__ import annotations
 
-import logging
 import os
 import tempfile
 import uuid
@@ -27,8 +26,6 @@ from checks.batfish_helpers import (
     run_snapshot,
     wait_for_batfish,
 )
-
-logger = logging.getLogger(__name__)
 
 _ARTIFACT_NAME_BY_PLATFORM = {
     "arista_eos": "pe-arista-eos",
@@ -50,7 +47,7 @@ class BatfishBackboneCheck(InfrahubCheck):
                 one backbone per invocation by the ``topologies_mpls`` target.
         """
         if os.environ.get("BATFISH_DISABLED") == "1":
-            logger.info("Batfish disabled by environment")
+            self.log_info(message="Batfish disabled by environment")
             return
 
         for edge in data.get("TopologyMplsBackbone", {}).get("edges", []):
@@ -66,10 +63,10 @@ class BatfishBackboneCheck(InfrahubCheck):
         supported_pes, skipped = self._partition_pes(backbone)
 
         for pe_name, platform_name in skipped:
-            logger.info("skipping %s: batfish does not support platform %s", pe_name, platform_name)
+            self.log_info(message=f"[skipped] {pe_name}: batfish does not support {platform_name}")
 
         if not supported_pes:
-            logger.info("no supported PEs to validate in backbone %s", backbone_name)
+            self.log_info(message=f"no supported PEs to validate in backbone {backbone_name}")
             return
 
         with tempfile.TemporaryDirectory(prefix=f"batfish-{backbone_name}-") as tmp:
@@ -81,13 +78,13 @@ class BatfishBackboneCheck(InfrahubCheck):
             for pe_id, pe_name, platform_name in supported_pes:
                 body = await self._fetch_artifact(pe_id=pe_id, platform_name=platform_name)
                 if body is None:
-                    logger.info("no artifact yet for %s — skipping in snapshot", pe_name)
+                    self.log_info(message=f"[skipped] no artifact yet for {pe_name}")
                     continue
                 (configs_dir / f"{pe_name}.cfg").write_text(body)
                 hosts_in_snapshot.add(pe_name)
 
             if not hosts_in_snapshot:
-                logger.info("no PE artifacts available for backbone %s", backbone_name)
+                self.log_info(message=f"no PE artifacts available for backbone {backbone_name}")
                 return
 
             host = os.environ.get("BATFISH_HOST", "batfish")
@@ -159,14 +156,14 @@ class BatfishBackboneCheck(InfrahubCheck):
     def _emit_findings(self, findings: list[Finding]) -> None:
         """Map findings to Infrahub log entries.
 
-        ERROR findings call ``log_error`` (which fails the check). WARNING and
-        INFO findings go to the stdlib logger so they appear in check
-        execution logs but do not fail the check.
+        ERROR findings call ``log_error`` (which fails the check). WARNING and INFO
+        findings call ``log_info`` so they appear in the proposed-change UI but
+        don't fail the check. Warnings carry a [WARN] prefix.
         """
         for f in findings:
             if f.severity == "error":
                 self.log_error(message=f"[{f.query}] {f.message}")
             elif f.severity == "warning":
-                logger.warning("[%s] %s", f.query, f.message)
+                self.log_info(message=f"[WARN][{f.query}] {f.message}")
             else:
-                logger.info("[%s] %s", f.query, f.message)
+                self.log_info(message=f"[{f.query}] {f.message}")
