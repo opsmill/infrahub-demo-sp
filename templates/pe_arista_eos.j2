@@ -29,6 +29,9 @@ management api http-commands
 management ssh
    no shutdown
 !
+! Global MPLS enable — required before per-interface `mpls ip`/LDP works.
+mpls ip
+!
 {% for iface in device.interfaces.edges if iface.node.name.value == 'Loopback0' %}
 interface Loopback0
    description Router-ID / iBGP source
@@ -69,6 +72,11 @@ router isis 1
 !
 mpls ldp
    router-id {{ ldp.router_id.value }}
+   transport-address interface Loopback0
+   interface Loopback0
+   {% for iface in device.interfaces.edges if iface.node.role.value == 'core' %}
+   interface {{ iface.node.name.value }}
+   {% endfor %}
    no shutdown
 !
 {# Per-VRF instances #}
@@ -90,6 +98,9 @@ vrf instance {{ vpn.vrf.node.name.value }}
 router bgp {{ device.asn.node.asn.value }}
    router-id {{ bgp.router_id.value }}
    neighbor RR-MESH peer group
+   ! Extended-community propagation is mandatory for route-targets to
+   ! traverse the iBGP mesh — without it VPNv4 routes import nowhere.
+   neighbor RR-MESH send-community extended
 {% for session in bgp.sessions.edges if session.node.session_type.value == 'INTERNAL' %}
    neighbor {{ m.ip_only(session.node.remote_ip.node.address.value) }} peer group RR-MESH
    neighbor {{ m.ip_only(session.node.remote_ip.node.address.value) }} remote-as {{ session.node.remote_as.node.asn.value }}
@@ -113,8 +124,14 @@ router bgp {{ device.asn.node.asn.value }}
 router bgp {{ device.asn.node.asn.value }}
    vrf {{ vpn.vrf.node.name.value }}
       rd {{ vpn.vrf.node.vrf_rd.value }}
-      route-target import {{ vpn.vrf.node.import_rt.node.name.value }}
-      route-target export {{ vpn.vrf.node.export_rt.node.name.value }}
+      ! Modern EOS nests route-target under per-AF with the vpn-ipv4 keyword.
+      ! `route-target import <rt>` directly under `vrf <name>` is rejected.
+      route-target import vpn-ipv4 {{ vpn.vrf.node.import_rt.node.name.value }}
+      route-target export vpn-ipv4 {{ vpn.vrf.node.export_rt.node.name.value }}
+      address-family ipv4
+         ! Inject PE-CE connected /30s into VPNv4; without this the remote
+         ! PE has no route to the customer subnet.
+         redistribute connected
 {% for s in sites if s.node.l3vpn.node.name.value == vpn.name.value %}
 {% if s.node.routing_protocol.value == 'ebgp' %}
       neighbor {{ m.ip_only(s.node.ce_address.node.address.value) }} remote-as {{ s.node.bgp_peer_asn.value }}

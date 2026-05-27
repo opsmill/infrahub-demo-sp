@@ -1,6 +1,7 @@
 {% import '_macros.j2' as m %}
 {% set device = data.DcimDevice.edges[0].node %}
 {% set isis = data.MplsIsisProcess.edges[0].node %}
+{% set bgp = data.MplsBgpProcess.edges[0].node %}
 {% set sites = data.ServiceL3VpnSite.edges
     | selectattr('node.pe_interface.node')
     | selectattr('node.pe_address.node')
@@ -14,10 +15,13 @@
 {%- endmacro %}
 {% set srl_levels = {'level-1': 'L1', 'level-2': 'L2', 'level-1-2': 'L1L2'} %}
 # SR Linux configuration for {{ device.name.value }}
-# Lab-only minimum: hostname + interfaces + ISIS underlay. SR Linux 23.10
-# in clab is a stand-in so the backbone comes up; BGP / L3VPN / bgp-vpn
-# config lives in the production SR OS artifact (pe-nokia-sros) and is
-# intentionally NOT rendered here. See docs/docs/lab/containerlab.mdx
+# Lab-scoped: hostname + interfaces + ISIS underlay + iBGP full mesh
+# (ipv4-unicast only) + MPLS forwarding plane on core interfaces.
+# Everything emitted here is what the public SR Linux 23.10 clab image
+# accepts. L3VPN signalling is NOT rendered — 23.10 either rejects the
+# constructs (LDP, per-VPN ip-vrf, bgp-vpn) or requires licensed
+# ixr-class hardware (VPNv4 afi-safi). Production-quality L3VPN config
+# lives in the pe-nokia-sros artifact. See docs/docs/lab/containerlab.mdx
 # 'Known gaps' for the rationale.
 set / system name host-name {{ device.name.value }}
 {% for iface in device.interfaces.edges if iface.node.name.value == 'Loopback0' %}
@@ -71,6 +75,36 @@ set / network-instance default protocols isis instance i1 interface {{ srl_iface
 {% for iface in device.interfaces.edges if iface.node.role.value == 'core' %}
 set / network-instance default protocols isis instance i1 interface {{ srl_iface(iface.node.name.value) }}.0 admin-state enable
 set / network-instance default protocols isis instance i1 interface {{ srl_iface(iface.node.name.value) }}.0 circuit-type point-to-point
+{% endfor %}
+
+{# MPLS forwarding plane on core interfaces. No label-distribution
+   protocol is configured (LDP isn't in 23.10's protocols enum and
+   SR-ISIS / l3vpn AFs need licensed hardware), so this brings the
+   MPLS subsystem up but no labels are exchanged. #}
+{% for iface in device.interfaces.edges if iface.node.role.value == 'core' %}
+set / network-instance default mpls interface {{ srl_iface(iface.node.name.value) }}.0 admin-state enable
+{% endfor %}
+
+{# iBGP full mesh on loopbacks. ipv4-unicast only — 23.10's afi-safi
+   enum is {ipv4-unicast, ipv6-unicast, evpn}; l3vpn-ipv4-unicast is
+   not available on the public image, so no VPNv4 routes are carried.
+   transport.local-address pins sessions to the loopback (matches the
+   23.10 schema where local-address nests under transport/). #}
+{% for iface in device.interfaces.edges if iface.node.name.value == 'Loopback0' %}
+{% for ip in iface.node.ip_addresses.edges %}
+set / network-instance default protocols bgp admin-state enable
+set / network-instance default protocols bgp autonomous-system {{ device.asn.node.asn.value }}
+set / network-instance default protocols bgp router-id {{ m.ip_only(ip.node.address.value) }}
+set / network-instance default protocols bgp afi-safi ipv4-unicast admin-state enable
+set / network-instance default protocols bgp group ibgp-mesh admin-state enable
+set / network-instance default protocols bgp group ibgp-mesh peer-as {{ device.asn.node.asn.value }}
+set / network-instance default protocols bgp group ibgp-mesh transport local-address {{ m.ip_only(ip.node.address.value) }}
+set / network-instance default protocols bgp group ibgp-mesh afi-safi ipv4-unicast admin-state enable
+{% endfor %}
+{% endfor %}
+{% for session in bgp.sessions.edges if session.node.session_type.value == 'INTERNAL' %}
+set / network-instance default protocols bgp neighbor {{ m.ip_only(session.node.remote_ip.node.address.value) }} peer-group ibgp-mesh
+set / network-instance default protocols bgp neighbor {{ m.ip_only(session.node.remote_ip.node.address.value) }} admin-state enable
 {% endfor %}
 
 commit save

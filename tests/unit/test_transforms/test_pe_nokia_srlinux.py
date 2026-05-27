@@ -60,29 +60,90 @@ async def test_no_l3vpn_ipv4_unicast_afi_safi() -> None:
 
 
 @pytest.mark.asyncio
-async def test_template_is_lab_minimum_no_bgp_no_l3vpn() -> None:
-    """The srlinux template is intentionally a 'lab minimum': hostname +
-    interfaces + ISIS underlay only.
+async def test_template_omits_unsupported_23_10_constructs() -> None:
+    """Lock out every SR Linux 23.10 construct the public clab image rejects.
 
-    BGP, per-VPN ip-vrf network-instances, bgp-vpn, and PE-CE eBGP groups
-    are all skipped — every one of them tripped a different SR Linux 23.10
-    parser error during the iteration cycle. Production SR OS template
-    (pe_nokia_sros.j2) renders the real BGP/L3VPN config; this one just
-    keeps the lab node up so the backbone topology boots.
+    The template now renders iBGP (ipv4-unicast only) and the MPLS forwarding
+    plane on top of the ISIS underlay. L3VPN signalling is still off-limits:
+    bgp-vpn, ip-vrf network-instances, l3vpn-*-unicast afi-safi, and the
+    PE-CE eBGP group all need licensed ixr-class hardware that the public
+    23.10 image doesn't provide. LDP is not in 23.10's protocols enum.
+    Production SR OS template (pe_nokia_sros.j2) renders the real L3VPN.
     """
     rendered = await PeNokiaSrLinux.__new__(PeNokiaSrLinux).transform(FIXTURE)
     forbidden = [
-        "protocols bgp",  # no iBGP-mesh
-        "protocols bgp-vpn",  # no L3VPN signalling
-        "type ip-vrf",  # no per-VPN network-instances
+        "protocols bgp-vpn",
+        "type ip-vrf",
         "vxlan-interface",
-        "ldp",  # already dropped, but lock it in
+        "protocols ldp",
+        "l3vpn-ipv4-unicast",
+        "l3vpn-ipv6-unicast",
     ]
     for needle in forbidden:
         assert needle not in rendered, (
-            f"{needle!r} is back in the srlinux lab template — this template "
-            f"is intentionally minimum (see docstring)."
+            f"{needle!r} is back in the srlinux lab template — the public "
+            f"SR Linux 23.10 image rejects it (see docstring)."
         )
+
+
+@pytest.mark.asyncio
+async def test_renders_ibgp_mesh_group() -> None:
+    """iBGP full mesh on loopbacks. ipv4-unicast only (the only legal
+    23.10 afi-safi besides ipv6 and evpn). transport.local-address pins
+    sessions to the loopback — 23.10 nests local-address under transport/.
+    """
+    rendered = await PeNokiaSrLinux.__new__(PeNokiaSrLinux).transform(FIXTURE)
+    assert "set / network-instance default protocols bgp admin-state enable" in rendered
+    assert "set / network-instance default protocols bgp autonomous-system 65000" in rendered
+    assert "set / network-instance default protocols bgp router-id 10.0.0.4" in rendered
+    assert (
+        "set / network-instance default protocols bgp afi-safi ipv4-unicast admin-state enable"
+        in rendered
+    )
+    assert (
+        "set / network-instance default protocols bgp group ibgp-mesh admin-state enable"
+        in rendered
+    )
+    assert "set / network-instance default protocols bgp group ibgp-mesh peer-as 65000" in rendered
+    assert (
+        "set / network-instance default protocols bgp group ibgp-mesh transport "
+        "local-address 10.0.0.4" in rendered
+    )
+    assert (
+        "set / network-instance default protocols bgp group ibgp-mesh afi-safi "
+        "ipv4-unicast admin-state enable" in rendered
+    )
+
+
+@pytest.mark.asyncio
+async def test_renders_ibgp_neighbors_from_internal_sessions() -> None:
+    """Each MplsBgpProcess session with session_type=INTERNAL produces a
+    neighbor under the ibgp-mesh peer-group.
+    """
+    rendered = await PeNokiaSrLinux.__new__(PeNokiaSrLinux).transform(FIXTURE)
+    assert (
+        "set / network-instance default protocols bgp neighbor 10.0.0.1 "
+        "peer-group ibgp-mesh" in rendered
+    )
+    assert (
+        "set / network-instance default protocols bgp neighbor 10.0.0.1 admin-state enable"
+        in rendered
+    )
+
+
+@pytest.mark.asyncio
+async def test_renders_mpls_on_core_interfaces() -> None:
+    """MPLS forwarding plane enabled on every core interface.
+
+    No label-distribution protocol is configured (LDP not in 23.10;
+    SR-ISIS and l3vpn AFs need a license), so this is parser-clean
+    enablement only — no labels are actually exchanged.
+    """
+    rendered = await PeNokiaSrLinux.__new__(PeNokiaSrLinux).transform(FIXTURE)
+    assert (
+        "set / network-instance default mpls interface ethernet-1/Gigabit0/0/0/0.0 "
+        "admin-state enable" in rendered
+    )
 
 
 @pytest.mark.asyncio
