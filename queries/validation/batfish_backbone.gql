@@ -1,0 +1,23 @@
+query BatfishBackbone($name: String!) {
+  TopologyMplsBackbone(name__value: $name) {
+    edges {
+      node {
+        name { value }
+        pes {
+          edges {
+            node {
+              id
+              name { value }
+              platform {
+                node {
+                  name { value }
+                  containerlab_os { value }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
