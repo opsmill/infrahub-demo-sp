@@ -210,3 +210,39 @@ async def test_error_findings_become_check_errors() -> None:
 
     assert len(check.errors) == 1
     assert "fileParseStatus" in check.errors[0]["message"]
+
+
+@pytest.mark.asyncio
+async def test_fetch_artifact_uses_name_filter_and_returns_body() -> None:
+    """_fetch_artifact queries CoreArtifact by artifact name + PE id, downloads via object_store."""
+    check = BatfishBackboneCheck(branch="main")
+
+    artifact = MagicMock()
+    artifact.storage_id = MagicMock(value="storage-abc")
+
+    check.client = MagicMock()
+    check.client.get = AsyncMock(return_value=artifact)
+    check.client.object_store.get = AsyncMock(return_value="! pe1 config\n")
+
+    body = await check._fetch_artifact(pe_id="id-pe1", platform_name="arista_eos")
+
+    assert body == "! pe1 config\n"
+    check.client.get.assert_awaited_once_with(
+        kind="CoreArtifact",
+        object__ids=["id-pe1"],
+        name__value="pe-arista-eos",
+    )
+    check.client.object_store.get.assert_awaited_once_with(identifier="storage-abc")
+
+
+@pytest.mark.asyncio
+async def test_fetch_artifact_returns_none_when_not_found() -> None:
+    """When the SDK raises NodeNotFoundError, _fetch_artifact returns None."""
+    from infrahub_sdk.exceptions import NodeNotFoundError
+
+    check = BatfishBackboneCheck(branch="main")
+    check.client = MagicMock()
+    check.client.get = AsyncMock(side_effect=NodeNotFoundError(identifier={"id": ["missing"]}))
+
+    body = await check._fetch_artifact(pe_id="id-pe1", platform_name="arista_eos")
+    assert body is None
