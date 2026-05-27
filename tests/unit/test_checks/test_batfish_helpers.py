@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from checks.batfish_helpers import SUPPORTED_PLATFORMS, Finding
+import pandas as pd
+
+from checks.batfish_helpers import SUPPORTED_PLATFORMS, Finding, findings_from_parse_status
 
 
 def test_finding_is_constructable() -> None:
@@ -20,3 +22,32 @@ def test_supported_platforms_includes_three_vendors() -> None:
     assert "juniper_junos" in SUPPORTED_PLATFORMS
     assert "nokia_sros" not in SUPPORTED_PLATFORMS
     assert "nokia_srlinux" not in SUPPORTED_PLATFORMS
+
+
+def test_parse_status_all_passed_yields_no_findings() -> None:
+    df = pd.DataFrame(
+        [
+            {"File_Name": "configs/pe1.cfg", "Status": "PASSED", "Nodes": ["pe1"]},
+            {"File_Name": "configs/pe2.cfg", "Status": "PASSED", "Nodes": ["pe2"]},
+        ]
+    )
+    findings = findings_from_parse_status(df)
+    assert findings == []
+
+
+def test_parse_status_failed_yields_one_error_per_bad_row() -> None:
+    df = pd.DataFrame(
+        [
+            {"File_Name": "configs/pe1.cfg", "Status": "PASSED", "Nodes": ["pe1"]},
+            {"File_Name": "configs/pe2.cfg", "Status": "PARTIALLY_UNRECOGNIZED", "Nodes": ["pe2"]},
+            {"File_Name": "configs/pe3.cfg", "Status": "FAILED", "Nodes": []},
+        ]
+    )
+    findings = findings_from_parse_status(df)
+    assert len(findings) == 2
+    assert {f.node for f in findings} == {"pe2", "pe3"}
+    assert all(f.severity == "error" for f in findings)
+    assert all(f.query == "fileParseStatus" for f in findings)
+    # pe3 had no Nodes — message should still reference the file.
+    pe3 = next(f for f in findings if f.node == "pe3")
+    assert "configs/pe3.cfg" in pe3.message
