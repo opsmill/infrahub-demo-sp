@@ -7,11 +7,13 @@ these helpers and maps ``Finding`` instances to Infrahub log entries.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
 import pandas as pd
+import requests
 
 # Platforms Batfish parses well. Nokia SR OS support is experimental and SR
 # Linux is unsupported — both are filtered out of the snapshot.
@@ -268,3 +270,28 @@ def run_snapshot(
         return findings
     finally:
         session.delete_snapshot(snapshot_name)
+
+
+def wait_for_batfish(host: str, port: int, timeout_s: float, backoff_s: float) -> bool:
+    """Poll the Batfish coordinator until it returns HTTP 200 or timeout elapses.
+
+    Args:
+        host: Batfish coordinator hostname.
+        port: Coordinator HTTP port (default 9997).
+        timeout_s: Total seconds to keep trying before giving up.
+        backoff_s: Sleep between attempts.
+
+    Returns:
+        True if Batfish responded 200 within the timeout, False otherwise.
+    """
+    deadline = time.monotonic() + timeout_s
+    url = f"http://{host}:{port}/"
+    while time.monotonic() < deadline:
+        try:
+            r = requests.get(url, timeout=2)
+            if r.status_code == 200:
+                return True
+        except Exception:  # noqa: BLE001 — any failure means "not ready yet"
+            pass
+        time.sleep(backoff_s)
+    return False

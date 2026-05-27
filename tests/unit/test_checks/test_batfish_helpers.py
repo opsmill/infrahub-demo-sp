@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
@@ -16,6 +16,7 @@ from checks.batfish_helpers import (
     findings_from_parse_warning,
     findings_from_undefined_references,
     run_snapshot,
+    wait_for_batfish,
 )
 
 
@@ -293,3 +294,22 @@ def test_run_snapshot_deletes_on_query_exception(tmp_path) -> None:
             expected_hosts={"pe1"},
         )
     session.delete_snapshot.assert_called_once_with("snap-3")
+
+
+# ---------------------------------------------------------------------------
+# wait_for_batfish tests
+# ---------------------------------------------------------------------------
+
+
+def test_wait_for_batfish_returns_true_on_first_200() -> None:
+    with patch("checks.batfish_helpers.requests.get") as mock_get:
+        mock_get.return_value.status_code = 200
+        assert wait_for_batfish("batfish", port=9997, timeout_s=10, backoff_s=0.01) is True
+        assert mock_get.call_count == 1
+
+
+def test_wait_for_batfish_returns_false_after_timeout() -> None:
+    with patch("checks.batfish_helpers.requests.get") as mock_get:
+        mock_get.side_effect = Exception("connection refused")
+        assert wait_for_batfish("batfish", port=9997, timeout_s=0.1, backoff_s=0.05) is False
+        assert mock_get.call_count >= 1
