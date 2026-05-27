@@ -375,6 +375,27 @@ def test(c: Context, kind: str = "unit") -> None:
 
 
 @task
+def batfish_check(c: Context, backbone: str = "mpls-backbone") -> None:
+    """Run BatfishBackboneCheck against a running local Infrahub.
+
+    Requires:
+        - `uv run invoke start` (Infrahub + Batfish sidecar up)
+        - INFRAHUB_ADDRESS, INFRAHUB_API_TOKEN set in .env
+        - At least one rendered pe-* artifact in the local instance
+
+    Args:
+        c: Invoke Context.
+        backbone: Backbone name to validate (default: mpls-backbone).
+    """
+    _banner("invoke batfish-check", border="cyan")
+    cmd = (
+        "uv run infrahubctl check batfish_backbone "
+        f"--variable name={backbone} --branch main"
+    )
+    c.run(cmd, pty=True)
+
+
+@task
 def docs(c: Context) -> None:
     """Build the Docusaurus documentation site under docs/."""
     _banner("invoke docs", border="cyan")
@@ -521,5 +542,6 @@ ns.add_task(bootstrap)
 ns.add_task(init_demo)
 ns.add_task(lint)
 ns.add_task(test)
+ns.add_task(batfish_check)
 ns.add_task(docs)
 ns.add_collection(lab)
