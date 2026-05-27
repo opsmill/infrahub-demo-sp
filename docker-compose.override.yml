@@ -41,3 +41,9 @@ services:
       - service-catalog
     networks:
       - default
+
+  batfish:
+    image: batfish/allinone:latest
+    container_name: batfish
+    networks:
+      - default
