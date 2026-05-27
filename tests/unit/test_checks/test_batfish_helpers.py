@@ -9,6 +9,7 @@ from checks.batfish_helpers import (
     Finding,
     findings_from_parse_status,
     findings_from_parse_warning,
+    findings_from_undefined_references,
 )
 
 
@@ -84,3 +85,30 @@ def test_parse_warning_populated_yields_one_error_per_row() -> None:
     assert "line 42" in f.message
     assert "configs/pe1.cfg" in f.message
     assert f.detail is not None and f.detail["Text"] == "platform-specific-knob foo"
+
+
+def test_undefined_refs_empty_yields_no_findings() -> None:
+    df = pd.DataFrame(columns=["File_Name", "Lines", "Type", "Structure_Name", "Context"])
+    assert findings_from_undefined_references(df) == []
+
+
+def test_undefined_refs_populated_yields_one_error_per_row() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "File_Name": "configs/pe1.cfg",
+                "Lines": [120, 121],
+                "Type": "route-map",
+                "Structure_Name": "RM-EXPORT-MISSING",
+                "Context": "bgp-neighbor-export",
+            }
+        ]
+    )
+    findings = findings_from_undefined_references(df)
+    assert len(findings) == 1
+    f = findings[0]
+    assert f.severity == "error"
+    assert f.query == "undefinedReferences"
+    assert f.node == "pe1"
+    assert "RM-EXPORT-MISSING" in f.message
+    assert "route-map" in f.message

@@ -109,3 +109,31 @@ def findings_from_parse_warning(df: pd.DataFrame) -> list[Finding]:
             )
         )
     return findings
+
+
+def findings_from_undefined_references(df: pd.DataFrame) -> list[Finding]:
+    """Map a pybatfish ``undefinedReferences`` answer into ``Finding`` rows.
+
+    Args:
+        df: DataFrame with ``File_Name``, ``Lines``, ``Type``, ``Structure_Name`` columns.
+
+    Returns:
+        One ``Finding`` per row, all severity ERROR.
+    """
+    findings: list[Finding] = []
+    for _, row in df.iterrows():
+        file_name = str(row["File_Name"])
+        node = Path(file_name).stem
+        findings.append(
+            Finding(
+                severity="error",
+                query="undefinedReferences",
+                node=node,
+                message=(
+                    f"undefined {row['Type']} '{row['Structure_Name']}' "
+                    f"referenced in {file_name}"
+                ),
+                detail=row.to_dict(),
+            )
+        )
+    return findings
