@@ -388,10 +388,7 @@ def batfish_check(c: Context, backbone: str = "mpls-backbone") -> None:
         backbone: Backbone name to validate (default: mpls-backbone).
     """
     _banner("invoke batfish-check", border="cyan")
-    cmd = (
-        "uv run infrahubctl check batfish_backbone "
-        f"--variable name={backbone} --branch main"
-    )
+    cmd = f"uv run infrahubctl check batfish_backbone --variable name={backbone} --branch main"
     c.run(cmd, pty=True)
 
 

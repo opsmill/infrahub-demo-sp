@@ -253,14 +253,10 @@ def run_snapshot(
         findings.extend(findings_from_parse_status(session.q.fileParseStatus().answer().frame()))
         findings.extend(findings_from_parse_warning(session.q.parseWarning().answer().frame()))
         findings.extend(
-            findings_from_undefined_references(
-                session.q.undefinedReferences().answer().frame()
-            )
+            findings_from_undefined_references(session.q.undefinedReferences().answer().frame())
         )
         findings.extend(
-            findings_from_bgp_session_compat(
-                session.q.bgpSessionCompatibility().answer().frame()
-            )
+            findings_from_bgp_session_compat(session.q.bgpSessionCompatibility().answer().frame())
         )
         findings.extend(
             findings_from_isis_edges(

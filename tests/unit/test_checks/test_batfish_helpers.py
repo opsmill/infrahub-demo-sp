@@ -214,20 +214,16 @@ def test_isis_edges_empty_with_no_expected_hosts_passes() -> None:
 def _fake_session_factory(answers: dict[str, pd.DataFrame]) -> MagicMock:
     """Build a fake pybatfish Session that returns canned DataFrames per query."""
     session = MagicMock()
-    session.q.fileParseStatus.return_value.answer.return_value.frame.return_value = (
-        answers.get("fileParseStatus", pd.DataFrame(columns=["File_Name", "Status", "Nodes"]))
+    session.q.fileParseStatus.return_value.answer.return_value.frame.return_value = answers.get(
+        "fileParseStatus", pd.DataFrame(columns=["File_Name", "Status", "Nodes"])
     )
-    session.q.parseWarning.return_value.answer.return_value.frame.return_value = (
-        answers.get(
-            "parseWarning",
-            pd.DataFrame(columns=["Filename", "Line", "Text", "Comment", "Parser_Context"]),
-        )
+    session.q.parseWarning.return_value.answer.return_value.frame.return_value = answers.get(
+        "parseWarning",
+        pd.DataFrame(columns=["Filename", "Line", "Text", "Comment", "Parser_Context"]),
     )
-    session.q.undefinedReferences.return_value.answer.return_value.frame.return_value = (
-        answers.get(
-            "undefinedReferences",
-            pd.DataFrame(columns=["File_Name", "Lines", "Type", "Structure_Name", "Context"]),
-        )
+    session.q.undefinedReferences.return_value.answer.return_value.frame.return_value = answers.get(
+        "undefinedReferences",
+        pd.DataFrame(columns=["File_Name", "Lines", "Type", "Structure_Name", "Context"]),
     )
     session.q.bgpSessionCompatibility.return_value.answer.return_value.frame.return_value = (
         answers.get(
@@ -255,9 +251,7 @@ def test_run_snapshot_happy_path_no_findings(tmp_path) -> None:
         expected_hosts={"pe1"},
     )
     assert findings == []
-    session.init_snapshot.assert_called_once_with(
-        str(tmp_path), name="snap-1", overwrite=True
-    )
+    session.init_snapshot.assert_called_once_with(str(tmp_path), name="snap-1", overwrite=True)
     session.delete_snapshot.assert_called_once_with("snap-1")
 
 

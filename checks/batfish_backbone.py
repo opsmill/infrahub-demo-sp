@@ -65,9 +65,7 @@ class BatfishBackboneCheck(InfrahubCheck):
         supported_pes, skipped = self._partition_pes(backbone)
 
         for pe_name, platform_name in skipped:
-            logger.info(
-                "skipping %s: batfish does not support platform %s", pe_name, platform_name
-            )
+            logger.info("skipping %s: batfish does not support platform %s", pe_name, platform_name)
 
         if not supported_pes:
             logger.info("no supported PEs to validate in backbone %s", backbone_name)
