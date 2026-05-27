@@ -8,6 +8,7 @@ from checks.batfish_helpers import (
     SUPPORTED_PLATFORMS,
     Finding,
     findings_from_bgp_session_compat,
+    findings_from_isis_edges,
     findings_from_parse_status,
     findings_from_parse_warning,
     findings_from_undefined_references,
@@ -156,3 +157,45 @@ def test_bgp_compat_half_open_yields_warning() -> None:
     assert all(f.node == "pe1" for f in findings)
     half_open = next(f for f in findings if "HALF_OPEN" in f.message)
     assert "pe2" in half_open.message
+
+
+def _iface(hostname: str) -> dict:
+    return {"hostname": hostname, "interface": "irrelevant"}
+
+
+def test_isis_edges_full_mesh_yields_no_findings() -> None:
+    # 3 PEs with all 6 directed edges present.
+    rows = []
+    pes = ["pe1", "pe2", "pe3"]
+    for a in pes:
+        for b in pes:
+            if a == b:
+                continue
+            rows.append({"Interface": _iface(a), "Remote_Interface": _iface(b)})
+    df = pd.DataFrame(rows)
+    findings = findings_from_isis_edges(df, expected_hosts=set(pes))
+    assert findings == []
+
+
+def test_isis_edges_missing_edge_yields_one_warning() -> None:
+    # 3 PEs, missing pe1 -> pe3 and pe3 -> pe1.
+    pes = ["pe1", "pe2", "pe3"]
+    rows = [
+        {"Interface": _iface("pe1"), "Remote_Interface": _iface("pe2")},
+        {"Interface": _iface("pe2"), "Remote_Interface": _iface("pe1")},
+        {"Interface": _iface("pe2"), "Remote_Interface": _iface("pe3")},
+        {"Interface": _iface("pe3"), "Remote_Interface": _iface("pe2")},
+    ]
+    df = pd.DataFrame(rows)
+    findings = findings_from_isis_edges(df, expected_hosts=set(pes))
+    # Two missing directed edges: (pe1, pe3) and (pe3, pe1).
+    assert len(findings) == 2
+    assert all(f.severity == "warning" for f in findings)
+    assert all(f.query == "isisEdges" for f in findings)
+    pairs = {(f.detail["from"], f.detail["to"]) for f in findings if f.detail}
+    assert pairs == {("pe1", "pe3"), ("pe3", "pe1")}
+
+
+def test_isis_edges_empty_with_no_expected_hosts_passes() -> None:
+    df = pd.DataFrame(columns=["Interface", "Remote_Interface"])
+    assert findings_from_isis_edges(df, expected_hosts=set()) == []

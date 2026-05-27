@@ -162,10 +162,49 @@ def findings_from_undefined_references(df: pd.DataFrame) -> list[Finding]:
                 query="undefinedReferences",
                 node=node,
                 message=(
-                    f"undefined {row['Type']} '{row['Structure_Name']}' "
-                    f"referenced in {file_name}"
+                    f"undefined {row['Type']} '{row['Structure_Name']}' referenced in {file_name}"
                 ),
                 detail=row.to_dict(),
             )
         )
     return findings
+
+
+def findings_from_isis_edges(df: pd.DataFrame, expected_hosts: set[str]) -> list[Finding]:
+    """Map a pybatfish ``isisEdges`` answer into ``Finding`` rows.
+
+    Compares observed directed edges against the expected full mesh among
+    ``expected_hosts``. Each missing directed edge is one WARNING finding.
+
+    Args:
+        df: DataFrame with ``Interface`` and ``Remote_Interface`` columns,
+            each a struct with a ``hostname`` field.
+        expected_hosts: Hostnames that should form a full IS-IS mesh.
+
+    Returns:
+        One ``Finding`` per missing directed edge.
+    """
+    observed: set[tuple[str, str]] = set()
+    for _, row in df.iterrows():
+        local = row["Interface"]
+        remote = row["Remote_Interface"]
+        local_host = local["hostname"] if isinstance(local, dict) else None
+        remote_host = remote["hostname"] if isinstance(remote, dict) else None
+        if local_host and remote_host:
+            observed.add((local_host, remote_host))
+
+    expected: set[tuple[str, str]] = {
+        (a, b) for a in expected_hosts for b in expected_hosts if a != b
+    }
+    missing = expected - observed
+
+    return [
+        Finding(
+            severity="warning",
+            query="isisEdges",
+            node=a,
+            message=f"isis adjacency missing: {a} -> {b}",
+            detail={"from": a, "to": b},
+        )
+        for (a, b) in sorted(missing)
+    ]
