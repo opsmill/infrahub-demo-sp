@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
 import pandas as pd
 
@@ -208,3 +208,63 @@ def findings_from_isis_edges(df: pd.DataFrame, expected_hosts: set[str]) -> list
         )
         for (a, b) in sorted(missing)
     ]
+
+
+class _PybatfishSession(Protocol):
+    """Structural type for the bits of pybatfish.Session we use."""
+
+    def set_network(self, name: str) -> object: ...
+    def init_snapshot(self, dir: str, name: str, overwrite: bool) -> object: ...
+    def delete_snapshot(self, name: str) -> object: ...
+
+    @property
+    def q(self) -> Any: ...
+
+
+def run_snapshot(
+    *,
+    session: _PybatfishSession,
+    snapshot_dir: Path,
+    network: str,
+    snapshot_name: str,
+    expected_hosts: set[str],
+) -> list[Finding]:
+    """Initialize a Batfish snapshot, run the query battery, and return findings.
+
+    Always deletes the snapshot in a ``finally`` block, even when queries raise.
+
+    Args:
+        session: A connected pybatfish ``Session`` (or any object satisfying
+            ``_PybatfishSession``).
+        snapshot_dir: Path to the directory containing ``configs/*.cfg``.
+        network: Batfish network name (shared across snapshots).
+        snapshot_name: Unique per-run snapshot name.
+        expected_hosts: PE hostnames that should form a full IS-IS mesh.
+
+    Returns:
+        Combined list of findings from all queries.
+    """
+    session.set_network(network)
+    session.init_snapshot(str(snapshot_dir), name=snapshot_name, overwrite=True)
+    try:
+        findings: list[Finding] = []
+        findings.extend(findings_from_parse_status(session.q.fileParseStatus().answer().frame()))
+        findings.extend(findings_from_parse_warning(session.q.parseWarning().answer().frame()))
+        findings.extend(
+            findings_from_undefined_references(
+                session.q.undefinedReferences().answer().frame()
+            )
+        )
+        findings.extend(
+            findings_from_bgp_session_compat(
+                session.q.bgpSessionCompatibility().answer().frame()
+            )
+        )
+        findings.extend(
+            findings_from_isis_edges(
+                session.q.isisEdges().answer().frame(), expected_hosts=expected_hosts
+            )
+        )
+        return findings
+    finally:
+        session.delete_snapshot(snapshot_name)

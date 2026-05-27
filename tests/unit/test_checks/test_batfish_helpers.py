@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pandas as pd
+import pytest
 
 from checks.batfish_helpers import (
     SUPPORTED_PLATFORMS,
@@ -12,6 +15,7 @@ from checks.batfish_helpers import (
     findings_from_parse_status,
     findings_from_parse_warning,
     findings_from_undefined_references,
+    run_snapshot,
 )
 
 
@@ -199,3 +203,93 @@ def test_isis_edges_missing_edge_yields_one_warning() -> None:
 def test_isis_edges_empty_with_no_expected_hosts_passes() -> None:
     df = pd.DataFrame(columns=["Interface", "Remote_Interface"])
     assert findings_from_isis_edges(df, expected_hosts=set()) == []
+
+
+# ---------------------------------------------------------------------------
+# run_snapshot tests
+# ---------------------------------------------------------------------------
+
+
+def _fake_session_factory(answers: dict[str, pd.DataFrame]) -> MagicMock:
+    """Build a fake pybatfish Session that returns canned DataFrames per query."""
+    session = MagicMock()
+    session.q.fileParseStatus.return_value.answer.return_value.frame.return_value = (
+        answers.get("fileParseStatus", pd.DataFrame(columns=["File_Name", "Status", "Nodes"]))
+    )
+    session.q.parseWarning.return_value.answer.return_value.frame.return_value = (
+        answers.get(
+            "parseWarning",
+            pd.DataFrame(columns=["Filename", "Line", "Text", "Comment", "Parser_Context"]),
+        )
+    )
+    session.q.undefinedReferences.return_value.answer.return_value.frame.return_value = (
+        answers.get(
+            "undefinedReferences",
+            pd.DataFrame(columns=["File_Name", "Lines", "Type", "Structure_Name", "Context"]),
+        )
+    )
+    session.q.bgpSessionCompatibility.return_value.answer.return_value.frame.return_value = (
+        answers.get(
+            "bgpSessionCompatibility",
+            pd.DataFrame(
+                columns=["Node", "Remote_Node", "Local_AS", "Remote_AS", "Configured_Status"]
+            ),
+        )
+    )
+    session.q.isisEdges.return_value.answer.return_value.frame.return_value = answers.get(
+        "isisEdges", pd.DataFrame(columns=["Interface", "Remote_Interface"])
+    )
+    return session
+
+
+def test_run_snapshot_happy_path_no_findings(tmp_path) -> None:
+    (tmp_path / "configs").mkdir()
+    (tmp_path / "configs" / "pe1.cfg").write_text("! pe1\n")
+    session = _fake_session_factory({})
+    findings = run_snapshot(
+        session=session,
+        snapshot_dir=tmp_path,
+        network="infrahub-mpls",
+        snapshot_name="snap-1",
+        expected_hosts={"pe1"},
+    )
+    assert findings == []
+    session.init_snapshot.assert_called_once_with(
+        str(tmp_path), name="snap-1", overwrite=True
+    )
+    session.delete_snapshot.assert_called_once_with("snap-1")
+
+
+def test_run_snapshot_failed_parse_yields_error_finding(tmp_path) -> None:
+    (tmp_path / "configs").mkdir()
+    session = _fake_session_factory(
+        {
+            "fileParseStatus": pd.DataFrame(
+                [{"File_Name": "configs/pe1.cfg", "Status": "FAILED", "Nodes": ["pe1"]}]
+            )
+        }
+    )
+    findings = run_snapshot(
+        session=session,
+        snapshot_dir=tmp_path,
+        network="infrahub-mpls",
+        snapshot_name="snap-2",
+        expected_hosts={"pe1"},
+    )
+    assert any(f.severity == "error" and f.query == "fileParseStatus" for f in findings)
+    session.delete_snapshot.assert_called_once_with("snap-2")
+
+
+def test_run_snapshot_deletes_on_query_exception(tmp_path) -> None:
+    (tmp_path / "configs").mkdir()
+    session = _fake_session_factory({})
+    session.q.fileParseStatus.side_effect = RuntimeError("boom")
+    with pytest.raises(RuntimeError):
+        run_snapshot(
+            session=session,
+            snapshot_dir=tmp_path,
+            network="infrahub-mpls",
+            snapshot_name="snap-3",
+            expected_hosts={"pe1"},
+        )
+    session.delete_snapshot.assert_called_once_with("snap-3")
