@@ -33,10 +33,17 @@ set / interface lo0 subinterface 0 ipv4 address {{ ip.node.address.value }}
 {% endfor %}
 {% endfor %}
 
-{# Core backbone interfaces #}
+{# Core backbone interfaces.
+
+   MTU semantic mismatch warning: Arista (and most Cisco) `mtu` is IP MTU,
+   so a "9000" interface emits Ethernet frames up to 9014 bytes on the
+   wire (mtu + 14 for the L2 header). SR Linux's `mtu` is the L2 frame
+   MTU, so we add 14 here — without that SR Linux silently drops Arista's
+   IS-IS hellos (which cEOS pads to the IS-IS interface MTU) and the
+   adjacency never forms. #}
 {% for iface in device.interfaces.edges if iface.node.role.value == 'core' %}
 set / interface {{ srl_iface(iface.node.name.value) }} admin-state enable
-set / interface {{ srl_iface(iface.node.name.value) }} mtu {{ iface.node.mtu.value }}
+set / interface {{ srl_iface(iface.node.name.value) }} mtu {{ iface.node.mtu.value + 14 }}
 set / interface {{ srl_iface(iface.node.name.value) }} subinterface 0 admin-state enable
 set / interface {{ srl_iface(iface.node.name.value) }} subinterface 0 ipv4 admin-state enable
 {% for ip in iface.node.ip_addresses.edges %}

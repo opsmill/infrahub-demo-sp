@@ -162,6 +162,19 @@ async def test_isis_level_capability_uses_srl_enum() -> None:
 
 
 @pytest.mark.asyncio
+async def test_core_interface_mtu_adds_l2_header_offset() -> None:
+    """SR Linux `mtu` is L2 frame MTU; Arista/Cisco `mtu` is IP MTU.
+
+    Without the +14 byte offset, SR Linux silently drops the IS-IS hellos
+    cEOS pads to its IS-IS interface MTU (an 8997-byte PDU becomes a
+    ~9014-byte Ethernet frame), and the IS-IS adjacency never forms.
+    Fixture has core mtu=9000 → rendered template must say `mtu 9014`.
+    """
+    rendered = await PeNokiaSrLinux.__new__(PeNokiaSrLinux).transform(FIXTURE)
+    assert "set / interface ethernet-1/Gigabit0/0/0/0 mtu 9014" in rendered
+
+
+@pytest.mark.asyncio
 async def test_ends_with_commit_save() -> None:
     """Final line commits the candidate session — without this nothing persists."""
     rendered = await PeNokiaSrLinux.__new__(PeNokiaSrLinux).transform(FIXTURE)
