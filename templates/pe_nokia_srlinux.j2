@@ -79,9 +79,13 @@ set / network-instance default protocols isis instance i1 net [ {{ isis.net_id.v
 set / network-instance default protocols isis instance i1 interface {{ srl_iface(iface.node.name.value) }}.0 admin-state enable
 set / network-instance default protocols isis instance i1 interface {{ srl_iface(iface.node.name.value) }}.0 passive true
 {% endfor %}
+{# Default circuit-type (broadcast) over Ethernet — same as netlab's
+   interop-validated baseline. cEOS 4.29 ↔ SR Linux 23.10 don't form a
+   P2P 3-way adjacency in this lab (cEOS sends RFC 3373's 5-byte TLV
+   240, SR Linux uses RFC 5303's 15-byte form, and the handshake stalls
+   in Initializing); broadcast adjacencies side-step that entirely. #}
 {% for iface in device.interfaces.edges if iface.node.role.value == 'core' %}
 set / network-instance default protocols isis instance i1 interface {{ srl_iface(iface.node.name.value) }}.0 admin-state enable
-set / network-instance default protocols isis instance i1 interface {{ srl_iface(iface.node.name.value) }}.0 circuit-type point-to-point
 {% endfor %}
 
 {# iBGP full mesh on loopbacks. ipv4-unicast only — 23.10's afi-safi
