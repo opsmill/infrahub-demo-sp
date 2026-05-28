@@ -269,11 +269,16 @@ def run_snapshot(
 
 
 def wait_for_batfish(host: str, port: int, timeout_s: float, backoff_s: float) -> bool:
-    """Poll the Batfish coordinator until it returns HTTP 200 or timeout elapses.
+    """Poll the Batfish coordinator until ``/v2/networks`` returns HTTP 200 or timeout elapses.
+
+    Probing ``/`` or ``/networks`` doesn't work — the coordinator returns 404
+    on both even when fully up. The API is rooted at ``/v2/`` (matches what
+    pybatfish itself hits), and ``/v2/networks`` returns 200 with ``[]`` the
+    moment the API is ready, regardless of network/snapshot state.
 
     Args:
         host: Batfish coordinator hostname.
-        port: Coordinator HTTP port (default 9997).
+        port: Coordinator HTTP port (default 9996 for batfish/allinone).
         timeout_s: Total seconds to keep trying before giving up.
         backoff_s: Sleep between attempts.
 
@@ -281,7 +286,7 @@ def wait_for_batfish(host: str, port: int, timeout_s: float, backoff_s: float) -
         True if Batfish responded 200 within the timeout, False otherwise.
     """
     deadline = time.monotonic() + timeout_s
-    url = f"http://{host}:{port}/"
+    url = f"http://{host}:{port}/v2/networks"
     while time.monotonic() < deadline:
         try:
             r = requests.get(url, timeout=2)

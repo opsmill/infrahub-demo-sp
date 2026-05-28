@@ -88,7 +88,7 @@ class BatfishBackboneCheck(InfrahubCheck):
                 return
 
             host = os.environ.get("BATFISH_HOST", "batfish")
-            port = int(os.environ.get("BATFISH_PORT", "9997"))
+            port = int(os.environ.get("BATFISH_PORT", "9996"))
             if not wait_for_batfish(host, port=port, timeout_s=60, backoff_s=2):
                 self.log_error(message=f"Batfish service unreachable at {host}:{port}")
                 return
