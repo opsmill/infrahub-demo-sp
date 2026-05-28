@@ -149,7 +149,7 @@ def findings_from_undefined_references(df: pd.DataFrame) -> list[Finding]:
     """Map a pybatfish ``undefinedReferences`` answer into ``Finding`` rows.
 
     Args:
-        df: DataFrame with ``File_Name``, ``Lines``, ``Type``, ``Structure_Name`` columns.
+        df: DataFrame with ``File_Name``, ``Lines``, ``Struct_Type``, ``Ref_Name`` columns.
 
     Returns:
         One ``Finding`` per row, all severity ERROR.
@@ -164,7 +164,7 @@ def findings_from_undefined_references(df: pd.DataFrame) -> list[Finding]:
                 query="undefinedReferences",
                 node=node,
                 message=(
-                    f"undefined {row['Type']} '{row['Structure_Name']}' referenced in {file_name}"
+                    f"undefined {row['Struct_Type']} '{row['Ref_Name']}' referenced in {file_name}"
                 ),
                 detail=row.to_dict(),
             )

@@ -95,7 +95,12 @@ def test_parse_warning_populated_yields_one_error_per_row() -> None:
 
 
 def test_undefined_refs_empty_yields_no_findings() -> None:
-    df = pd.DataFrame(columns=["File_Name", "Lines", "Type", "Structure_Name", "Context"])
+    # Column names match pybatfish's actual undefinedReferences answer schema:
+    # ['File_Name', 'Struct_Type', 'Ref_Name', 'Context', 'Lines']. Inventing
+    # column names here would let the helper drift from real Batfish output
+    # while tests stay green (which is exactly how the previous version of
+    # this file shipped a KeyError to production).
+    df = pd.DataFrame(columns=["File_Name", "Lines", "Struct_Type", "Ref_Name", "Context"])
     assert findings_from_undefined_references(df) == []
 
 
@@ -105,8 +110,8 @@ def test_undefined_refs_populated_yields_one_error_per_row() -> None:
             {
                 "File_Name": "configs/pe1.cfg",
                 "Lines": [120, 121],
-                "Type": "route-map",
-                "Structure_Name": "RM-EXPORT-MISSING",
+                "Struct_Type": "route-map",
+                "Ref_Name": "RM-EXPORT-MISSING",
                 "Context": "bgp-neighbor-export",
             }
         ]
@@ -223,7 +228,7 @@ def _fake_session_factory(answers: dict[str, pd.DataFrame]) -> MagicMock:
     )
     session.q.undefinedReferences.return_value.answer.return_value.frame.return_value = answers.get(
         "undefinedReferences",
-        pd.DataFrame(columns=["File_Name", "Lines", "Type", "Structure_Name", "Context"]),
+        pd.DataFrame(columns=["File_Name", "Lines", "Struct_Type", "Ref_Name", "Context"]),
     )
     session.q.bgpSessionCompatibility.return_value.answer.return_value.frame.return_value = (
         answers.get(
