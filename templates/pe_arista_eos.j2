@@ -1,4 +1,10 @@
 {% import '_macros.j2' as m %}
+{# Format marker for static analyzers (e.g. Batfish): without this header,
+   the EOS-specific syntax below (`vrf instance`, `address-family vpn-ipv4`,
+   `neighbor X peer group`, etc.) gets mis-parsed against the Cisco IOS
+   grammar and every line is reported as unrecognized. Idiomatic RANCID
+   hint that Batfish recognizes to pick the Arista grammar. #}
+!RANCID-CONTENT-TYPE: arista
 {% set device = data.DcimDevice.edges[0].node %}
 {% set isis = data.MplsIsisProcess.edges[0].node %}
 {% set ldp = data.MplsLdpProcess.edges[0].node %}
@@ -29,6 +35,15 @@ management api http-commands
 management ssh
    no shutdown
 !
+! IP routing must be explicitly enabled in cEOS — without this, IS-IS
+! never installs an adjacency ("IS-IS is disabled because: Routing is
+! not enabled"). VRF routing has to be enabled per-VRF below.
+ip routing
+ipv6 unicast-routing
+!
+! Global MPLS enable — required before per-interface `mpls ip`/LDP works.
+mpls ip
+!
 {% for iface in device.interfaces.edges if iface.node.name.value == 'Loopback0' %}
 interface Loopback0
    description Router-ID / iBGP source
@@ -44,7 +59,6 @@ interface {{ iface.node.name.value }}
    no switchport
    mpls ip
    isis enable 1
-   isis network point-to-point
 {% for ip in iface.node.ip_addresses.edges %}
    ip address {{ ip.node.address.value }}
 {% endfor %}
@@ -69,6 +83,11 @@ router isis 1
 !
 mpls ldp
    router-id {{ ldp.router_id.value }}
+   transport-address interface Loopback0
+   interface Loopback0
+   {% for iface in device.interfaces.edges if iface.node.role.value == 'core' %}
+   interface {{ iface.node.name.value }}
+   {% endfor %}
    no shutdown
 !
 {# Per-VRF instances #}
@@ -84,12 +103,17 @@ mpls ldp
 vrf instance {{ vpn.vrf.node.name.value }}
    description L3VPN {{ vpn.name.value }} (vpn-id {{ vpn.vpn_id.value }})
 !
+ip routing vrf {{ vpn.vrf.node.name.value }}
+!
 {% endif %}
 {% endfor %}
 !
 router bgp {{ device.asn.node.asn.value }}
    router-id {{ bgp.router_id.value }}
    neighbor RR-MESH peer group
+   ! Extended-community propagation is mandatory for route-targets to
+   ! traverse the iBGP mesh — without it VPNv4 routes import nowhere.
+   neighbor RR-MESH send-community extended
 {% for session in bgp.sessions.edges if session.node.session_type.value == 'INTERNAL' %}
    neighbor {{ m.ip_only(session.node.remote_ip.node.address.value) }} peer group RR-MESH
    neighbor {{ m.ip_only(session.node.remote_ip.node.address.value) }} remote-as {{ session.node.remote_as.node.asn.value }}
@@ -113,8 +137,14 @@ router bgp {{ device.asn.node.asn.value }}
 router bgp {{ device.asn.node.asn.value }}
    vrf {{ vpn.vrf.node.name.value }}
       rd {{ vpn.vrf.node.vrf_rd.value }}
-      route-target import {{ vpn.vrf.node.import_rt.node.name.value }}
-      route-target export {{ vpn.vrf.node.export_rt.node.name.value }}
+      ! Modern EOS nests route-target under per-AF with the vpn-ipv4 keyword.
+      ! `route-target import <rt>` directly under `vrf <name>` is rejected.
+      route-target import vpn-ipv4 {{ vpn.vrf.node.import_rt.node.name.value }}
+      route-target export vpn-ipv4 {{ vpn.vrf.node.export_rt.node.name.value }}
+      address-family ipv4
+         ! Inject PE-CE connected /30s into VPNv4; without this the remote
+         ! PE has no route to the customer subnet.
+         redistribute connected
 {% for s in sites if s.node.l3vpn.node.name.value == vpn.name.value %}
 {% if s.node.routing_protocol.value == 'ebgp' %}
       neighbor {{ m.ip_only(s.node.ce_address.node.address.value) }} remote-as {{ s.node.bgp_peer_asn.value }}

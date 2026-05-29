@@ -13,6 +13,13 @@ system {
     host-name {{ device.name.value }};
     no-redirects;
 }
+/* routing-options is required: protocols bgp commit-fails without a
+   globally configured autonomous-system. router-id is also required so
+   iBGP and ISIS pick a deterministic ID instead of guessing from lo0. */
+routing-options {
+    autonomous-system {{ device.asn.node.asn.value }};
+    router-id {{ bgp.router_id.value }};
+}
 interfaces {
     /* Loopback */
     lo0 {
@@ -32,7 +39,7 @@ interfaces {
     }
     /* Backbone interfaces */
 {% for iface in device.interfaces.edges if iface.node.role.value == 'core' %}
-    {{ iface.node.name.value }} {
+    {{ m.junos_iface(iface.node.name.value) }} {
         description "{{ iface.node.description.value }}";
         mtu {{ iface.node.mtu.value }};
         unit 0 {
@@ -48,7 +55,7 @@ interfaces {
     /* Customer-facing interfaces (VRF-bound) */
 {% for site_edge in sites %}
 {% set site = site_edge.node %}
-    {{ site.pe_interface.node.name.value }} {
+    {{ m.junos_iface(site.pe_interface.node.name.value) }} {
         description "L3VPN {{ site.l3vpn.node.name.value }} - {{ site.name.value }}";
         unit 0 {
             family inet {
@@ -61,7 +68,7 @@ interfaces {
 protocols {
     isis {
 {% for iface in device.interfaces.edges if iface.node.role.value == 'core' %}
-        interface {{ iface.node.name.value }}.0 {
+        interface {{ m.junos_iface(iface.node.name.value) }}.0 {
             point-to-point;
             level 2 metric 10;
         }
@@ -72,7 +79,7 @@ protocols {
     }
     ldp {
 {% for iface in device.interfaces.edges if iface.node.role.value == 'core' %}
-        interface {{ iface.node.name.value }}.0;
+        interface {{ m.junos_iface(iface.node.name.value) }}.0;
 {% endfor %}
         interface lo0.0;
     }
@@ -93,7 +100,7 @@ protocols {
     }
     mpls {
 {% for iface in device.interfaces.edges if iface.node.role.value == 'core' %}
-        interface {{ iface.node.name.value }}.0;
+        interface {{ m.junos_iface(iface.node.name.value) }}.0;
 {% endfor %}
     }
 }
@@ -109,8 +116,12 @@ routing-instances {
         route-distinguisher {{ vpn.vrf.node.vrf_rd.value }};
         vrf-import import-{{ vpn_name }};
         vrf-export export-{{ vpn_name }};
+        /* Required for normal IP-VPN forwarding on Junos PEs. Without
+           vrf-table-label, VPNv4 forwarding into the VRF uses per-prefix
+           labels and won't work in the typical case. */
+        vrf-table-label;
 {% for s in sites if s.node.l3vpn.node.name.value == vpn_name %}
-        interface {{ s.node.pe_interface.node.name.value }}.0;
+        interface {{ m.junos_iface(s.node.pe_interface.node.name.value) }}.0;
 {% endfor %}
         protocols {
             bgp {
@@ -118,8 +129,12 @@ routing-instances {
                     type external;
 {% for s in sites if s.node.l3vpn.node.name.value == vpn_name %}
 {% if s.node.routing_protocol.value == 'ebgp' %}
-                    peer-as {{ s.node.bgp_peer_asn.value }};
-                    neighbor {{ m.ip_only(s.node.ce_address.node.address.value) }};
+                    /* peer-as must be per-neighbor: a group-level peer-as
+                       collapses to the last value, breaking VRFs with
+                       multiple CEs at different ASNs. */
+                    neighbor {{ m.ip_only(s.node.ce_address.node.address.value) }} {
+                        peer-as {{ s.node.bgp_peer_asn.value }};
+                    }
 {% endif %}
 {% endfor %}
                 }

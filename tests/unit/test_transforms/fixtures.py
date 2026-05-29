@@ -53,7 +53,10 @@ def pe_fixture(name: str, loopback: str, net_id: str) -> dict:
                                     "node": {
                                         "__typename": "InterfacePhysical",
                                         "id": "e1",
-                                        "name": {"value": "GigabitEthernet0/0/0/0"},
+                                        # Schema convention: abstract Ethernet<N> (1-indexed).
+                                        # Per-vendor templates translate via _macros.j2
+                                        # (`iosxr_iface`, `junos_iface`, `srl_iface`).
+                                        "name": {"value": "Ethernet1"},
                                         "description": {"value": "To backbone peer"},
                                         "status": {"value": "active"},
                                         "role": {"value": "core"},

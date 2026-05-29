@@ -13,3 +13,21 @@
 {{ iface.node.name.value }}
 {% endfor %}
 {%- endmacro %}
+
+{# Map our generic Ethernet<N> interface name onto a Cisco IOS-XR port name.
+   Schema is 1-indexed; IOS-XR ports are 0-indexed under 0/0/0/N, so
+   Ethernet1 → GigabitEthernet0/0/0/0. Loopbacks pass through unchanged. #}
+{% macro iosxr_iface(name) -%}
+{%- if name.startswith('Loopback') -%}{{ name }}
+{%- else -%}GigabitEthernet0/0/0/{{ name | replace('Ethernet', '') | int - 1 }}
+{%- endif -%}
+{%- endmacro %}
+
+{# Map our generic Ethernet<N> interface name onto a Junos port name.
+   Schema is 1-indexed; Junos `ge-` units are 0-indexed under ge-0/0/N,
+   so Ethernet1 → ge-0/0/0. Loopback is the Junos-special lo0. #}
+{% macro junos_iface(name) -%}
+{%- if name.startswith('Loopback') -%}lo0
+{%- else -%}ge-0/0/{{ name | replace('Ethernet', '') | int - 1 }}
+{%- endif -%}
+{%- endmacro %}

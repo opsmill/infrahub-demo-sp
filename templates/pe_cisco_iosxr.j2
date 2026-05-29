@@ -28,7 +28,7 @@ interface Loopback0
 {% endfor %}
 {# 2. Backbone interfaces #}
 {% for iface in device.interfaces.edges if iface.node.role.value == 'core' %}
-interface {{ iface.node.name.value }}
+interface {{ m.iosxr_iface(iface.node.name.value) }}
  description {{ iface.node.description.value }}
  mtu {{ iface.node.mtu.value }}
 {% for ip in iface.node.ip_addresses.edges %}
@@ -40,7 +40,7 @@ interface {{ iface.node.name.value }}
 {# 3. Per-VRF customer interfaces #}
 {% for site_edge in sites %}
 {% set site = site_edge.node %}
-interface {{ site.pe_interface.node.name.value }}
+interface {{ m.iosxr_iface(site.pe_interface.node.name.value) }}
  description L3VPN {{ site.l3vpn.node.name.value }} - {{ site.name.value }}
  vrf {{ site.l3vpn.node.vrf.node.name.value }}
 {% if site.pe_address.node.address.value %}
@@ -78,7 +78,7 @@ router isis 1
   metric-style wide
  !
 {% for iface in device.interfaces.edges if iface.node.role.value == 'core' %}
- interface {{ iface.node.name.value }}
+ interface {{ m.iosxr_iface(iface.node.name.value) }}
   point-to-point
   address-family ipv4 unicast
   !
@@ -89,7 +89,7 @@ router isis 1
 mpls ldp
  router-id {{ ldp.router_id.value }}
 {% for iface in device.interfaces.edges if iface.node.role.value == 'core' %}
- interface {{ iface.node.name.value }}
+ interface {{ m.iosxr_iface(iface.node.name.value) }}
  !
 {% endfor %}
 !

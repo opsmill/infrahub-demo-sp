@@ -185,18 +185,66 @@ async def test_renders_eapi_http_for_push_arista() -> None:
 @pytest.mark.asyncio
 async def test_route_target_is_under_router_bgp_not_vrf_instance() -> None:
     """Modern Arista EOS rejects route-target inside `vrf instance` —
-    it belongs under `router bgp <asn> / vrf <name>`. EOS errors with:
+    it belongs under `router bgp <asn> / vrf <name>` with the `vpn-ipv4`
+    keyword. EOS errors otherwise with:
         Invalid input (at token 0: 'route-target')
     """
     rendered = await PeAristaEos.__new__(PeAristaEos).transform(
         pe_fixture_with_site("pe-lon-arista", "10.0.0.1/32", "49.0001.0100.0000.0001.00")
     )
-    # The vrf instance block must NOT contain route-target lines.
     vrf_instance_section = rendered.split("vrf instance acme-prod")[1].split("!", 1)[0]
     assert "route-target" not in vrf_instance_section, (
         "route-target must not appear under vrf instance — Arista rejects it.\n"
         f"vrf instance block was:\n{vrf_instance_section}"
     )
-    # And the bgp vrf block must contain them.
-    assert "route-target import 65000:100" in rendered
-    assert "route-target export 65000:100" in rendered
+    assert "route-target import vpn-ipv4 65000:100" in rendered
+    assert "route-target export vpn-ipv4 65000:100" in rendered
+
+
+@pytest.mark.asyncio
+async def test_global_mpls_enable_and_ldp_interfaces() -> None:
+    """Without global `mpls ip` plus per-interface `mpls ldp interface`
+    declarations, LDP adjacencies never form on cEOS — the section looks
+    configured but does nothing. Locks both in.
+    """
+    rendered = await PeAristaEos.__new__(PeAristaEos).transform(FIXTURE)
+    assert "\nmpls ip\n" in rendered
+    assert "transport-address interface Loopback0" in rendered
+    ldp_block = rendered.split("mpls ldp\n")[1].split("\n!", 1)[0]
+    assert "interface Loopback0" in ldp_block
+    assert "interface Ethernet1" in ldp_block
+
+
+@pytest.mark.asyncio
+async def test_ibgp_send_community_extended() -> None:
+    """Route-targets won't traverse the iBGP mesh without extended-community
+    propagation; without this VPNv4 routes import nowhere.
+    """
+    rendered = await PeAristaEos.__new__(PeAristaEos).transform(FIXTURE)
+    assert "neighbor RR-MESH send-community extended" in rendered
+
+
+@pytest.mark.asyncio
+async def test_vrf_redistribute_connected() -> None:
+    """PE-CE connected /30s must be injected into VPNv4 via the VRF AF."""
+    rendered = await PeAristaEos.__new__(PeAristaEos).transform(
+        pe_fixture_with_site("pe-lon-arista", "10.0.0.1/32", "49.0001.0100.0000.0001.00")
+    )
+    bgp_vrf_section = rendered.split("router bgp 65000\n   vrf acme-prod\n", 1)[1].split("\n!", 1)[
+        0
+    ]
+    assert "address-family ipv4" in bgp_vrf_section
+    assert "redistribute connected" in bgp_vrf_section
+
+
+@pytest.mark.asyncio
+async def test_emits_rancid_arista_format_marker() -> None:
+    """Batfish (and other static analyzers) pick a parser by file header.
+
+    Without a `!RANCID-CONTENT-TYPE: arista` hint, Batfish parses the config
+    against the Cisco IOS grammar — every EOS-specific construct
+    (`vrf instance`, `address-family vpn-ipv4`, `neighbor X peer group`,
+    LDP `transport-address`, …) is reported as unrecognized syntax.
+    """
+    rendered = await PeAristaEos.__new__(PeAristaEos).transform(FIXTURE)
+    assert "!RANCID-CONTENT-TYPE: arista" in rendered
