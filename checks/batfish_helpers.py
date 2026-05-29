@@ -10,10 +10,18 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
-import pandas as pd
 import requests
+
+# ``pandas`` is used only in function-signature type annotations; with
+# ``from __future__ import annotations`` they're strings, never evaluated at
+# import time. The worker container that loads this module to register the
+# check doesn't have pandas installed — keeping the import guarded keeps
+# module load cheap and side-effect-free in those environments. At runtime
+# pandas is supplied via the ``pybatfish`` Session that calls these helpers.
+if TYPE_CHECKING:
+    import pandas as pd
 
 # Platforms Batfish parses well. Nokia SR OS support is experimental and SR
 # Linux is unsupported — both are filtered out of the snapshot.
