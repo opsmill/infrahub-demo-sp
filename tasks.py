@@ -375,7 +375,7 @@ def test(c: Context, kind: str = "unit") -> None:
 
 
 @task
-def batfish_check(c: Context, backbone: str = "mpls-backbone") -> None:
+def batfish(c: Context, backbone: str = "mpls-backbone") -> None:
     """Run BatfishBackboneCheck against a running local Infrahub.
 
     Requires:
@@ -387,7 +387,7 @@ def batfish_check(c: Context, backbone: str = "mpls-backbone") -> None:
         c: Invoke Context.
         backbone: Backbone name to validate (default: mpls-backbone).
     """
-    _banner("invoke batfish-check", border="cyan")
+    _banner("invoke batfish", border="cyan")
     cmd = f"uv run infrahubctl check batfish_backbone name={backbone} --branch main"
     c.run(cmd, pty=True)
 
@@ -539,6 +539,6 @@ ns.add_task(bootstrap)
 ns.add_task(init_demo)
 ns.add_task(lint)
 ns.add_task(test)
-ns.add_task(batfish_check)
+ns.add_task(batfish)
 ns.add_task(docs)
 ns.add_collection(lab)
