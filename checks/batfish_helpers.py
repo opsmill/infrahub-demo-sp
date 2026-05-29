@@ -59,8 +59,26 @@ def _node_from_row(row: pd.Series[Any], file_name: str) -> str:
     return Path(file_name).stem
 
 
+# File-level parse statuses that mean "Batfish could not produce a usable
+# model of this config" — these stay ERROR (block the PR). Everything else
+# (PARTIALLY_UNRECOGNIZED in particular) is degraded to WARNING: the file
+# parsed, some lines weren't modelled, but the model is still useful for
+# downstream checks. Real config bugs surface via `undefinedReferences`,
+# not via partial-parse noise from Batfish's grammar gaps.
+_PARSE_FATAL_STATUSES: frozenset[str] = frozenset({"PARSE_FAIL", "ORPHANED", "WILL_NOT_COMMIT"})
+
+
 def findings_from_parse_status(df: pd.DataFrame) -> list[Finding]:
     """Map a pybatfish ``fileParseStatus`` answer into ``Finding`` rows.
+
+    Tiered severity:
+
+    - ``PASSED`` — no finding.
+    - ``PARSE_FAIL`` / ``ORPHANED`` / ``WILL_NOT_COMMIT`` — ERROR (file
+      couldn't be modelled at all, downstream checks can't run on it).
+    - Anything else (in practice ``PARTIALLY_UNRECOGNIZED``) — WARNING
+      (file modelled, some lines skipped — usually Batfish grammar gaps
+      for vendor features Batfish doesn't yet support).
 
     Args:
         df: DataFrame with at least ``File_Name``, ``Status``, ``Nodes`` columns.
@@ -73,11 +91,14 @@ def findings_from_parse_status(df: pd.DataFrame) -> list[Finding]:
         status = str(row["Status"])
         if status == _PARSE_OK:
             continue
+        severity: Literal["error", "warning"] = (
+            "error" if status in _PARSE_FATAL_STATUSES else "warning"
+        )
         file_name = str(row["File_Name"])
         node = _node_from_row(row, file_name)
         findings.append(
             Finding(
-                severity="error",
+                severity=severity,
                 query="fileParseStatus",
                 node=node,
                 message=f"config {file_name} parse status: {status}",
@@ -88,13 +109,20 @@ def findings_from_parse_status(df: pd.DataFrame) -> list[Finding]:
 
 
 def findings_from_parse_warning(df: pd.DataFrame) -> list[Finding]:
-    """Map a pybatfish ``parseWarning`` answer into ``Finding`` rows.
+    """Map a pybatfish ``parseWarning`` answer into ``Finding`` WARNING rows.
+
+    These are per-line "Batfish doesn't recognise this construct" notes
+    against a file that otherwise parsed. They're informational — Batfish
+    grammars lag real vendor syntax, and emitting one as ERROR would mean
+    blocking the PR until every grammar gap is closed upstream. Real
+    config errors surface as ``undefinedReferences`` (still ERROR) or
+    ``fileParseStatus`` with a fatal status (also ERROR).
 
     Args:
         df: DataFrame with ``Filename``, ``Line``, ``Text``, ``Comment`` columns.
 
     Returns:
-        One ``Finding`` per row, all severity ERROR.
+        One ``Finding`` per row, all severity WARNING.
     """
     findings: list[Finding] = []
     for _, row in df.iterrows():
@@ -103,7 +131,7 @@ def findings_from_parse_warning(df: pd.DataFrame) -> list[Finding]:
         line = row["Line"]
         findings.append(
             Finding(
-                severity="error",
+                severity="warning",
                 query="parseWarning",
                 node=node,
                 message=f"parse warning in {file_name} line {line}: {row['Comment']}",

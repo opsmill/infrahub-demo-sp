@@ -48,22 +48,31 @@ def test_parse_status_all_passed_yields_no_findings() -> None:
     assert findings == []
 
 
-def test_parse_status_failed_yields_one_error_per_bad_row() -> None:
+def test_parse_status_tiers_severity_by_status() -> None:
+    """Partial parses degrade to WARNING; only fatal statuses stay ERROR.
+
+    Promoting every PARTIALLY_UNRECOGNIZED to ERROR would block every PR
+    on Batfish grammar gaps for vendor features Batfish doesn't yet model
+    (`route-target import vpn-ipv4`, `vrf-import …` policies, MPLS
+    `transport-address`, etc.). Real config-correctness failures are
+    PARSE_FAIL / ORPHANED / WILL_NOT_COMMIT.
+    """
     df = pd.DataFrame(
         [
             {"File_Name": "configs/pe1.cfg", "Status": "PASSED", "Nodes": ["pe1"]},
             {"File_Name": "configs/pe2.cfg", "Status": "PARTIALLY_UNRECOGNIZED", "Nodes": ["pe2"]},
-            {"File_Name": "configs/pe3.cfg", "Status": "FAILED", "Nodes": []},
+            {"File_Name": "configs/pe3.cfg", "Status": "PARSE_FAIL", "Nodes": []},
+            {"File_Name": "configs/pe4.cfg", "Status": "ORPHANED", "Nodes": ["pe4"]},
         ]
     )
     findings = findings_from_parse_status(df)
-    assert len(findings) == 2
-    assert {f.node for f in findings} == {"pe2", "pe3"}
-    assert all(f.severity == "error" for f in findings)
-    assert all(f.query == "fileParseStatus" for f in findings)
+    assert {f.node for f in findings} == {"pe2", "pe3", "pe4"}
+    by_node = {f.node: f for f in findings}
+    assert by_node["pe2"].severity == "warning"  # partial parse — informational
+    assert by_node["pe3"].severity == "error"  # fatal — block
+    assert by_node["pe4"].severity == "error"  # fatal — block
     # pe3 had no Nodes — message should still reference the file.
-    pe3 = next(f for f in findings if f.node == "pe3")
-    assert "configs/pe3.cfg" in pe3.message
+    assert "configs/pe3.cfg" in by_node["pe3"].message
 
 
 def test_parse_warning_empty_yields_no_findings() -> None:
@@ -71,7 +80,11 @@ def test_parse_warning_empty_yields_no_findings() -> None:
     assert findings_from_parse_warning(df) == []
 
 
-def test_parse_warning_populated_yields_one_error_per_row() -> None:
+def test_parse_warning_populated_yields_one_warning_per_row() -> None:
+    """parseWarning rows are per-line "Batfish doesn't model this", not
+    config errors. Emitting them as WARNING surfaces the noise without
+    blocking the PR. Real config bugs come through `undefinedReferences`.
+    """
     df = pd.DataFrame(
         [
             {
@@ -86,7 +99,7 @@ def test_parse_warning_populated_yields_one_error_per_row() -> None:
     findings = findings_from_parse_warning(df)
     assert len(findings) == 1
     f = findings[0]
-    assert f.severity == "error"
+    assert f.severity == "warning"
     assert f.query == "parseWarning"
     assert f.node == "pe1"
     assert "line 42" in f.message
@@ -261,11 +274,14 @@ def test_run_snapshot_happy_path_no_findings(tmp_path) -> None:
 
 
 def test_run_snapshot_failed_parse_yields_error_finding(tmp_path) -> None:
+    # PARSE_FAIL is one of the real fatal Batfish statuses — it stays ERROR
+    # (blocking) regardless of the partial-parse tiering. (Made-up status
+    # strings like "FAILED" would now degrade to WARNING.)
     (tmp_path / "configs").mkdir()
     session = _fake_session_factory(
         {
             "fileParseStatus": pd.DataFrame(
-                [{"File_Name": "configs/pe1.cfg", "Status": "FAILED", "Nodes": ["pe1"]}]
+                [{"File_Name": "configs/pe1.cfg", "Status": "PARSE_FAIL", "Nodes": ["pe1"]}]
             )
         }
     )
