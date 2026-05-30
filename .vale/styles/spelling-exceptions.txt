@@ -3,6 +3,8 @@ ASNs
 Arista
 Async
 BGP
+Batfish
+Batfish's
 CLIs
 Containerlab
 Containerlab's
@@ -47,6 +49,7 @@ VRFs
 VXLAN
 Versa
 Viptela
+adjacencies
 auditability
 autoescape
 automations
@@ -66,6 +69,7 @@ enums
 env
 envrc
 evolvability
+expanders
 extranet
 hostname
 http
@@ -80,6 +84,8 @@ netmiko
 netshoot
 npm
 parallelization
+parseWarning
+parseWarnings
 reachability
 rebase
 repos

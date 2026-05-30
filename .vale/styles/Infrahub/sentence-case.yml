@@ -62,3 +62,32 @@ exceptions:
   - VLAN
   - VLANs
   - VXLAN
+  - Arista
+  - Batfish
+  - cEOS
+  - Cisco
+  - CLI
+  - DcimDevice
+  - EOS
+  - IOS-XR
+  - Juniper
+  - Junos
+  - L3VPN
+  - Linux
+  - LocationRegion
+  - LocationSite
+  - MplsBgpProcess
+  - MplsIsisProcess
+  - MplsLdpProcess
+  - network-multitool
+  - Nokia
+  - OS
+  - RoutingProtocol
+  - ServiceL3Vpn
+  - ServiceL3VpnSite
+  - ServiceSdwan
+  - ServiceSdwanSite
+  - SR
+  - TopologyMplsBackbone
+  - uv
+  - yamllint

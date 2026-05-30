@@ -1,4 +1,4 @@
-# Schema Reference
+# Schema reference
 
 This page covers the SP-demo-specific schema nodes defined in `schemas/sp/`.
 Base and extension schemas (devices, interfaces, IPAM, routing) come from
@@ -20,7 +20,7 @@ has one or more `ServiceL3VpnSite` attachments (component relationship).
 
 | Field | Kind | Required | Description | Who sets it |
 |---|---|---|---|---|
-| `name` | Text | Required | Unique human name for the VPN (e.g. `acme-prod`) | User |
+| `name` | Text | Required | Unique human name for the VPN (for example, `acme-prod`) | User |
 | `description` | Text | Optional | Free-text description | User |
 | `vpn_id` | Number | Required | Unique integer allocated from `vpn_id_pool`. Used to derive RD/RT as `<asn>:<vpn_id>` | User (catalog allocates from pool) |
 | `address_family` | Dropdown | Required | `ipv4` or `ipv4_ipv6`. Defaults to `ipv4` | User |
@@ -79,7 +79,7 @@ has one or more `ServiceSdwanSite` attachments (component relationship).
 
 | Field | Kind | Required | Description | Who sets it |
 |---|---|---|---|---|
-| `name` | Text | Required | Unique human name for the SD-WAN service (e.g. `treasury-branch-sdwan`) | User |
+| `name` | Text | Required | Unique human name for the SD-WAN service (for example, `treasury-branch-sdwan`) | User |
 | `description` | Text | Optional | Free-text description | User |
 | `service_id` | Number | Required | Unique integer allocated from `sdwan_id_pool`. Used for SD-WAN site-id derivation | User (catalog allocates from pool) |
 | `vendor` | Dropdown | Required | `viptela` (Cisco SD-WAN) or `versa` (Versa Networks). Defaults to `viptela` | User |
@@ -163,7 +163,7 @@ routing process. The `device` relationship is inherited from `RoutingProtocol`.
 |---|---|---|---|---|
 | `area_id` | Text | Required | IS-IS area (default `49.0001`) | User (bootstrap) |
 | `level` | Dropdown | Required | `level-1`, `level-2`, or `level-1-2` (default `level-2`) | User (bootstrap) |
-| `net_id` | Text | Required | ISO NET identifier (e.g. `49.0001.0100.0000.0001.00`) | User (bootstrap) |
+| `net_id` | Text | Required | ISO NET identifier (for example, `49.0001.0100.0000.0001.00`) | User (bootstrap) |
 
 ### Relationships
 
@@ -217,7 +217,7 @@ overlay process carrying VPNv4 / VPNv6 address families.
 | Field | Kind | Required | Description | Who sets it |
 |---|---|---|---|---|
 | `router_id` | Text | Required | BGP router-ID (typically the Loopback0 IP) | User (bootstrap) |
-| `address_families` | List | Required | MP-BGP address families enabled (e.g. `["vpnv4", "vpnv6"]`) | User (bootstrap) |
+| `address_families` | List | Required | MP-BGP address families enabled (for example, `["vpnv4", "vpnv6"]`) | User (bootstrap) |
 
 ### Relationships
 
@@ -240,7 +240,7 @@ hosting capability via `LocationHosting`. Both render under
 
 | Kind | Inherits | Purpose |
 |---|---|---|
-| `LocationRegion` | `LocationGeneric` | Geographic region (e.g. `emea`) |
+| `LocationRegion` | `LocationGeneric` | Geographic region (for example, `emea`) |
 | `LocationSite` | `LocationGeneric`, `LocationHosting` | PoP / site that hosts PEs |
 
 ---
@@ -265,7 +265,7 @@ The demo bootstrap sets `role = pe` on all four PEs.
 
 ---
 
-## Resource Pools
+## Resource pools
 
 The following pools are bootstrapped in `objects/50_pools.yml` and consumed
 by the generator and the Streamlit catalog:

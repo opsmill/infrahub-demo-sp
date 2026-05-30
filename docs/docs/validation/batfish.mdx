@@ -12,7 +12,7 @@ the Streamlit service catalog.
 
 For each MPLS backbone, the check:
 
-1. Fetches the rendered config artifact for every PE whose platform is
+1. Fetches the rendered configuration artifact for every PE whose platform is
    in `SUPPORTED_PLATFORMS` (`arista_eos`, `cisco_iosxr`, `juniper_junos`).
    Nokia SR OS and SR Linux are not parsed by Batfish today — they're
    reported as INFO so the gap is explicit, not invisible.
@@ -24,7 +24,7 @@ For each MPLS backbone, the check:
 | `fileParseStatus` | Files Batfish couldn't model at all (`PARSE_FAIL`, `ORPHANED`, `WILL_NOT_COMMIT`) | ERROR |
 | `fileParseStatus` | Files partially parsed (`PARTIALLY_UNRECOGNIZED` — Batfish grammar gaps) | WARNING |
 | `parseWarning` | Per-line "Batfish doesn't model this construct" notes | WARNING |
-| `undefinedReferences` | Config references a structure (route-map, ACL, peer-group) that isn't defined anywhere | ERROR |
+| `undefinedReferences` | Configuration references a structure (route-map, ACL, peer-group) that isn't defined anywhere | ERROR |
 | `bgpSessionCompatibility` | Configured BGP session doesn't pair cleanly with the other end (mismatched AS, missing remote, etc.) | WARNING |
 | `isisEdges` | Expected IS-IS adjacency between two PEs isn't present | WARNING |
 
@@ -56,7 +56,7 @@ page. It runs the same query battery as the CLI, but with stage-by-stage
 progress:
 
 1. *Fetching backbone topology …*
-2. *Fetching N rendered config(s) …* (one tick per PE)
+2. *Fetching N rendered configuration(s) …* (one tick per PE)
 3. *Waiting for Batfish coordinator at batfish:9996 …*
 4. *Initializing snapshot …*
 5. *Running query: Parse status / Parse warnings / Undefined references / BGP / IS-IS edges*
@@ -80,7 +80,7 @@ from any other container on the `sp-demo` network as `batfish:9996`. No
 host port mapping is set up by default — the sidecar talks only inside
 the compose network.
 
-Set `BATFISH_DISABLED=1` to skip the check entirely (e.g. for CI
+Set `BATFISH_DISABLED=1` to skip the check entirely (for example, for CI
 environments that don't want to start the sidecar):
 
 ```bash
@@ -96,8 +96,8 @@ BATFISH_DISABLED=1 uv run pytest
   `route-target import vpn-ipv4` show up as parseWarnings even though
   the configs are valid on the target platform. That's why parseWarning
   is mapped to WARNING (informational) rather than ERROR.
-- **IS-IS adjacencies are inferred from config, not observed.** Batfish
+- **IS-IS adjacencies are inferred from configuration, not observed.** Batfish
   compares advertised IS-IS interface tuples to predict who *should*
   peer; it doesn't see live protocol state. A `isisEdges` finding may
-  mean "config drift between PEs" or simply "this PE isn't fully
+  mean "configuration drift between PEs" or "this PE isn't fully
   meshed with the others yet."
