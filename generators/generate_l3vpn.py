@@ -52,10 +52,18 @@ class L3VpnGenerator(InfrahubGenerator):
         vpn_id = int(vpn["vpn_id"]["value"])
         rd = f"{backbone_asn}:{vpn_id}"
 
-        if vpn.get("vrf") and vpn["vrf"].get("node"):
+        # Idempotency is derived from the live relationship, NOT the generator
+        # query: the query must not return ``vrf`` (an object this generator
+        # creates), or its query-group bookkeeping destabilises in the
+        # proposed-change pipeline (CoreGraphQLQueryGroupUpsert -> NodeNotFound,
+        # branch wiped). See queries/service/l3vpn.gql.
+        vpn_obj = await self.client.get(kind="ServiceL3Vpn", id=vpn["id"], branch=self.branch)
+        vrf_rel: Any = vpn_obj.vrf
+        await vrf_rel.fetch()
+        if vrf_rel.peer:
             return await self.client.get(
                 kind="IpamVRF",
-                id=vpn["vrf"]["node"]["id"],
+                id=vrf_rel.peer.id,
                 branch=self.branch,
             )
 
@@ -71,7 +79,6 @@ class L3VpnGenerator(InfrahubGenerator):
         )
         await vrf.save(allow_upsert=True)
 
-        vpn_obj = await self.client.get(kind="ServiceL3Vpn", id=vpn["id"], branch=self.branch)
         vpn_obj.vrf = vrf
         vpn_obj.status.value = "active"  # type: ignore[union-attr]
         await vpn_obj.save(allow_upsert=True)
@@ -99,10 +106,15 @@ class L3VpnGenerator(InfrahubGenerator):
         )
         pe_name = site["pe_device"]["node"]["name"]["value"]
 
-        if site.get("pe_interface") and site["pe_interface"].get("node"):
+        # Idempotency via live relationships, NOT the generator query (the query
+        # must not return pe_interface / pe_address / ce_address, which this
+        # generator creates — see queries/service/l3vpn.gql and _ensure_vrf).
+        iface_rel: Any = site_obj.pe_interface
+        await iface_rel.fetch()
+        if iface_rel.peer:
             iface = await self.client.get(
                 kind="InterfacePhysical",
-                id=site["pe_interface"]["node"]["id"],
+                id=iface_rel.peer.id,
                 branch=self.branch,
             )
         else:
@@ -113,9 +125,11 @@ class L3VpnGenerator(InfrahubGenerator):
             await iface.save(allow_upsert=True)
             site_obj.pe_interface = iface
 
-        has_pe_addr = site.get("pe_address") and site["pe_address"].get("node")
-        has_ce_addr = site.get("ce_address") and site["ce_address"].get("node")
-        if not has_pe_addr or not has_ce_addr:
+        pe_addr_rel: Any = site_obj.pe_address
+        ce_addr_rel: Any = site_obj.ce_address
+        await pe_addr_rel.fetch()
+        await ce_addr_rel.fetch()
+        if not pe_addr_rel.peer or not ce_addr_rel.peer:
             p2p = await allocate_prefix_from_pool(
                 self.client,
                 "pe_ce_pool",

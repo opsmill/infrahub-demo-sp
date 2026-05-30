@@ -145,37 +145,16 @@ if submitted:
             )
             run_async(site_obj.save())
 
-        # Run the SD-WAN generator explicitly on the branch and wait for it to
-        # finish, *before* kicking off artifact rendering. The generator
-        # materialises one edge device per site and adds it to the vendor edge
-        # group (sdwan_versa_edges / sdwan_viptela_edges). The SD-WAN artifact
-        # definitions target that group, so if it is still empty when artifact
-        # generation runs, no per-edge config artifact is produced.
-        #
-        # We trigger the generator the same way bootstrap does
-        # (scripts/run_generator.py) instead of relying on automatic dispatch:
-        # in this wizard the generator otherwise only runs inside the
-        # proposed-change pipeline, which we open last — too late for the
-        # artifact step below. ``wait_until_completion`` blocks until the edges
-        # and LAN IPs exist, so artifacts render against complete data.
-        generator = run_async(
-            client.get(kind="CoreGeneratorDefinition", name__value="generate_sdwan")
-        )
-        run_async(
-            client.execute_graphql(
-                """
-                mutation RunGenerator($id: String!) {
-                  CoreGeneratorDefinitionRun(
-                    data: {id: $id}, wait_until_completion: true
-                  ) {
-                    ok
-                  }
-                }
-                """,
-                variables={"id": generator.id},
-                branch_name=branch_name,
-            )
-        )
+        # Wait for the SD-WAN generator (auto-fired by group membership) to
+        # materialise the edge devices / LAN IPs before kicking off artifact
+        # rendering, otherwise per-edge configs render against stale data.
+        def _is_active() -> bool:
+            v = run_async(client.get(kind="ServiceSdwan", name__value=name))
+            return v.status.value == "active"
+
+        deadline = time.monotonic() + 120
+        while not _is_active() and time.monotonic() < deadline:
+            time.sleep(2)
 
         # Trigger artifact regeneration on the branch so the proposed change
         # shows real per-edge config diffs. The /api/artifact/generate endpoint

@@ -9,30 +9,52 @@ import pytest
 from generators.generate_sdwan import SdwanGenerator
 
 
-def _make_gen(
-    payload: dict, *, existing_members: list | None = None
-) -> tuple[SdwanGenerator, MagicMock]:
-    """Build a SdwanGenerator instance with a mocked client primed by ``payload``.
+def _rel(peer: object | None = None) -> MagicMock:
+    """A cardinality-one relationship mock with an async ``fetch`` and a ``peer``."""
+    return MagicMock(fetch=AsyncMock(), peer=peer)
 
-    ``existing_members`` controls what the edge group reports as already in it —
-    use this to exercise the "add edge to group" path vs the idempotent no-op.
+
+def _make_gen(
+    payload: dict,
+    *,
+    existing_members: list | None = None,
+    site_has_edge: bool = False,
+    site_has_lan: bool = False,
+) -> tuple[SdwanGenerator, MagicMock]:
+    """Build a SdwanGenerator with a mocked client primed by ``payload``.
+
+    Idempotency now comes from the live ServiceSdwanSite relationships
+    (``sdwan_edge``/``lan_address``), not the query payload — ``site_has_edge``
+    / ``site_has_lan`` set whether those relationships already have a peer.
+    ``existing_members`` controls what the edge group already contains.
     """
     client = MagicMock()
-    # The generator does `client.get(...)` for the CoreStandardGroup, then for
-    # the ServiceSdwanSite, then for an existing DcimDevice if the site has
-    # one, and finally for the ServiceSdwan row to flip status. We hand out
-    # MagicMocks per-call so tests can inspect specific interactions.
-    client.get = AsyncMock(
-        side_effect=lambda **_: MagicMock(
-            members=MagicMock(fetch=AsyncMock(), peers=existing_members or [], add=MagicMock()),
-            save=AsyncMock(),
-            id="mock-id",
-            status=MagicMock(value="draft"),
-            sdwan_edge=None,
-            lan_address=None,
-        )
+    group = MagicMock(
+        members=MagicMock(fetch=AsyncMock(), peers=existing_members or [], add=MagicMock()),
+        save=AsyncMock(),
+        id="group-id",
     )
-    client.create = AsyncMock()
+
+    def get_side_effect(**kwargs: object) -> MagicMock:
+        kind = kwargs.get("kind")
+        if kind == "CoreStandardGroup":
+            return group
+        if kind == "ServiceSdwanSite":
+            return MagicMock(
+                id="site-id",
+                sdwan_edge=_rel(MagicMock(id="edge-existing") if site_has_edge else None),
+                lan_address=_rel(MagicMock(id="ip-existing") if site_has_lan else None),
+                status=MagicMock(value="draft"),
+                save=AsyncMock(),
+            )
+        if kind == "DcimDevice":
+            return MagicMock(id="edge-existing", save=AsyncMock())
+        if kind == "ServiceSdwan":
+            return MagicMock(status=MagicMock(value="draft"), save=AsyncMock())
+        return MagicMock(save=AsyncMock(), id="mock-id")
+
+    client.get = AsyncMock(side_effect=get_side_effect)
+    client.create = AsyncMock(return_value=MagicMock(id="created-id", save=AsyncMock()))
     client.filters = AsyncMock(return_value=[])
 
     gen = SdwanGenerator.__new__(SdwanGenerator)
@@ -69,17 +91,13 @@ def _site(
     name: str = "london",
     location_short: str = "lon",
     lan_subnet: str = "10.10.0.0/24",
-    has_edge: bool = False,
-    has_lan: bool = False,
 ) -> dict:
-    """One ServiceSdwanSite as it appears in the SDK's nested edge payload."""
+    """One ServiceSdwanSite as it appears in the (non-self-referential) query payload."""
     return {
         "id": f"site-{name}",
         "name": {"value": name},
         "location": {"node": {"shortname": {"value": location_short}}},
         "lan_subnet": {"node": {"prefix": {"value": lan_subnet}}},
-        "sdwan_edge": {"node": {"id": f"edge-{name}"}} if has_edge else None,
-        "lan_address": {"node": {"id": f"ip-{name}"}} if has_lan else None,
     }
 
 
@@ -102,8 +120,8 @@ async def test_unknown_vendor_raises() -> None:
 @pytest.mark.asyncio
 async def test_viptela_uses_cisco_viptela_platform_and_edge_group() -> None:
     """Vendor 'viptela' → (cisco_viptela, cEdge-1000, sdwan_viptela_edges)."""
-    payload = _svc_payload(vendor="viptela", sites=[_site(has_edge=False, has_lan=True)])
-    gen, client = _make_gen(payload)
+    payload = _svc_payload(vendor="viptela", sites=[_site()])
+    gen, client = _make_gen(payload, site_has_lan=True)
     with patch("generators.generate_sdwan.find_or_create_device", new=AsyncMock()) as foc:
         foc.return_value = MagicMock(id="edge-new")
         await gen.generate()
@@ -124,8 +142,8 @@ async def test_viptela_uses_cisco_viptela_platform_and_edge_group() -> None:
 @pytest.mark.asyncio
 async def test_versa_uses_versa_flexvnf_platform_and_edge_group() -> None:
     """Vendor 'versa' → (versa_flexvnf, FlexVNF-200, sdwan_versa_edges)."""
-    payload = _svc_payload(vendor="versa", sites=[_site(has_edge=False, has_lan=True)])
-    gen, client = _make_gen(payload)
+    payload = _svc_payload(vendor="versa", sites=[_site()])
+    gen, client = _make_gen(payload, site_has_lan=True)
     with patch("generators.generate_sdwan.find_or_create_device", new=AsyncMock()) as foc:
         foc.return_value = MagicMock(id="edge-new")
         await gen.generate()
@@ -143,7 +161,7 @@ async def test_versa_uses_versa_flexvnf_platform_and_edge_group() -> None:
 async def test_lan_address_first_usable_in_subnet() -> None:
     """The materialised LAN IP is network_address + 1 with the subnet's prefix length."""
     payload = _svc_payload(sites=[_site(lan_subnet="10.42.7.0/24")])
-    gen, client = _make_gen(payload)
+    gen, client = _make_gen(payload, site_has_lan=False)
     with patch("generators.generate_sdwan.find_or_create_device", new=AsyncMock()):
         await gen.generate()
 
@@ -155,8 +173,8 @@ async def test_lan_address_first_usable_in_subnet() -> None:
 @pytest.mark.asyncio
 async def test_existing_lan_address_not_recreated() -> None:
     """Sites that already have a lan_address peer are skipped — no second IPAddress create."""
-    payload = _svc_payload(sites=[_site(has_lan=True)])
-    gen, client = _make_gen(payload)
+    payload = _svc_payload(sites=[_site()])
+    gen, client = _make_gen(payload, site_has_lan=True)
     with patch("generators.generate_sdwan.find_or_create_device", new=AsyncMock()):
         await gen.generate()
     assert not any(
@@ -166,9 +184,9 @@ async def test_existing_lan_address_not_recreated() -> None:
 
 @pytest.mark.asyncio
 async def test_existing_edge_not_recreated() -> None:
-    """Sites with `sdwan_edge` set fetch the device by id — no find_or_create_device call."""
-    payload = _svc_payload(sites=[_site(has_edge=True, has_lan=True)])
-    gen, _client = _make_gen(payload)
+    """Sites whose sdwan_edge relationship already has a peer fetch it — no create."""
+    payload = _svc_payload(sites=[_site()])
+    gen, _client = _make_gen(payload, site_has_edge=True, site_has_lan=True)
     with patch("generators.generate_sdwan.find_or_create_device", new=AsyncMock()) as foc:
         await gen.generate()
         foc.assert_not_called()

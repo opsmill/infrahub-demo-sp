@@ -8,7 +8,6 @@ query L3Vpn($name: String!) {
         address_family { value }
         status { value }
         tenant { node { id name { value } } }
-        vrf { node { id name { value } vrf_rd { value } } }
         sites {
           edges {
             node {
@@ -19,10 +18,7 @@ query L3Vpn($name: String!) {
               static_routes { value }
               status { value }
               pe_device { node { id name { value } platform { node { name { value } } } } }
-              pe_interface { node { id name { value } } }
               customer_subnet { node { id prefix { value } } }
-              pe_address { node { id address { value } } }
-              ce_address { node { id address { value } } }
             }
           }
         }

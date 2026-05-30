@@ -18,8 +18,6 @@ query Sdwan($name: String!) {
               status { value }
               location { node { id name { value } shortname { value } } }
               lan_subnet { node { id prefix { value } } }
-              lan_address { node { id address { value } } }
-              sdwan_edge { node { id name { value } } }
             }
           }
         }

@@ -86,11 +86,21 @@ class SdwanGenerator(InfrahubGenerator):
         site_obj = await self.client.get(kind="ServiceSdwanSite", id=site["id"], branch=self.branch)
         location_name = site["location"]["node"]["shortname"]["value"]
 
-        has_edge = site.get("sdwan_edge") and site["sdwan_edge"].get("node")
-        if has_edge:
+        # Idempotency is derived from the live object's relationships, NOT from
+        # the generator query. The query must not return ``sdwan_edge`` /
+        # ``lan_address`` (the objects this generator creates): if it did, the
+        # generator's internal query-group (``collect_data(update_group=True)``)
+        # would track those freshly-created nodes and destabilise — its
+        # ``CoreGraphQLQueryGroupUpsert`` raises ``NodeNotFound`` and the branch
+        # gets wiped inside the proposed-change pipeline. Fetching the
+        # relationships here preserves idempotency without that coupling, the
+        # same way infrahub-demo-dc's generators look state up separately.
+        edge_rel: Any = site_obj.sdwan_edge
+        await edge_rel.fetch()
+        if edge_rel.peer:
             edge = await self.client.get(
                 kind="DcimDevice",
-                id=site["sdwan_edge"]["node"]["id"],
+                id=edge_rel.peer.id,
                 branch=self.branch,
             )
         else:
@@ -106,8 +116,9 @@ class SdwanGenerator(InfrahubGenerator):
             )
             site_obj.sdwan_edge = edge
 
-        has_lan = site.get("lan_address") and site["lan_address"].get("node")
-        if not has_lan:
+        lan_rel: Any = site_obj.lan_address
+        await lan_rel.fetch()
+        if not lan_rel.peer:
             lan_subnet_str = site["lan_subnet"]["node"]["prefix"]["value"]
             net = ipaddress.IPv4Network(lan_subnet_str)
             lan_ip = await self.client.create(

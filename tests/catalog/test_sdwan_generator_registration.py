@@ -1,15 +1,14 @@
-"""Catalog test: service generator registration in .infrahub.yml.
+"""Guard the service generators against self-referential queries.
 
-Guards the two-part fix for the service-catalog wizards (SD-WAN and
-L3VPN) not producing config artifacts:
-
-1. Each wizard runs its generator explicitly before rendering artifacts
-   (covered in ``pages/2_Create_SDWAN.py`` / ``pages/1_Create_L3VPN.py``).
-2. Neither generator may re-run inside the proposed-change pipeline
-   (``execute_in_proposed_change: false``). Their queries return the
-   objects they create (sdwan_edge / lan_address; vrf / pe_interface /
-   pe_address / ce_address); re-running as a pipeline check destabilises
-   the internal query-group update and deletes the freshly-rendered data.
+A generator query must return only the *inputs* it reads, never the objects
+the generator *creates*. If a generator's query returns its own outputs (e.g.
+``sdwan_edge``/``lan_address`` for SD-WAN, ``vrf``/``pe_interface``/
+``pe_address``/``ce_address`` for L3VPN), the generator's internal query-group
+bookkeeping (``collect_data(update_group=True)``) tracks freshly-created nodes
+and destabilises inside the proposed-change pipeline — ``CoreGraphQLQueryGroup``
+upsert raises ``NodeNotFound`` and the branch is wiped, so no config artifact
+survives. The generators derive idempotency from live relationships instead
+(matching the infrahub-demo-dc generator pattern).
 """
 
 from __future__ import annotations
@@ -33,6 +32,17 @@ def test_sdwan_generator_registered() -> None:
     assert Path(g["file_path"]).exists()
 
 
-@pytest.mark.parametrize("generator_name", ["generate_sdwan", "generate_l3vpn"])
-def test_generator_not_run_in_proposed_change(generator_name: str) -> None:
-    assert _generators()[generator_name]["execute_in_proposed_change"] is False
+@pytest.mark.parametrize(
+    ("query_path", "forbidden_fields"),
+    [
+        ("queries/service/sdwan.gql", ["sdwan_edge", "lan_address"]),
+        ("queries/service/l3vpn.gql", ["vrf", "pe_interface", "pe_address", "ce_address"]),
+    ],
+)
+def test_generator_query_not_self_referential(query_path: str, forbidden_fields: list[str]) -> None:
+    query = Path(query_path).read_text()
+    for field in forbidden_fields:
+        assert f"{field} " not in query and f"{field}{{" not in query, (
+            f"{query_path} returns generator-created field '{field}'; this makes the "
+            "generator query self-referential and destabilises the proposed-change pipeline"
+        )

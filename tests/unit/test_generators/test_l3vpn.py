@@ -14,7 +14,18 @@ async def test_generator_creates_vrf_with_correct_rd_on_first_run() -> None:
 
     client = MagicMock()
     client.create = AsyncMock()
-    client.get = AsyncMock()
+
+    # Idempotency is now read from the live ServiceL3Vpn.vrf relationship rather
+    # than the query payload, so the mock must report "no VRF yet" (peer=None)
+    # for the first-run path to create one.
+    def _get_side_effect(**kwargs: object) -> MagicMock:
+        if kwargs.get("kind") == "ServiceL3Vpn":
+            obj = MagicMock(status=MagicMock(value="draft"), save=AsyncMock())
+            obj.vrf = MagicMock(fetch=AsyncMock(), peer=None)
+            return obj
+        return MagicMock(save=AsyncMock())
+
+    client.get = AsyncMock(side_effect=_get_side_effect)
     client.filters = AsyncMock(return_value=[])
 
     payload = {
