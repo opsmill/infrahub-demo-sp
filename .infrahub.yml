@@ -90,6 +90,13 @@ generator_definitions:
     class_name: L3VpnGenerator
     parameters:
       name: name__value
+    # Same rationale as generate_sdwan below: the service-catalog wizard runs
+    # this generator explicitly before opening the proposed change, and the
+    # generator's query returns the objects it creates (vrf, pe_interface,
+    # pe_address, ce_address). Re-running it as a proposed-change check is
+    # redundant and corrupts the freshly-rendered data. Disable the in-pipeline
+    # run; the post-merge run still applies.
+    execute_in_proposed_change: false
   - name: generate_sdwan
     file_path: generators/generate_sdwan.py
     targets: sdwans
@@ -97,6 +104,15 @@ generator_definitions:
     class_name: SdwanGenerator
     parameters:
       name: name__value
+    # The service-catalog wizard runs this generator explicitly on the branch
+    # (CoreGeneratorDefinitionRun) before opening the proposed change, so the
+    # edge devices exist by the time artifacts render. Re-running it *as a check*
+    # inside the proposed-change pipeline is therefore redundant — and harmful:
+    # the generator's query returns the objects it creates (sdwan_edge,
+    # lan_address), which destabilises the in-pipeline run (CoreGraphQLQueryGroup
+    # upsert hits a missing node) and deletes the freshly-rendered edges and
+    # artifacts. Disable the in-pipeline run; the post-merge run still applies.
+    execute_in_proposed_change: false
 check_definitions:
   - {name: l3vpn_overlap, class_name: L3VpnOverlapCheck, file_path: checks/l3vpn_overlap.py, targets: l3vpns}
   - {name: l3vpn_site_subnet, class_name: L3VpnSiteSubnetCheck, file_path: checks/l3vpn_site_subnet.py, targets: l3vpns}

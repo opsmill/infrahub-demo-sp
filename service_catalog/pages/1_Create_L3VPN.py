@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import time
 import urllib.request
 import uuid
 from typing import Any
@@ -131,17 +130,36 @@ if submitted:
             )
             run_async(site_obj.save())
 
-        # Wait for the L3VPN generator (auto-fired by group membership) to
-        # materialize the VRF / interfaces / IPs before triggering artifact
-        # rendering, otherwise downstream artifacts render against stale data
+        # Run the L3VPN generator explicitly on the branch and wait for it to
+        # finish, *before* triggering artifact rendering. The generator
+        # materializes the VRF / interfaces / IPs the artifact templates depend
+        # on; if we render before it runs, downstream artifacts use stale data
         # and the proposed change shows no diff against main.
-        def _is_active() -> bool:
-            v = run_async(client.get(kind="ServiceL3Vpn", name__value=name))
-            return v.status.value == "active"
-
-        deadline = time.monotonic() + 120
-        while not _is_active() and time.monotonic() < deadline:
-            time.sleep(2)
+        #
+        # We trigger the generator the same way bootstrap does
+        # (scripts/run_generator.py) instead of relying on automatic dispatch:
+        # in this wizard the generator otherwise only runs inside the
+        # proposed-change pipeline, which we open last — too late for the
+        # artifact step below. ``wait_until_completion`` blocks until the VRF
+        # and per-site IPs exist, so artifacts render against complete data.
+        generator = run_async(
+            client.get(kind="CoreGeneratorDefinition", name__value="generate_l3vpn")
+        )
+        run_async(
+            client.execute_graphql(
+                """
+                mutation RunGenerator($id: String!) {
+                  CoreGeneratorDefinitionRun(
+                    data: {id: $id}, wait_until_completion: true
+                  ) {
+                    ok
+                  }
+                }
+                """,
+                variables={"id": generator.id},
+                branch_name=branch_name,
+            )
+        )
 
         # Trigger artifact regeneration on the branch so the proposed change
         # shows real per-PE config diffs. Infrahub doesn't automatically
