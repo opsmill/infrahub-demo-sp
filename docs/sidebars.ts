@@ -29,6 +29,13 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
+      label: 'Validation',
+      items: [
+        'validation/batfish',
+      ],
+    },
+    {
+      type: 'category',
       label: 'Operations',
       items: [
         'troubleshooting',

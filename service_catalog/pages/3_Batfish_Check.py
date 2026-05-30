@@ -17,6 +17,7 @@ from typing import Any
 
 import streamlit as st
 from infrahub_sdk.exceptions import NodeNotFoundError
+from utils import client_for, run_async
 
 from checks.batfish_helpers import (
     SUPPORTED_PLATFORMS,
@@ -28,7 +29,6 @@ from checks.batfish_helpers import (
     findings_from_undefined_references,
     wait_for_batfish,
 )
-from utils import client_for, run_async
 
 # Per-platform artifact name. Kept in sync with the same mapping in
 # `checks/batfish_backbone.py` — both files reach into Infrahub's

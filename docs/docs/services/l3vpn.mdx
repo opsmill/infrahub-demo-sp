@@ -70,6 +70,7 @@ sequenceDiagram
 | `l3vpn_site_subnet` | `checks/l3vpn_site_subnet.py` | The customer subnet is not already claimed by another site in the same VRF |
 | `pe_interface_alloc` | `checks/pe_interface_alloc.py` | The nominated PE interface exists and has `status = free` |
 | `backbone_session_count` | `checks/backbone_session_count.py` | Every PE in the backbone has at least 3 iBGP sessions (full-mesh invariant) |
+| `batfish_backbone` | `checks/batfish_backbone.py` | Static validation of the rendered backbone configs via Batfish — see [Batfish validation](../validation/batfish.mdx) for the full query battery |
 
 A failing check blocks merge of the proposed change. The operator can see
 the check result in the Infrahub UI under the proposed change's **Checks** tab.

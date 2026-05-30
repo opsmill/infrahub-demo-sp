@@ -63,7 +63,27 @@ overlays. The flow mirrors Create L3VPN: pick vendor and topology, list
 the sites, submit. See [services/sdwan](./services/sdwan.mdx) for the
 lifecycle, vendor differences, and known gaps.
 
-## 5. (Optional) Bring up the containerlab
+## 5. (Optional) Run Batfish validation
+
+Under the sidebar **Validation → Batfish Check** the catalog runs
+`BatfishBackboneCheck` against the rendered MPLS backbone configs and
+shows findings bucketed by severity. Each query (parse status, undefined
+references, BGP session compatibility, IS-IS adjacency mesh) progresses
+with its own status indicator so a slow Batfish init isn't a blank
+screen.
+
+The Batfish sidecar is enabled by default in `docker-compose.override.yml`
+and started by `invoke start`. You can also run the same check from the
+command line:
+
+```bash
+uv run invoke batfish
+```
+
+See [validation/batfish](./validation/batfish.mdx) for what each
+finding means and how severity is tiered.
+
+## 6. (Optional) Bring up the containerlab
 
 See [`lab/containerlab`](./lab/containerlab.mdx).
 
