@@ -145,26 +145,18 @@ if submitted:
             )
             run_async(site_obj.save())
 
-        # Wait for the SD-WAN generator (auto-fired by group membership) to
-        # materialise the edge devices / LAN IPs before kicking off artifact
-        # rendering, otherwise per-edge configs render against stale data.
-        def _is_active() -> bool:
-            v = run_async(client.get(kind="ServiceSdwan", name__value=name))
-            return v.status.value == "active"
-
-        deadline = time.monotonic() + 120
-        while not _is_active() and time.monotonic() < deadline:
-            time.sleep(2)
-
-        # Trigger artifact regeneration on the branch so the proposed change
-        # shows real per-edge config diffs. The /api/artifact/generate endpoint
-        # returns 200 immediately and the work happens async server-side, so
-        # poll for the expected artifacts and re-POST any that don't show up
-        # within the timeout (handles a race where the regen request beats the
-        # generator's group-membership write to the read replica).
-        sdwan_edge_group = "sdwan_viptela_edges" if vendor == "viptela" else "sdwan_versa_edges"
+        # The SD-WAN generator is auto-dispatched when the service joins the
+        # ``sdwans`` group; it materialises one edge device + LAN IP per site,
+        # adds each edge to the vendor edge group, and flips the service to
+        # ``active`` as its final step. Artifacts target that vendor group, so
+        # we must wait for the generator before rendering — and then keep
+        # re-triggering generation until one config artifact per site exists,
+        # because /api/artifact/generate is async and a no-op against a group
+        # that is still empty (the generator and the artifact request race).
         sdwan_def_name = "sdwan-viptela-config" if vendor == "viptela" else "sdwan-versa-config"
         artifact_definitions = run_async(client.all(kind="CoreArtifactDefinition"))
+        sdwan_def = next(d for d in artifact_definitions if d.name.value == sdwan_def_name)
+        expected_edge_count = len(sites)
 
         def _post_definition(def_id: str) -> None:
             url = f"{client.address}/api/artifact/generate/{def_id}?branch={branch_name}"
@@ -175,37 +167,36 @@ if submitted:
             )
             urllib.request.urlopen(request).read()
 
-        for definition in artifact_definitions:
-            _post_definition(definition.id)
-
-        # Confirm the SD-WAN edge artifacts (one per site) actually materialised.
-        # Re-POST once if they're still missing after the first wait window.
-        edge_group_obj = run_async(
-            client.get(kind="CoreStandardGroup", name__value=sdwan_edge_group)
-        )
-        run_async(edge_group_obj.members.fetch())
-        expected_edge_count = len(edge_group_obj.members.peers)
-        sdwan_def = next(d for d in artifact_definitions if d.name.value == sdwan_def_name)
+        def _service_active() -> bool:
+            v = run_async(client.get(kind="ServiceSdwan", name__value=name))
+            return v.status.value == "active"
 
         def _count_sdwan_artifacts() -> int:
             return len(
-                run_async(
-                    client.filters(
-                        kind="CoreArtifact",
-                        definition__ids=[sdwan_def.id],
-                    )
-                )
+                run_async(client.filters(kind="CoreArtifact", definition__ids=[sdwan_def.id]))
             )
 
-        deadline = time.monotonic() + 90
-        reposted = False
+        deadline = time.monotonic() + 240
+        posted_all = False
+        last_post = 0.0
         while time.monotonic() < deadline:
+            if not posted_all:
+                if not _service_active():
+                    time.sleep(3)
+                    continue
+                # Generator finished (edges exist) — render every definition once.
+                for definition in artifact_definitions:
+                    _post_definition(definition.id)
+                posted_all = True
+                last_post = time.monotonic()
             if _count_sdwan_artifacts() >= expected_edge_count:
                 break
-            time.sleep(3)
-            if not reposted and time.monotonic() > deadline - 60:
+            # Re-poke the SD-WAN definition periodically until the per-edge
+            # artifacts show up (covers read-replica lag on group membership).
+            if time.monotonic() - last_post > 20:
                 _post_definition(sdwan_def.id)
-                reposted = True
+                last_post = time.monotonic()
+            time.sleep(3)
         else:
             st.warning(
                 f"Only {_count_sdwan_artifacts()} of {expected_edge_count} "
