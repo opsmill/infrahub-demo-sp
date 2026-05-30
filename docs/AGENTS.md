@@ -15,7 +15,7 @@ pages (use relative paths, not absolute URLs).
 Follow the [Diataxis framework](https://diataxis.fr/) loosely:
 
 - **Tutorials / quickstart** — getting started in minimal steps
-- **How-to guides** — task-oriented (e.g. adding a new vendor transform)
+- **How-to guides** — task-oriented (for example, adding a new vendor transform)
 - **Reference** — schema tables, CLI flag lists, API shapes
 - **Explanation / architecture** — why things are designed the way they are
 
@@ -84,7 +84,7 @@ uv run yamllint .
 - No `TODO`, `TBD`, or `XXX` placeholders in committed files.
 - No raw credential values — use `<your-token>` placeholders.
 - No absolute filesystem paths that are specific to a developer's machine.
-- No generated content that duplicates the code (e.g. do not paste full
+- No generated content that duplicates the code (for example, do not paste full
   Jinja2 templates into docs; link to the source file instead).
 
 ## When to update docs
