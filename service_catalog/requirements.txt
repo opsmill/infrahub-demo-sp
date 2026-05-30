@@ -4,3 +4,7 @@ requests>=2.34.2
 pyyaml>=6.0
 pandas>=2.0.0
 python-dotenv>=1.2.2
+# pybatfish drives the Batfish Check page (pages/3_Batfish_Check.py).
+# The page imports the helpers from `checks/batfish_helpers.py` (mounted
+# read-only at /app/checks) and talks to the batfish sidecar directly.
+pybatfish>=2025.7.7
