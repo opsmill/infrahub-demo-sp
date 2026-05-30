@@ -52,33 +52,31 @@ class L3VpnGenerator(InfrahubGenerator):
         vpn_id = int(vpn["vpn_id"]["value"])
         rd = f"{backbone_asn}:{vpn_id}"
 
-        # Idempotency is derived from the live relationship, NOT the generator
-        # query: the query must not return ``vrf`` (an object this generator
-        # creates), or its query-group bookkeeping destabilises in the
-        # proposed-change pipeline (CoreGraphQLQueryGroupUpsert -> NodeNotFound,
-        # branch wiped). See queries/service/l3vpn.gql.
-        vpn_obj = await self.client.get(kind="ServiceL3Vpn", id=vpn["id"], branch=self.branch)
-        vrf_rel: Any = vpn_obj.vrf
-        await vrf_rel.fetch()
-        if vrf_rel.peer:
-            return await self.client.get(
-                kind="IpamVRF",
-                id=vrf_rel.peer.id,
-                branch=self.branch,
-            )
-
-        rt = await find_or_create_route_target(self.client, rd, self.branch)
-        vrf = await self.client.create(
-            kind="IpamVRF",
-            branch=self.branch,
-            name=vpn["name"]["value"],
-            vrf_rd=rd,
-            import_rt=rt,
-            export_rt=rt,
-            namespace={"hfid": ["default"]},
+        # Idempotency is derived from deterministic keys via ``client.filters``,
+        # NOT the generator query: the query must not return ``vrf`` (an object
+        # this generator creates), or its query-group bookkeeping destabilises in
+        # the proposed-change pipeline (CoreGraphQLQueryGroupUpsert ->
+        # NodeNotFound, branch wiped). See queries/service/l3vpn.gql.
+        vpn_name = vpn["name"]["value"]
+        existing_vrf = await self.client.filters(
+            kind="IpamVRF", name__value=vpn_name, branch=self.branch
         )
-        await vrf.save(allow_upsert=True)
+        if existing_vrf:
+            vrf = existing_vrf[0]
+        else:
+            rt = await find_or_create_route_target(self.client, rd, self.branch)
+            vrf = await self.client.create(
+                kind="IpamVRF",
+                branch=self.branch,
+                name=vpn_name,
+                vrf_rd=rd,
+                import_rt=rt,
+                export_rt=rt,
+                namespace={"hfid": ["default"]},
+            )
+            await vrf.save(allow_upsert=True)
 
+        vpn_obj = await self.client.get(kind="ServiceL3Vpn", id=vpn["id"], branch=self.branch)
         vpn_obj.vrf = vrf
         vpn_obj.status.value = "active"  # type: ignore[union-attr]
         await vpn_obj.save(allow_upsert=True)
@@ -106,59 +104,72 @@ class L3VpnGenerator(InfrahubGenerator):
         )
         pe_name = site["pe_device"]["node"]["name"]["value"]
 
-        # Idempotency via live relationships, NOT the generator query (the query
-        # must not return pe_interface / pe_address / ce_address, which this
-        # generator creates — see queries/service/l3vpn.gql and _ensure_vrf).
-        iface_rel: Any = site_obj.pe_interface
-        await iface_rel.fetch()
-        if iface_rel.peer:
-            iface = await self.client.get(
-                kind="InterfacePhysical",
-                id=iface_rel.peer.id,
-                branch=self.branch,
-            )
+        # Idempotency via deterministic keys (client.filters / pool identifier),
+        # NOT the generator query (the query must not return pe_interface /
+        # pe_address / ce_address, which this generator creates — see
+        # queries/service/l3vpn.gql and _ensure_vrf). The per-PE interface is
+        # keyed by its description; the /30 is allocated from the pool under a
+        # per-site identifier (idempotent); the PE/CE IPs are keyed by address.
+        iface_desc = f"L3VPN {vpn['name']['value']}"
+        existing_iface = await self.client.filters(
+            kind="InterfacePhysical",
+            device__name__value=pe_name,
+            description__value=iface_desc,
+            branch=self.branch,
+        )
+        if existing_iface:
+            iface = existing_iface[0]
         else:
             iface = await next_free_physical_interface(self.client, pe_name, self.branch)
             iface.role.value = "cust"
             iface.status.value = "active"  # remove from the free-interface candidate set
-            iface.description.value = f"L3VPN {vpn['name']['value']}"
+            iface.description.value = iface_desc
             await iface.save(allow_upsert=True)
-            site_obj.pe_interface = iface
+        site_obj.pe_interface = iface
 
-        pe_addr_rel: Any = site_obj.pe_address
-        ce_addr_rel: Any = site_obj.ce_address
-        await pe_addr_rel.fetch()
-        await ce_addr_rel.fetch()
-        if not pe_addr_rel.peer or not ce_addr_rel.peer:
-            p2p = await allocate_prefix_from_pool(
-                self.client,
-                "pe_ce_pool",
-                self.branch,
-                identifier=f"l3vpnsite-{site['id']}",
-                prefix_length=30,
-            )
-            p2p.vrf = vrf
-            await p2p.save(allow_upsert=True)
+        p2p = await allocate_prefix_from_pool(
+            self.client,
+            "pe_ce_pool",
+            self.branch,
+            identifier=f"l3vpnsite-{site['id']}",
+            prefix_length=30,
+        )
+        p2p.vrf = vrf
+        await p2p.save(allow_upsert=True)
 
-            net = ipaddress.IPv4Network(p2p.prefix.value)
+        net = ipaddress.IPv4Network(p2p.prefix.value)
+        pe_addr = f"{net.network_address + 1}/30"
+        ce_addr = f"{net.network_address + 2}/30"
+        existing_pe = await self.client.filters(
+            kind="IpamIPAddress", address__value=pe_addr, branch=self.branch
+        )
+        if existing_pe:
+            pe_ip = existing_pe[0]
+        else:
             pe_ip = await self.client.create(
                 kind="IpamIPAddress",
                 branch=self.branch,
-                address=f"{net.network_address + 1}/30",
+                address=pe_addr,
                 interface=iface,
                 vrf=vrf,
             )
             await pe_ip.save(allow_upsert=True)
+        existing_ce = await self.client.filters(
+            kind="IpamIPAddress", address__value=ce_addr, branch=self.branch
+        )
+        if existing_ce:
+            ce_ip = existing_ce[0]
+        else:
             ce_ip = await self.client.create(
                 kind="IpamIPAddress",
                 branch=self.branch,
-                address=f"{net.network_address + 2}/30",
+                address=ce_addr,
                 vrf=vrf,
             )
             await ce_ip.save(allow_upsert=True)
 
-            site_obj.pe_address = pe_ip
-            site_obj.ce_address = ce_ip
+        site_obj.pe_address = pe_ip
+        site_obj.ce_address = ce_ip
 
         cust_subnet = await self.client.get(
             kind="IpamPrefix",

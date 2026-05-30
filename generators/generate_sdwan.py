@@ -86,48 +86,40 @@ class SdwanGenerator(InfrahubGenerator):
         site_obj = await self.client.get(kind="ServiceSdwanSite", id=site["id"], branch=self.branch)
         location_name = site["location"]["node"]["shortname"]["value"]
 
-        # Idempotency is derived from the live object's relationships, NOT from
-        # the generator query. The query must not return ``sdwan_edge`` /
-        # ``lan_address`` (the objects this generator creates): if it did, the
+        # Idempotency is derived from deterministic keys via ``client.filters``,
+        # NOT from the generator query. The query must not return ``sdwan_edge``
+        # / ``lan_address`` (the objects this generator creates): if it did, the
         # generator's internal query-group (``collect_data(update_group=True)``)
         # would track those freshly-created nodes and destabilise — its
         # ``CoreGraphQLQueryGroupUpsert`` raises ``NodeNotFound`` and the branch
-        # gets wiped inside the proposed-change pipeline. Fetching the
-        # relationships here preserves idempotency without that coupling, the
-        # same way infrahub-demo-dc's generators look state up separately.
-        edge_rel: Any = site_obj.sdwan_edge
-        await edge_rel.fetch()
-        if edge_rel.peer:
-            edge = await self.client.get(
-                kind="DcimDevice",
-                id=edge_rel.peer.id,
-                branch=self.branch,
-            )
-        else:
-            edge_name = f"{svc_name}-{site['name']['value']}-edge"
-            edge = await find_or_create_device(
-                self.client,
-                name=edge_name,
-                platform_name=platform,
-                device_type_name=device_type,
-                location_hfid=location_name,
-                role="cpe",
-                branch=self.branch,
-            )
-            site_obj.sdwan_edge = edge
+        # gets wiped inside the proposed-change pipeline. Looking state up by
+        # key here keeps idempotency without that coupling, the same way
+        # infrahub-demo-dc's generators look existing objects up separately.
+        edge_name = f"{svc_name}-{site['name']['value']}-edge"
+        edge = await find_or_create_device(
+            self.client,
+            name=edge_name,
+            platform_name=platform,
+            device_type_name=device_type,
+            location_hfid=location_name,
+            role="cpe",
+            branch=self.branch,
+        )
+        site_obj.sdwan_edge = edge
 
-        lan_rel: Any = site_obj.lan_address
-        await lan_rel.fetch()
-        if not lan_rel.peer:
-            lan_subnet_str = site["lan_subnet"]["node"]["prefix"]["value"]
-            net = ipaddress.IPv4Network(lan_subnet_str)
+        net = ipaddress.IPv4Network(site["lan_subnet"]["node"]["prefix"]["value"])
+        lan_addr = f"{net.network_address + 1}/{net.prefixlen}"
+        existing_ip = await self.client.filters(
+            kind="IpamIPAddress", address__value=lan_addr, branch=self.branch
+        )
+        if existing_ip:
+            lan_ip = existing_ip[0]
+        else:
             lan_ip = await self.client.create(
-                kind="IpamIPAddress",
-                branch=self.branch,
-                address=f"{net.network_address + 1}/{net.prefixlen}",
+                kind="IpamIPAddress", branch=self.branch, address=lan_addr
             )
             await lan_ip.save(allow_upsert=True)
-            site_obj.lan_address = lan_ip
+        site_obj.lan_address = lan_ip
 
         site_obj.status.value = "active"  # type: ignore[union-attr]
         await site_obj.save(allow_upsert=True)
