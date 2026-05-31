@@ -53,6 +53,11 @@ services:
 
   batfish:
     image: batfish/allinone:latest
+    # batfish/allinone is published for linux/amd64 only (no arm64 variant),
+    # so pin the platform explicitly. On Apple Silicon Docker runs it under
+    # emulation; this silences the "platform does not match" warning and makes
+    # the intent explicit (works the same on native amd64 hosts).
+    platform: linux/amd64
     container_name: batfish
     restart: unless-stopped
     networks:
