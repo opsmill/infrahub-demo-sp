@@ -90,7 +90,7 @@ if submitted:
             )
         st.stop()
 
-    with st.spinner("Opening branch and creating objects..."):
+    with st.spinner("Creating objects, running the generator, and rendering configs..."):
         branch_name = f"sdwan/{uuid.uuid4().hex[:8]}"
         branch = run_async(client_main.branch.create(branch_name, sync_with_git=False))
         client = client_for(branch=branch_name)
@@ -145,17 +145,39 @@ if submitted:
             )
             run_async(site_obj.save())
 
-        # The SD-WAN generator is auto-dispatched when the service joins the
-        # ``sdwans`` group; it materialises one edge device + LAN IP per site,
-        # adds each edge to the vendor edge group, and flips the service to
-        # ``active`` as its final step. Artifacts target that vendor group, so
-        # we must wait for the generator before rendering — and then keep
-        # re-triggering generation until one config artifact per site exists,
-        # because /api/artifact/generate is async and a no-op against a group
-        # that is still empty (the generator and the artifact request race).
+        # Open the proposed change FIRST. The SD-WAN generator does not run on
+        # plain branch writes — it only runs inside the proposed-change pipeline
+        # (``proposed-changed-run-generator``). The pipeline materialises one
+        # edge + LAN IP per site, adds each edge to the vendor edge group, and
+        # flips the service to ``active`` as its final step. Creating the PC up
+        # front is what triggers that run; an earlier ordering that waited for
+        # ``active`` *before* creating the PC dead-locked (the generator could
+        # never run, so the wait always timed out).
+        pc = run_async(
+            client_main.create(
+                kind="CoreProposedChange",
+                source_branch=branch_name,
+                destination_branch="main",
+                name=f"Create SD-WAN {name}",
+            )
+        )
+        run_async(pc.save())
+
+        # Artifact rendering MUST then be triggered explicitly — the PC pipeline
+        # only re-renders artifacts that already exist on ``main`` (to compute
+        # config diffs); it does NOT create artifacts for brand-new targets, and
+        # its own artifact-validation step races ahead of the generator's group
+        # write anyway. The wizard's edges are brand-new ``DcimDevice`` members
+        # of the vendor edge group with no artifact on ``main``, so we wait for
+        # the generator to finish (service ``active`` => group populated), then
+        # re-POST the vendor definition on a short cadence until one artifact per
+        # edge appears. Mirrors ``scripts/regenerate_artifacts.py``.
         sdwan_def_name = "sdwan-viptela-config" if vendor == "viptela" else "sdwan-versa-config"
-        artifact_definitions = run_async(client.all(kind="CoreArtifactDefinition"))
-        sdwan_def = next(d for d in artifact_definitions if d.name.value == sdwan_def_name)
+        sdwan_def = next(
+            d
+            for d in run_async(client.all(kind="CoreArtifactDefinition"))
+            if d.name.value == sdwan_def_name
+        )
         expected_edge_count = len(sites)
 
         def _post_definition(def_id: str) -> None:
@@ -168,58 +190,48 @@ if submitted:
             urllib.request.urlopen(request).read()
 
         def _service_active() -> bool:
-            v = run_async(client.get(kind="ServiceSdwan", name__value=name))
-            return v.status.value == "active"
+            svc_now = run_async(client.get(kind="ServiceSdwan", name__value=name))
+            return svc_now.status.value == "active"
 
-        def _count_sdwan_artifacts() -> int:
-            return len(
-                run_async(client.filters(kind="CoreArtifact", definition__ids=[sdwan_def.id]))
-            )
+        def _sdwan_artifact_count() -> int:
+            arts = run_async(client.filters(kind="CoreArtifact", definition__ids=[sdwan_def.id]))
+            return len(arts)
 
-        deadline = time.monotonic() + 240
-        posted_all = False
+        # The PC pipeline takes a couple of minutes to start and run the
+        # generator; a generous deadline keeps the wizard from giving up before
+        # the configs land, with a UI-retrigger fallback on timeout.
+        deadline = time.monotonic() + 420
+        generator_done = False
         last_post = 0.0
         while time.monotonic() < deadline:
-            if not posted_all:
+            if not generator_done:
                 if not _service_active():
-                    time.sleep(3)
+                    time.sleep(5)
                     continue
-                # Generator finished (edges exist) — render every definition once.
-                for definition in artifact_definitions:
-                    _post_definition(definition.id)
-                posted_all = True
-                last_post = time.monotonic()
-            if _count_sdwan_artifacts() >= expected_edge_count:
+                generator_done = True
+            if _sdwan_artifact_count() >= expected_edge_count:
                 break
-            # Re-poke the SD-WAN definition periodically until the per-edge
-            # artifacts show up (covers read-replica lag on group membership).
-            if time.monotonic() - last_post > 20:
+            # Re-POST on a short cadence once the generator is done; each attempt
+            # is a no-op until the vendor group's new members are committed and
+            # resolvable as definition targets, after which it renders one
+            # artifact per edge.
+            if time.monotonic() - last_post > 8:
                 _post_definition(sdwan_def.id)
                 last_post = time.monotonic()
             time.sleep(3)
         else:
             st.warning(
-                f"Only {_count_sdwan_artifacts()} of {expected_edge_count} "
-                f"`{sdwan_def_name}` artifacts had materialised when we gave up "
-                "polling. The proposed change will open anyway — re-trigger "
-                "artifact generation from the Infrahub UI if any are missing."
+                f"Only {_sdwan_artifact_count()} of {expected_edge_count} "
+                f"`{sdwan_def_name}` artifacts had rendered when polling stopped. "
+                "The proposed change is open anyway — re-trigger artifact "
+                "generation from its Artifacts tab if any are missing."
             )
-
-        pc = run_async(
-            client_main.create(
-                kind="CoreProposedChange",
-                source_branch=branch_name,
-                destination_branch="main",
-                name=f"Create SD-WAN {name}",
-            )
-        )
-        run_async(pc.save())
 
     ui_url = os.environ.get("INFRAHUB_UI_URL", "http://localhost:8000")
     st.success(f"Branch `{branch_name}` opened, service_id={service_id}.")
     st.markdown(
-        f"**Next step:** review the diff and the validation pipeline in Infrahub, "
-        f"then merge the proposed change.\n\n"
+        f"**Next step:** review the rendered configs on the Artifacts tab, plus "
+        f"the diff and validation pipeline, then merge the proposed change.\n\n"
         f"- [Open Proposed Change]({ui_url}/proposed-changes/{pc.id})\n"
         f"- [Browse branch in Infrahub]({ui_url}/?branch={branch_name})",
     )
