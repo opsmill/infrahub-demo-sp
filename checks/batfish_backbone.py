@@ -2,35 +2,30 @@
 
 Runs on every Infrahub proposed change targeting ``topologies_mpls``. For each
 backbone, fetches per-PE rendered configs via the Infrahub SDK, filters out
-unsupported vendors, loads the configs into a temporary Batfish snapshot, runs
-the query battery, and maps findings to Infrahub log entries.
+unsupported vendors, and POSTs them to the ``batfish-runner`` sidecar, which
+owns the ``pybatfish`` engine. The runner loads a temporary snapshot, runs the
+query battery, and returns findings as JSON; this check maps them to Infrahub
+log entries.
 
-See ``docs/superpowers/specs/2026-05-26-batfish-mpls-ci-validation-design.md``.
+The split exists because Infrahub executes checks inside the stock
+``task-worker`` image, which does not ship ``pybatfish``/``pandas``. Rather than
+bake those heavy deps into the worker, the engine lives in ``batfish_runner``
+and is reached over HTTP.
+
+See ``docs/superpowers/specs/2026-06-08-batfish-runner-sidecar-design.md``.
 """
 
 from __future__ import annotations
 
 import os
-import tempfile
 import uuid
-from pathlib import Path
 from typing import Any
 
+import httpx
 from infrahub_sdk.checks import InfrahubCheck
 from infrahub_sdk.exceptions import NodeNotFoundError
 
-from .batfish_helpers import (
-    SUPPORTED_PLATFORMS,
-    Finding,
-    run_snapshot,
-    wait_for_batfish,
-)
-
-# ``pybatfish`` is a runtime-only dependency: the worker container that
-# loads this module at registration time may not have it installed.
-# Importing at module scope used to fail the whole repo import (blocking
-# every other check + generator), so defer it to ``validate()`` and
-# treat ImportError as a soft "skip this check" signal.
+from .batfish_common import SUPPORTED_PLATFORMS, Finding
 
 _ARTIFACT_NAME_BY_PLATFORM = {
     "arista_eos": "pe-arista-eos",
@@ -38,9 +33,18 @@ _ARTIFACT_NAME_BY_PLATFORM = {
     "juniper_junos": "pe-juniper-junos",
 }
 
+# Batfish network name shared across snapshots (matches the runner default).
+_NETWORK = "infrahub-mpls"
+
+# How long to wait on the runner. Snapshot init + the query battery can take
+# 30-60s on a cold Batfish; the runner also waits internally for the
+# coordinator. Keep the client timeout generous so a slow-but-working run
+# isn't misreported as unreachable.
+_RUNNER_TIMEOUT_S = 180.0
+
 
 class BatfishBackboneCheck(InfrahubCheck):
-    """Validate every MPLS backbone with Batfish."""
+    """Validate every MPLS backbone with Batfish (via the runner sidecar)."""
 
     query = "batfish_backbone"
 
@@ -53,11 +57,6 @@ class BatfishBackboneCheck(InfrahubCheck):
         """
         if os.environ.get("BATFISH_DISABLED") == "1":
             self.log_info(message="Batfish disabled by environment")
-            return
-        try:
-            from pybatfish.client.session import Session  # noqa: F401, PLC0415
-        except ImportError:
-            self.log_info(message="pybatfish not installed in this environment; check skipped")
             return
 
         for edge in data.get("TopologyMplsBackbone", {}).get("edges", []):
@@ -79,42 +78,25 @@ class BatfishBackboneCheck(InfrahubCheck):
             self.log_info(message=f"no supported PEs to validate in backbone {backbone_name}")
             return
 
-        with tempfile.TemporaryDirectory(prefix=f"batfish-{backbone_name}-") as tmp:
-            tmp_path = Path(tmp)
-            configs_dir = tmp_path / "configs"
-            configs_dir.mkdir()
+        configs: dict[str, str] = {}
+        for pe_id, pe_name, platform_name in supported_pes:
+            body = await self._fetch_artifact(pe_id=pe_id, platform_name=platform_name)
+            if body is None:
+                self.log_info(message=f"[skipped] no artifact yet for {pe_name}")
+                continue
+            configs[pe_name] = body
 
-            hosts_in_snapshot: set[str] = set()
-            for pe_id, pe_name, platform_name in supported_pes:
-                body = await self._fetch_artifact(pe_id=pe_id, platform_name=platform_name)
-                if body is None:
-                    self.log_info(message=f"[skipped] no artifact yet for {pe_name}")
-                    continue
-                (configs_dir / f"{pe_name}.cfg").write_text(body)
-                hosts_in_snapshot.add(pe_name)
+        if not configs:
+            self.log_info(message=f"no PE artifacts available for backbone {backbone_name}")
+            return
 
-            if not hosts_in_snapshot:
-                self.log_info(message=f"no PE artifacts available for backbone {backbone_name}")
-                return
-
-            host = os.environ.get("BATFISH_HOST", "batfish")
-            port = int(os.environ.get("BATFISH_PORT", "9996"))
-            if not wait_for_batfish(host, port=port, timeout_s=60, backoff_s=2):
-                self.log_error(message=f"Batfish service unreachable at {host}:{port}")
-                return
-
-            # Deferred import — see module docstring + ``validate()``.
-            from pybatfish.client.session import Session  # noqa: PLC0415
-
-            session = Session(host=host)
-            snapshot_name = f"{backbone_name}-{uuid.uuid4().hex[:8]}"
-            findings = run_snapshot(
-                session=session,
-                snapshot_dir=tmp_path,
-                network="infrahub-mpls",
-                snapshot_name=snapshot_name,
-                expected_hosts=hosts_in_snapshot,
-            )
+        snapshot_name = f"{backbone_name}-{uuid.uuid4().hex[:8]}"
+        findings = await self._run_via_runner(
+            snapshot_name=snapshot_name,
+            expected_hosts=sorted(configs),
+            configs=configs,
+        )
+        if findings is not None:
             self._emit_findings(findings)
 
     def _partition_pes(
@@ -165,6 +147,58 @@ class BatfishBackboneCheck(InfrahubCheck):
             return None
         body: str = await self.client.object_store.get(identifier=storage_id)
         return body
+
+    async def _run_via_runner(
+        self,
+        snapshot_name: str,
+        expected_hosts: list[str],
+        configs: dict[str, str],
+    ) -> list[Finding] | None:
+        """POST configs to the batfish-runner and return the parsed findings.
+
+        On any transport or service error the check fails loudly with a single
+        ``log_error`` and ``None`` is returned (so nothing is emitted twice).
+        This is deliberate: the previous behavior silently passed when the
+        engine was unavailable, which hid the fact that Batfish never ran.
+
+        Args:
+            snapshot_name: Unique snapshot name for this run.
+            expected_hosts: PE hostnames that should form a full IS-IS mesh.
+            configs: Mapping of PE hostname to rendered config text.
+
+        Returns:
+            List of findings on success, or ``None`` if the runner could not be
+            reached or returned an error (an error is already logged).
+        """
+        url = os.environ.get("BATFISH_RUNNER_URL", "http://batfish-runner:8080").rstrip("/")
+        payload = {
+            "network": _NETWORK,
+            "snapshot": snapshot_name,
+            "expected_hosts": expected_hosts,
+            "configs": configs,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=_RUNNER_TIMEOUT_S) as client:
+                response = await client.post(f"{url}/check", json=payload)
+        except httpx.HTTPError as exc:
+            self.log_error(message=f"batfish-runner unreachable at {url}: {exc}")
+            return None
+
+        if response.status_code != httpx.codes.OK:
+            detail = self._error_detail(response)
+            self.log_error(message=f"batfish-runner error ({response.status_code}): {detail}")
+            return None
+
+        body = response.json()
+        return [Finding(**row) for row in body.get("findings", [])]
+
+    @staticmethod
+    def _error_detail(response: httpx.Response) -> str:
+        """Extract a human-readable error message from a non-200 runner response."""
+        try:
+            return str(response.json().get("error", response.text))
+        except ValueError:
+            return response.text
 
     def _emit_findings(self, findings: list[Finding]) -> None:
         """Map findings to Infrahub log entries.

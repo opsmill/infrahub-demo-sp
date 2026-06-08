@@ -379,16 +379,25 @@ def batfish(c: Context, backbone: str = "mpls-backbone") -> None:
     """Run BatfishBackboneCheck against a running local Infrahub.
 
     Requires:
-        - `uv run invoke start` (Infrahub + Batfish sidecar up)
+        - `uv run invoke start` (Infrahub + Batfish sidecar + batfish-runner up)
         - INFRAHUB_ADDRESS, INFRAHUB_API_TOKEN set in .env
         - At least one rendered pe-* artifact in the local instance
+
+    The check posts configs to the batfish-runner sidecar. From the host the
+    runner is reached on its published port, so point BATFISH_RUNNER_URL at
+    localhost (inside the task-worker it defaults to http://batfish-runner:8080).
 
     Args:
         c: Invoke Context.
         backbone: Backbone name to validate (default: mpls-backbone).
     """
     _banner("invoke batfish", border="cyan")
-    cmd = f"uv run infrahubctl check batfish_backbone name={backbone} --branch main"
+    runner_port = os.getenv("BATFISH_RUNNER_PORT", "8080")
+    runner_url = os.getenv("BATFISH_RUNNER_URL", f"http://localhost:{runner_port}")
+    cmd = (
+        f"BATFISH_RUNNER_URL={runner_url} "
+        f"uv run infrahubctl check batfish_backbone name={backbone} --branch main"
+    )
     c.run(cmd, pty=True)
 
 

@@ -8,44 +8,36 @@ these helpers and maps ``Finding`` instances to Infrahub log entries.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 import requests
 
+# ``Finding`` and ``SUPPORTED_PLATFORMS`` live in the dependency-free
+# ``batfish_common`` module so the task-worker check can use them without
+# importing this engine (and its ``requests``/``pandas`` coupling). They are
+# re-exported here for the runner and the existing test imports.
+from .batfish_common import SUPPORTED_PLATFORMS, Finding
+
+__all__ = [
+    "SUPPORTED_PLATFORMS",
+    "Finding",
+    "findings_from_bgp_session_compat",
+    "findings_from_isis_edges",
+    "findings_from_parse_status",
+    "findings_from_parse_warning",
+    "findings_from_undefined_references",
+    "run_snapshot",
+    "wait_for_batfish",
+]
+
 # ``pandas`` is used only in function-signature type annotations; with
 # ``from __future__ import annotations`` they're strings, never evaluated at
-# import time. The worker container that loads this module to register the
-# check doesn't have pandas installed — keeping the import guarded keeps
-# module load cheap and side-effect-free in those environments. At runtime
-# pandas is supplied via the ``pybatfish`` Session that calls these helpers.
+# import time. Keeping the import guarded keeps module load cheap and
+# side-effect-free. At runtime pandas is supplied via the ``pybatfish``
+# Session that calls these helpers.
 if TYPE_CHECKING:
     import pandas as pd
-
-# Platforms Batfish parses well. Nokia SR OS support is experimental and SR
-# Linux is unsupported — both are filtered out of the snapshot.
-SUPPORTED_PLATFORMS: frozenset[str] = frozenset({"arista_eos", "cisco_iosxr", "juniper_junos"})
-
-
-@dataclass
-class Finding:
-    """One result row from a Batfish query, normalized for emission.
-
-    Attributes:
-        severity: ``error``, ``warning``, or ``info``.
-        query: pybatfish query name that produced the finding.
-        node: PE hostname the finding is attributed to, if applicable.
-        message: One-line human summary.
-        detail: Raw row payload (e.g. the pandas Series as dict) for the
-            full message body. ``None`` when the finding isn't row-derived.
-    """
-
-    severity: Literal["error", "warning", "info"]
-    query: str
-    node: str | None
-    message: str
-    detail: dict[str, Any] | None
 
 
 _PARSE_OK = "PASSED"

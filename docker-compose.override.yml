@@ -16,6 +16,11 @@ services:
       - "${PREFECT_PORT:-4200}:4200"
 
   task-worker:
+    environment:
+      # The registered BatfishBackboneCheck runs here (in the stock infrahub
+      # image, which has no pybatfish). It POSTs configs to the batfish-runner
+      # sidecar instead of importing pybatfish locally.
+      - BATFISH_RUNNER_URL=http://batfish-runner:8080
     volumes:
       - ./:/upstream
 
@@ -60,5 +65,33 @@ services:
     platform: linux/amd64
     container_name: batfish
     restart: unless-stopped
+    networks:
+      - default
+
+  batfish-runner:
+    # Owns the pybatfish engine so the stock task-worker image doesn't have to.
+    # The BatfishBackboneCheck POSTs configs to /check; this service drives the
+    # batfish sidecar and returns findings as JSON. Source is bind-mounted
+    # (deps are baked into the image) so editing the check engine needs no
+    # rebuild — same pattern as the Streamlit container above.
+    build:
+      context: ./batfish_runner
+      dockerfile: Dockerfile
+    container_name: batfish-runner
+    restart: unless-stopped
+    environment:
+      - BATFISH_HOST=batfish
+      - BATFISH_PORT=9996
+    ports:
+      # Exposed so the host-side `uv run invoke batfish` task can reach it at
+      # http://localhost:${BATFISH_RUNNER_PORT}.
+      - "${BATFISH_RUNNER_PORT:-8080}:8080"
+    volumes:
+      - ./batfish_runner:/app
+      # Reuse the canonical engine without duplicating it — same read-only
+      # mount the Streamlit container uses.
+      - ./checks:/app/checks:ro
+    depends_on:
+      - batfish
     networks:
       - default
