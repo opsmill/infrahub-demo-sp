@@ -1,0 +1,8 @@
+# batfish-runner sidecar dependencies. Mirrors the Streamlit image's Batfish
+# stack so the same query battery runs identically in both.
+flask>=3.0.0
+requests>=2.34.2
+pandas>=2.0.0
+# pybatfish drives the snapshot + query battery. Pinned to the same floor as
+# service_catalog/requirements.txt so both Batfish paths agree.
+pybatfish>=2025.7.7
