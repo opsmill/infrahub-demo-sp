@@ -1,7 +1,7 @@
 import type {SidebarsConfig} from '@docusaurus/plugin-content-docs';
 
 const sidebars: SidebarsConfig = {
-  DemoSpSidebar: [
+  InfrahubDemoSpSidebar: [
     {
       type: 'category',
       label: 'Getting started',
