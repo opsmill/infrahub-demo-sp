@@ -5,7 +5,7 @@ models a multi-vendor MPLS backbone (Arista EOS, Cisco IOS-XR, Juniper Junos,
 Nokia SR OS) and provisions L3VPNs as a service through a Streamlit Service
 Catalog.
 
-**Full documentation:** <https://docs.infrahub.app/demo-sp/>
+**Full documentation:** <https://docs.infrahub.app/infrahub-demo-sp>
 
 ---
 
@@ -24,7 +24,7 @@ Visit <http://localhost:8000> (admin / infrahub) for the Infrahub UI. To
 enable the Streamlit Service Catalog sidecar set
 `INFRAHUB_SERVICE_CATALOG="true"` in `.env` and re-run `uv run invoke start`.
 
-See the [quickstart guide](https://docs.infrahub.app/demo-sp/quickstart) for
+See the [quickstart guide](https://docs.infrahub.app/infrahub-demo-sp/quickstart) for
 the step-by-step walkthrough.
 
 ## What's inside
