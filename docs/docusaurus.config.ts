@@ -63,7 +63,7 @@ const config: Config = {
       items: [
         {
           type: "docSidebar",
-          sidebarId: "DemoSpSidebar",
+          sidebarId: "InfrahubDemoSpSidebar",
           position: "left",
           label: "Infrahub demo-sp example",
         },
