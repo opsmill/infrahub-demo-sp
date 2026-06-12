@@ -27,9 +27,9 @@ jobs:
 
       - name: Sync folders
         run: |
-          rm -rf target-repo/docs/docs-demo-sp/*
+          rm -rf target-repo/docs/docs-infrahub-demo-sp/*
           rm -f target-repo/docs/sidebars-infrahub-demo-sp.ts
-          cp -r source-repo/docs/docs/* target-repo/docs/docs-demo-sp/
+          cp -r source-repo/docs/docs/* target-repo/docs/docs-infrahub-demo-sp/
           cp source-repo/docs/sidebars.ts target-repo/docs/sidebars-infrahub-demo-sp.ts
           cd target-repo
           git config user.name github-actions
