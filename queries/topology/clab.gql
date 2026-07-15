@@ -16,6 +16,13 @@ query Clab($name: String!) {
                     name { value }
                     role { value }
                     description { value }
+                    ... on InterfacePhysical {
+                      ip_addresses {
+                        edges {
+                          node { address { value } }
+                        }
+                      }
+                    }
                   }
                 }
               }

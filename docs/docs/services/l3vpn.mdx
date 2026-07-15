@@ -69,7 +69,7 @@ sequenceDiagram
 | `l3vpn_overlap` | `checks/l3vpn_overlap.py` | No two active `ServiceL3Vpn` objects share the same `vpn_id` |
 | `l3vpn_site_subnet` | `checks/l3vpn_site_subnet.py` | The customer subnet is not already claimed by another site in the same VRF |
 | `pe_interface_alloc` | `checks/pe_interface_alloc.py` | The nominated PE interface exists and has `status = free` |
-| `backbone_session_count` | `checks/backbone_session_count.py` | Every PE in the backbone has at least 3 iBGP sessions (full-mesh invariant) |
+| `backbone_session_count` | `checks/backbone_session_count.py` | Every PE in the backbone has its full-mesh complement of N−1 iBGP sessions (N = PE count — 7 each on the 8-PE financial backbone, 3 each on the 4-PE isp backbone) |
 | `batfish_backbone` | `checks/batfish_backbone.py` | Static validation of the rendered backbone configs via Batfish — see [Batfish validation](../validation/batfish.mdx) for the full query battery |
 
 A failing check blocks merge of the proposed change. The operator can see
@@ -97,7 +97,9 @@ and allocated addresses will skip re-creation and only update missing fields.
 
 The transform layer renders a full configuration fragment for each PE
 when that PE has at least one active L3VPN site. Configuration sections
-differ by vendor:
+differ by vendor. On the default **financial** backbone every PE is Arista,
+so `trading-floor-vpn` renders the Arista EOS form at all four sites; the
+**isp** dataset, with one PE per vendor, exercises all four forms below:
 
 ### Arista EOS
 

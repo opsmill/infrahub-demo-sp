@@ -514,24 +514,42 @@ def lab_status(c: Context) -> None:
 
 @task(name="push-arista")
 def lab_push_arista(c: Context) -> None:
-    """Push the rendered Arista config to the running cEOS lab node."""
+    """Push each rendered Arista config to its running cEOS lab node.
+
+    Reuses the per-device configs fetched by ``invoke lab.deploy`` into
+    ``lab/devices/<node>.cfg`` and pushes one per cEOS node in the topology,
+    so it works for a single-Arista backbone (ISP) or an all-cEOS backbone
+    (financial) alike.
+    """
     _banner("invoke lab.push-arista", border="cyan")
-    LAB_DIR.mkdir(exist_ok=True)
-    arista_cfg = LAB_DIR / "pe-lon-arista.cfg"
-    _step(f"Fetching pe-arista-eos → {arista_cfg.relative_to(REPO_ROOT)}")
-    _fetch_artifact(c, "pe-arista-eos", arista_cfg)
-    _success("Artifact fetched")
+    if not LAB_TOPO.exists():
+        _wait(f"No lab topology at {LAB_TOPO}; run `invoke lab.deploy` first.")
+        return
     # containerlab DNS-registers each node as clab-<lab-name>-<node-name>,
     # not clab-<node-name>. The lab name lives in the rendered topology
     # YAML, so parse it here rather than hard-code it.
-    lab_name = yaml.safe_load(LAB_TOPO.read_text())["name"]
-    host = f"clab-{lab_name}-pe-lon-arista"
-    _step(f"Pushing config to {host}")
-    c.run(
-        f"uv run python scripts/push_arista.py {shlex.quote(str(arista_cfg))} {shlex.quote(host)}",
-        pty=True,
-    )
-    _success("Config pushed")
+    topo = yaml.safe_load(LAB_TOPO.read_text())
+    lab_name = topo["name"]
+    ceos_nodes = [
+        node_name
+        for node_name, node in topo.get("topology", {}).get("nodes", {}).items()
+        if node.get("kind") == "ceos"
+    ]
+    if not ceos_nodes:
+        _wait("No cEOS nodes in the topology; nothing to push.")
+        return
+    for node_name in ceos_nodes:
+        cfg = LAB_DEVICES_DIR / f"{node_name}.cfg"
+        if not cfg.exists():
+            _wait(f"No config at {cfg.relative_to(REPO_ROOT)}; run `invoke lab.deploy` first.")
+            continue
+        host = f"clab-{lab_name}-{node_name}"
+        _step(f"Pushing {cfg.relative_to(REPO_ROOT)} → {host}")
+        c.run(
+            f"uv run python scripts/push_arista.py {shlex.quote(str(cfg))} {shlex.quote(host)}",
+            pty=True,
+        )
+    _success("Config(s) pushed")
 
 
 lab.add_task(lab_deploy)

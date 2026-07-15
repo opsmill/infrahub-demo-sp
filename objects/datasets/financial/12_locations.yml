@@ -1,0 +1,27 @@
+---
+# Additional EMEA sites for the financial 8-PE backbone. The EMEA region and
+# the first four sites (London, Frankfurt, Amsterdam, Paris) come from the
+# shared objects/10_locations.yml; these four extend it to eight so each PE
+# has a distinct site. Loaded after 10_locations.yml (12_ prefix) so the
+# `emea` parent already exists.
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: LocationSite
+  data:
+    - name: Madrid
+      shortname: mad
+      description: Madrid - Iberia hub; BME (Bolsas y Mercados) access and Southern Europe client services.
+      parent: emea
+    - name: Milan
+      shortname: mil
+      description: Milan - Italy hub; Borsa Italiana access and DACH/Southern Europe bridge.
+      parent: emea
+    - name: Dublin
+      shortname: dub
+      description: Dublin - Ireland hub; fund administration and EU-domiciled entity services.
+      parent: emea
+    - name: Zurich
+      shortname: zrh
+      description: Zurich - Switzerland hub; private banking and Swiss franc treasury operations.
+      parent: emea

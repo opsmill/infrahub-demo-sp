@@ -1,0 +1,1166 @@
+# Financial dataset MPLS backbone — 8 PE routers, all Arista cEOS.
+#
+# Topology: ring (pe-01..pe-08..pe-01) + cross-chords (01-05, 02-06, 03-07,
+# 04-08) => 12 backbone p2p links, every PE degree 3 (partial mesh). iBGP is a
+# full mesh (56 directional sessions). Generated data — see the demo docs for
+# the topology diagram.
+#
+# NOTE: this file is generated deterministically; regenerate rather than
+# hand-editing individual rows to keep the addressing plan consistent.
+---
+# 8 PE devices — all Arista cEOS (arista_eos / 7280R3)
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: DcimDevice
+  data:
+    - name: pe-01
+      status: active
+      role: pe
+      location: lon
+      platform: arista_eos
+      device_type: 7280R3
+      asn: ["65000", "Backbone-AS"]
+      member_of_groups:
+        - pe_arista_eos
+        - pes
+    - name: pe-02
+      status: active
+      role: pe
+      location: fra
+      platform: arista_eos
+      device_type: 7280R3
+      asn: ["65000", "Backbone-AS"]
+      member_of_groups:
+        - pe_arista_eos
+        - pes
+    - name: pe-03
+      status: active
+      role: pe
+      location: ams
+      platform: arista_eos
+      device_type: 7280R3
+      asn: ["65000", "Backbone-AS"]
+      member_of_groups:
+        - pe_arista_eos
+        - pes
+    - name: pe-04
+      status: active
+      role: pe
+      location: par
+      platform: arista_eos
+      device_type: 7280R3
+      asn: ["65000", "Backbone-AS"]
+      member_of_groups:
+        - pe_arista_eos
+        - pes
+    - name: pe-05
+      status: active
+      role: pe
+      location: mad
+      platform: arista_eos
+      device_type: 7280R3
+      asn: ["65000", "Backbone-AS"]
+      member_of_groups:
+        - pe_arista_eos
+        - pes
+    - name: pe-06
+      status: active
+      role: pe
+      location: mil
+      platform: arista_eos
+      device_type: 7280R3
+      asn: ["65000", "Backbone-AS"]
+      member_of_groups:
+        - pe_arista_eos
+        - pes
+    - name: pe-07
+      status: active
+      role: pe
+      location: dub
+      platform: arista_eos
+      device_type: 7280R3
+      asn: ["65000", "Backbone-AS"]
+      member_of_groups:
+        - pe_arista_eos
+        - pes
+    - name: pe-08
+      status: active
+      role: pe
+      location: zrh
+      platform: arista_eos
+      device_type: 7280R3
+      asn: ["65000", "Backbone-AS"]
+      member_of_groups:
+        - pe_arista_eos
+        - pes
+
+---
+# Loopback0 interfaces (one per PE) with embedded loopback IPs
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: InterfaceVirtual
+  data:
+    - name: Loopback0
+      description: Router-ID / iBGP source
+      mtu: 1500
+      status: active
+      role: management
+      device: pe-01
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.0.0.1/32
+            description: pe-01 loopback
+    - name: Loopback0
+      description: Router-ID / iBGP source
+      mtu: 1500
+      status: active
+      role: management
+      device: pe-02
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.0.0.2/32
+            description: pe-02 loopback
+    - name: Loopback0
+      description: Router-ID / iBGP source
+      mtu: 1500
+      status: active
+      role: management
+      device: pe-03
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.0.0.3/32
+            description: pe-03 loopback
+    - name: Loopback0
+      description: Router-ID / iBGP source
+      mtu: 1500
+      status: active
+      role: management
+      device: pe-04
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.0.0.4/32
+            description: pe-04 loopback
+    - name: Loopback0
+      description: Router-ID / iBGP source
+      mtu: 1500
+      status: active
+      role: management
+      device: pe-05
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.0.0.5/32
+            description: pe-05 loopback
+    - name: Loopback0
+      description: Router-ID / iBGP source
+      mtu: 1500
+      status: active
+      role: management
+      device: pe-06
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.0.0.6/32
+            description: pe-06 loopback
+    - name: Loopback0
+      description: Router-ID / iBGP source
+      mtu: 1500
+      status: active
+      role: management
+      device: pe-07
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.0.0.7/32
+            description: pe-07 loopback
+    - name: Loopback0
+      description: Router-ID / iBGP source
+      mtu: 1500
+      status: active
+      role: management
+      device: pe-08
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.0.0.8/32
+            description: pe-08 loopback
+
+---
+# Backbone physical interfaces (3 core p2p + 4 free customer per PE)
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: InterfacePhysical
+  data:
+    # pe-01 (lon)
+    - name: Ethernet1
+      description: To pe-02
+      mtu: 9000
+      status: active
+      role: core
+      device: pe-01
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.1.0.0/31
+    - name: Ethernet2
+      description: To pe-05
+      mtu: 9000
+      status: active
+      role: core
+      device: pe-01
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.1.0.2/31
+    - name: Ethernet3
+      description: To pe-08
+      mtu: 9000
+      status: active
+      role: core
+      device: pe-01
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.1.0.4/31
+    # pe-02 (fra)
+    - name: Ethernet1
+      description: To pe-01
+      mtu: 9000
+      status: active
+      role: core
+      device: pe-02
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.1.0.1/31
+    - name: Ethernet2
+      description: To pe-03
+      mtu: 9000
+      status: active
+      role: core
+      device: pe-02
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.1.0.6/31
+    - name: Ethernet3
+      description: To pe-06
+      mtu: 9000
+      status: active
+      role: core
+      device: pe-02
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.1.0.8/31
+    # pe-03 (ams)
+    - name: Ethernet1
+      description: To pe-02
+      mtu: 9000
+      status: active
+      role: core
+      device: pe-03
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.1.0.7/31
+    - name: Ethernet2
+      description: To pe-04
+      mtu: 9000
+      status: active
+      role: core
+      device: pe-03
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.1.0.10/31
+    - name: Ethernet3
+      description: To pe-07
+      mtu: 9000
+      status: active
+      role: core
+      device: pe-03
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.1.0.12/31
+    # pe-04 (par)
+    - name: Ethernet1
+      description: To pe-03
+      mtu: 9000
+      status: active
+      role: core
+      device: pe-04
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.1.0.11/31
+    - name: Ethernet2
+      description: To pe-05
+      mtu: 9000
+      status: active
+      role: core
+      device: pe-04
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.1.0.14/31
+    - name: Ethernet3
+      description: To pe-08
+      mtu: 9000
+      status: active
+      role: core
+      device: pe-04
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.1.0.16/31
+    # pe-05 (mad)
+    - name: Ethernet1
+      description: To pe-01
+      mtu: 9000
+      status: active
+      role: core
+      device: pe-05
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.1.0.3/31
+    - name: Ethernet2
+      description: To pe-04
+      mtu: 9000
+      status: active
+      role: core
+      device: pe-05
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.1.0.15/31
+    - name: Ethernet3
+      description: To pe-06
+      mtu: 9000
+      status: active
+      role: core
+      device: pe-05
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.1.0.18/31
+    # pe-06 (mil)
+    - name: Ethernet1
+      description: To pe-02
+      mtu: 9000
+      status: active
+      role: core
+      device: pe-06
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.1.0.9/31
+    - name: Ethernet2
+      description: To pe-05
+      mtu: 9000
+      status: active
+      role: core
+      device: pe-06
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.1.0.19/31
+    - name: Ethernet3
+      description: To pe-07
+      mtu: 9000
+      status: active
+      role: core
+      device: pe-06
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.1.0.20/31
+    # pe-07 (dub)
+    - name: Ethernet1
+      description: To pe-03
+      mtu: 9000
+      status: active
+      role: core
+      device: pe-07
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.1.0.13/31
+    - name: Ethernet2
+      description: To pe-06
+      mtu: 9000
+      status: active
+      role: core
+      device: pe-07
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.1.0.21/31
+    - name: Ethernet3
+      description: To pe-08
+      mtu: 9000
+      status: active
+      role: core
+      device: pe-07
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.1.0.22/31
+    # pe-08 (zrh)
+    - name: Ethernet1
+      description: To pe-01
+      mtu: 9000
+      status: active
+      role: core
+      device: pe-08
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.1.0.5/31
+    - name: Ethernet2
+      description: To pe-04
+      mtu: 9000
+      status: active
+      role: core
+      device: pe-08
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.1.0.17/31
+    - name: Ethernet3
+      description: To pe-07
+      mtu: 9000
+      status: active
+      role: core
+      device: pe-08
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.1.0.23/31
+    # Free customer-facing interfaces — allocated to L3VPN sites by the
+    # generate_l3vpn generator (status=free is its allocation filter).
+    - {name: Ethernet4, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-01}
+    - {name: Ethernet5, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-01}
+    - {name: Ethernet6, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-01}
+    - {name: Ethernet7, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-01}
+    - {name: Ethernet4, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-02}
+    - {name: Ethernet5, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-02}
+    - {name: Ethernet6, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-02}
+    - {name: Ethernet7, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-02}
+    - {name: Ethernet4, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-03}
+    - {name: Ethernet5, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-03}
+    - {name: Ethernet6, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-03}
+    - {name: Ethernet7, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-03}
+    - {name: Ethernet4, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-04}
+    - {name: Ethernet5, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-04}
+    - {name: Ethernet6, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-04}
+    - {name: Ethernet7, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-04}
+    - {name: Ethernet4, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-05}
+    - {name: Ethernet5, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-05}
+    - {name: Ethernet6, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-05}
+    - {name: Ethernet7, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-05}
+    - {name: Ethernet4, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-06}
+    - {name: Ethernet5, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-06}
+    - {name: Ethernet6, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-06}
+    - {name: Ethernet7, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-06}
+    - {name: Ethernet4, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-07}
+    - {name: Ethernet5, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-07}
+    - {name: Ethernet6, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-07}
+    - {name: Ethernet7, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-07}
+    - {name: Ethernet4, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-08}
+    - {name: Ethernet5, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-08}
+    - {name: Ethernet6, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-08}
+    - {name: Ethernet7, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-08}
+
+---
+# Backbone p2p prefixes (12 x /31 from 10.1.0.0/16)
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: IpamPrefix
+  data:
+    - {prefix: 10.1.0.0/31, description: pe-01 <-> pe-02, status: active, role: technical}
+    - {prefix: 10.1.0.2/31, description: pe-01 <-> pe-05, status: active, role: technical}
+    - {prefix: 10.1.0.4/31, description: pe-01 <-> pe-08, status: active, role: technical}
+    - {prefix: 10.1.0.6/31, description: pe-02 <-> pe-03, status: active, role: technical}
+    - {prefix: 10.1.0.8/31, description: pe-02 <-> pe-06, status: active, role: technical}
+    - {prefix: 10.1.0.10/31, description: pe-03 <-> pe-04, status: active, role: technical}
+    - {prefix: 10.1.0.12/31, description: pe-03 <-> pe-07, status: active, role: technical}
+    - {prefix: 10.1.0.14/31, description: pe-04 <-> pe-05, status: active, role: technical}
+    - {prefix: 10.1.0.16/31, description: pe-04 <-> pe-08, status: active, role: technical}
+    - {prefix: 10.1.0.18/31, description: pe-05 <-> pe-06, status: active, role: technical}
+    - {prefix: 10.1.0.20/31, description: pe-06 <-> pe-07, status: active, role: technical}
+    - {prefix: 10.1.0.22/31, description: pe-07 <-> pe-08, status: active, role: technical}
+
+---
+# ISIS processes
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: MplsIsisProcess
+  data:
+    - device: pe-01
+      description: ISIS L2
+      status: active
+      area_id: "49.0001"
+      level: level-2
+      net_id: "49.0001.0100.0000.0001.00"
+    - device: pe-02
+      description: ISIS L2
+      status: active
+      area_id: "49.0001"
+      level: level-2
+      net_id: "49.0001.0100.0000.0002.00"
+    - device: pe-03
+      description: ISIS L2
+      status: active
+      area_id: "49.0001"
+      level: level-2
+      net_id: "49.0001.0100.0000.0003.00"
+    - device: pe-04
+      description: ISIS L2
+      status: active
+      area_id: "49.0001"
+      level: level-2
+      net_id: "49.0001.0100.0000.0004.00"
+    - device: pe-05
+      description: ISIS L2
+      status: active
+      area_id: "49.0001"
+      level: level-2
+      net_id: "49.0001.0100.0000.0005.00"
+    - device: pe-06
+      description: ISIS L2
+      status: active
+      area_id: "49.0001"
+      level: level-2
+      net_id: "49.0001.0100.0000.0006.00"
+    - device: pe-07
+      description: ISIS L2
+      status: active
+      area_id: "49.0001"
+      level: level-2
+      net_id: "49.0001.0100.0000.0007.00"
+    - device: pe-08
+      description: ISIS L2
+      status: active
+      area_id: "49.0001"
+      level: level-2
+      net_id: "49.0001.0100.0000.0008.00"
+
+---
+# LDP processes
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: MplsLdpProcess
+  data:
+    - device: pe-01
+      description: LDP
+      status: active
+      router_id: "10.0.0.1"
+    - device: pe-02
+      description: LDP
+      status: active
+      router_id: "10.0.0.2"
+    - device: pe-03
+      description: LDP
+      status: active
+      router_id: "10.0.0.3"
+    - device: pe-04
+      description: LDP
+      status: active
+      router_id: "10.0.0.4"
+    - device: pe-05
+      description: LDP
+      status: active
+      router_id: "10.0.0.5"
+    - device: pe-06
+      description: LDP
+      status: active
+      router_id: "10.0.0.6"
+    - device: pe-07
+      description: LDP
+      status: active
+      router_id: "10.0.0.7"
+    - device: pe-08
+      description: LDP
+      status: active
+      router_id: "10.0.0.8"
+
+---
+# MP-BGP processes
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: MplsBgpProcess
+  data:
+    - device: pe-01
+      description: MP-BGP VPNv4/v6
+      status: active
+      router_id: "10.0.0.1"
+      address_families: ["vpnv4", "vpnv6"]
+    - device: pe-02
+      description: MP-BGP VPNv4/v6
+      status: active
+      router_id: "10.0.0.2"
+      address_families: ["vpnv4", "vpnv6"]
+    - device: pe-03
+      description: MP-BGP VPNv4/v6
+      status: active
+      router_id: "10.0.0.3"
+      address_families: ["vpnv4", "vpnv6"]
+    - device: pe-04
+      description: MP-BGP VPNv4/v6
+      status: active
+      router_id: "10.0.0.4"
+      address_families: ["vpnv4", "vpnv6"]
+    - device: pe-05
+      description: MP-BGP VPNv4/v6
+      status: active
+      router_id: "10.0.0.5"
+      address_families: ["vpnv4", "vpnv6"]
+    - device: pe-06
+      description: MP-BGP VPNv4/v6
+      status: active
+      router_id: "10.0.0.6"
+      address_families: ["vpnv4", "vpnv6"]
+    - device: pe-07
+      description: MP-BGP VPNv4/v6
+      status: active
+      router_id: "10.0.0.7"
+      address_families: ["vpnv4", "vpnv6"]
+    - device: pe-08
+      description: MP-BGP VPNv4/v6
+      status: active
+      router_id: "10.0.0.8"
+      address_families: ["vpnv4", "vpnv6"]
+
+---
+# iBGP overlay sessions — full mesh (56 RoutingBGPSession rows, one per direction)
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: RoutingBGPSession
+  data:
+    # pe-01 -> peers
+    - description: pe-01 to pe-02
+      session_type: INTERNAL
+      role: backbone
+      device: pe-01
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.1/32", "default"]
+      remote_ip: ["10.0.0.2/32", "default"]
+      status: active
+    - description: pe-01 to pe-03
+      session_type: INTERNAL
+      role: backbone
+      device: pe-01
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.1/32", "default"]
+      remote_ip: ["10.0.0.3/32", "default"]
+      status: active
+    - description: pe-01 to pe-04
+      session_type: INTERNAL
+      role: backbone
+      device: pe-01
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.1/32", "default"]
+      remote_ip: ["10.0.0.4/32", "default"]
+      status: active
+    - description: pe-01 to pe-05
+      session_type: INTERNAL
+      role: backbone
+      device: pe-01
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.1/32", "default"]
+      remote_ip: ["10.0.0.5/32", "default"]
+      status: active
+    - description: pe-01 to pe-06
+      session_type: INTERNAL
+      role: backbone
+      device: pe-01
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.1/32", "default"]
+      remote_ip: ["10.0.0.6/32", "default"]
+      status: active
+    - description: pe-01 to pe-07
+      session_type: INTERNAL
+      role: backbone
+      device: pe-01
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.1/32", "default"]
+      remote_ip: ["10.0.0.7/32", "default"]
+      status: active
+    - description: pe-01 to pe-08
+      session_type: INTERNAL
+      role: backbone
+      device: pe-01
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.1/32", "default"]
+      remote_ip: ["10.0.0.8/32", "default"]
+      status: active
+    # pe-02 -> peers
+    - description: pe-02 to pe-01
+      session_type: INTERNAL
+      role: backbone
+      device: pe-02
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.2/32", "default"]
+      remote_ip: ["10.0.0.1/32", "default"]
+      status: active
+    - description: pe-02 to pe-03
+      session_type: INTERNAL
+      role: backbone
+      device: pe-02
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.2/32", "default"]
+      remote_ip: ["10.0.0.3/32", "default"]
+      status: active
+    - description: pe-02 to pe-04
+      session_type: INTERNAL
+      role: backbone
+      device: pe-02
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.2/32", "default"]
+      remote_ip: ["10.0.0.4/32", "default"]
+      status: active
+    - description: pe-02 to pe-05
+      session_type: INTERNAL
+      role: backbone
+      device: pe-02
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.2/32", "default"]
+      remote_ip: ["10.0.0.5/32", "default"]
+      status: active
+    - description: pe-02 to pe-06
+      session_type: INTERNAL
+      role: backbone
+      device: pe-02
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.2/32", "default"]
+      remote_ip: ["10.0.0.6/32", "default"]
+      status: active
+    - description: pe-02 to pe-07
+      session_type: INTERNAL
+      role: backbone
+      device: pe-02
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.2/32", "default"]
+      remote_ip: ["10.0.0.7/32", "default"]
+      status: active
+    - description: pe-02 to pe-08
+      session_type: INTERNAL
+      role: backbone
+      device: pe-02
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.2/32", "default"]
+      remote_ip: ["10.0.0.8/32", "default"]
+      status: active
+    # pe-03 -> peers
+    - description: pe-03 to pe-01
+      session_type: INTERNAL
+      role: backbone
+      device: pe-03
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.3/32", "default"]
+      remote_ip: ["10.0.0.1/32", "default"]
+      status: active
+    - description: pe-03 to pe-02
+      session_type: INTERNAL
+      role: backbone
+      device: pe-03
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.3/32", "default"]
+      remote_ip: ["10.0.0.2/32", "default"]
+      status: active
+    - description: pe-03 to pe-04
+      session_type: INTERNAL
+      role: backbone
+      device: pe-03
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.3/32", "default"]
+      remote_ip: ["10.0.0.4/32", "default"]
+      status: active
+    - description: pe-03 to pe-05
+      session_type: INTERNAL
+      role: backbone
+      device: pe-03
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.3/32", "default"]
+      remote_ip: ["10.0.0.5/32", "default"]
+      status: active
+    - description: pe-03 to pe-06
+      session_type: INTERNAL
+      role: backbone
+      device: pe-03
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.3/32", "default"]
+      remote_ip: ["10.0.0.6/32", "default"]
+      status: active
+    - description: pe-03 to pe-07
+      session_type: INTERNAL
+      role: backbone
+      device: pe-03
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.3/32", "default"]
+      remote_ip: ["10.0.0.7/32", "default"]
+      status: active
+    - description: pe-03 to pe-08
+      session_type: INTERNAL
+      role: backbone
+      device: pe-03
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.3/32", "default"]
+      remote_ip: ["10.0.0.8/32", "default"]
+      status: active
+    # pe-04 -> peers
+    - description: pe-04 to pe-01
+      session_type: INTERNAL
+      role: backbone
+      device: pe-04
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.4/32", "default"]
+      remote_ip: ["10.0.0.1/32", "default"]
+      status: active
+    - description: pe-04 to pe-02
+      session_type: INTERNAL
+      role: backbone
+      device: pe-04
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.4/32", "default"]
+      remote_ip: ["10.0.0.2/32", "default"]
+      status: active
+    - description: pe-04 to pe-03
+      session_type: INTERNAL
+      role: backbone
+      device: pe-04
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.4/32", "default"]
+      remote_ip: ["10.0.0.3/32", "default"]
+      status: active
+    - description: pe-04 to pe-05
+      session_type: INTERNAL
+      role: backbone
+      device: pe-04
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.4/32", "default"]
+      remote_ip: ["10.0.0.5/32", "default"]
+      status: active
+    - description: pe-04 to pe-06
+      session_type: INTERNAL
+      role: backbone
+      device: pe-04
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.4/32", "default"]
+      remote_ip: ["10.0.0.6/32", "default"]
+      status: active
+    - description: pe-04 to pe-07
+      session_type: INTERNAL
+      role: backbone
+      device: pe-04
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.4/32", "default"]
+      remote_ip: ["10.0.0.7/32", "default"]
+      status: active
+    - description: pe-04 to pe-08
+      session_type: INTERNAL
+      role: backbone
+      device: pe-04
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.4/32", "default"]
+      remote_ip: ["10.0.0.8/32", "default"]
+      status: active
+    # pe-05 -> peers
+    - description: pe-05 to pe-01
+      session_type: INTERNAL
+      role: backbone
+      device: pe-05
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.5/32", "default"]
+      remote_ip: ["10.0.0.1/32", "default"]
+      status: active
+    - description: pe-05 to pe-02
+      session_type: INTERNAL
+      role: backbone
+      device: pe-05
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.5/32", "default"]
+      remote_ip: ["10.0.0.2/32", "default"]
+      status: active
+    - description: pe-05 to pe-03
+      session_type: INTERNAL
+      role: backbone
+      device: pe-05
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.5/32", "default"]
+      remote_ip: ["10.0.0.3/32", "default"]
+      status: active
+    - description: pe-05 to pe-04
+      session_type: INTERNAL
+      role: backbone
+      device: pe-05
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.5/32", "default"]
+      remote_ip: ["10.0.0.4/32", "default"]
+      status: active
+    - description: pe-05 to pe-06
+      session_type: INTERNAL
+      role: backbone
+      device: pe-05
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.5/32", "default"]
+      remote_ip: ["10.0.0.6/32", "default"]
+      status: active
+    - description: pe-05 to pe-07
+      session_type: INTERNAL
+      role: backbone
+      device: pe-05
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.5/32", "default"]
+      remote_ip: ["10.0.0.7/32", "default"]
+      status: active
+    - description: pe-05 to pe-08
+      session_type: INTERNAL
+      role: backbone
+      device: pe-05
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.5/32", "default"]
+      remote_ip: ["10.0.0.8/32", "default"]
+      status: active
+    # pe-06 -> peers
+    - description: pe-06 to pe-01
+      session_type: INTERNAL
+      role: backbone
+      device: pe-06
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.6/32", "default"]
+      remote_ip: ["10.0.0.1/32", "default"]
+      status: active
+    - description: pe-06 to pe-02
+      session_type: INTERNAL
+      role: backbone
+      device: pe-06
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.6/32", "default"]
+      remote_ip: ["10.0.0.2/32", "default"]
+      status: active
+    - description: pe-06 to pe-03
+      session_type: INTERNAL
+      role: backbone
+      device: pe-06
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.6/32", "default"]
+      remote_ip: ["10.0.0.3/32", "default"]
+      status: active
+    - description: pe-06 to pe-04
+      session_type: INTERNAL
+      role: backbone
+      device: pe-06
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.6/32", "default"]
+      remote_ip: ["10.0.0.4/32", "default"]
+      status: active
+    - description: pe-06 to pe-05
+      session_type: INTERNAL
+      role: backbone
+      device: pe-06
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.6/32", "default"]
+      remote_ip: ["10.0.0.5/32", "default"]
+      status: active
+    - description: pe-06 to pe-07
+      session_type: INTERNAL
+      role: backbone
+      device: pe-06
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.6/32", "default"]
+      remote_ip: ["10.0.0.7/32", "default"]
+      status: active
+    - description: pe-06 to pe-08
+      session_type: INTERNAL
+      role: backbone
+      device: pe-06
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.6/32", "default"]
+      remote_ip: ["10.0.0.8/32", "default"]
+      status: active
+    # pe-07 -> peers
+    - description: pe-07 to pe-01
+      session_type: INTERNAL
+      role: backbone
+      device: pe-07
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.7/32", "default"]
+      remote_ip: ["10.0.0.1/32", "default"]
+      status: active
+    - description: pe-07 to pe-02
+      session_type: INTERNAL
+      role: backbone
+      device: pe-07
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.7/32", "default"]
+      remote_ip: ["10.0.0.2/32", "default"]
+      status: active
+    - description: pe-07 to pe-03
+      session_type: INTERNAL
+      role: backbone
+      device: pe-07
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.7/32", "default"]
+      remote_ip: ["10.0.0.3/32", "default"]
+      status: active
+    - description: pe-07 to pe-04
+      session_type: INTERNAL
+      role: backbone
+      device: pe-07
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.7/32", "default"]
+      remote_ip: ["10.0.0.4/32", "default"]
+      status: active
+    - description: pe-07 to pe-05
+      session_type: INTERNAL
+      role: backbone
+      device: pe-07
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.7/32", "default"]
+      remote_ip: ["10.0.0.5/32", "default"]
+      status: active
+    - description: pe-07 to pe-06
+      session_type: INTERNAL
+      role: backbone
+      device: pe-07
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.7/32", "default"]
+      remote_ip: ["10.0.0.6/32", "default"]
+      status: active
+    - description: pe-07 to pe-08
+      session_type: INTERNAL
+      role: backbone
+      device: pe-07
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.7/32", "default"]
+      remote_ip: ["10.0.0.8/32", "default"]
+      status: active
+    # pe-08 -> peers
+    - description: pe-08 to pe-01
+      session_type: INTERNAL
+      role: backbone
+      device: pe-08
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.8/32", "default"]
+      remote_ip: ["10.0.0.1/32", "default"]
+      status: active
+    - description: pe-08 to pe-02
+      session_type: INTERNAL
+      role: backbone
+      device: pe-08
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.8/32", "default"]
+      remote_ip: ["10.0.0.2/32", "default"]
+      status: active
+    - description: pe-08 to pe-03
+      session_type: INTERNAL
+      role: backbone
+      device: pe-08
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.8/32", "default"]
+      remote_ip: ["10.0.0.3/32", "default"]
+      status: active
+    - description: pe-08 to pe-04
+      session_type: INTERNAL
+      role: backbone
+      device: pe-08
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.8/32", "default"]
+      remote_ip: ["10.0.0.4/32", "default"]
+      status: active
+    - description: pe-08 to pe-05
+      session_type: INTERNAL
+      role: backbone
+      device: pe-08
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.8/32", "default"]
+      remote_ip: ["10.0.0.5/32", "default"]
+      status: active
+    - description: pe-08 to pe-06
+      session_type: INTERNAL
+      role: backbone
+      device: pe-08
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.8/32", "default"]
+      remote_ip: ["10.0.0.6/32", "default"]
+      status: active
+    - description: pe-08 to pe-07
+      session_type: INTERNAL
+      role: backbone
+      device: pe-08
+      local_as: ["65000", "Backbone-AS"]
+      remote_as: ["65000", "Backbone-AS"]
+      local_ip: ["10.0.0.8/32", "default"]
+      remote_ip: ["10.0.0.7/32", "default"]
+      status: active

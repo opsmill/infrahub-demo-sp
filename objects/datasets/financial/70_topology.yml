@@ -1,0 +1,23 @@
+---
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: TopologyMplsBackbone
+  data:
+    - name: mpls-backbone-1
+      description: EMEA MPLS backbone — 8 Arista cEOS PEs in a partial mesh.
+      isis_area: "49.0001"
+      isis_level: level-2
+      location: emea
+      asn: ["65000", "Backbone-AS"]
+      pes:
+        - pe-01
+        - pe-02
+        - pe-03
+        - pe-04
+        - pe-05
+        - pe-06
+        - pe-07
+        - pe-08
+      member_of_groups:
+        - topologies_mpls
