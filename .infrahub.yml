@@ -83,13 +83,24 @@ artifact_definitions:
     transformation: sdwan_versa
     parameters: {device: name__value}
 generator_definitions:
+  # generate_l3vpn: execute_in_proposed_change: false — do NOT run it inside the
+  # proposed-change CI pipeline. In the pipeline it races the artifact
+  # validators (they render before the generator materializes the VRF/IPs, so
+  # the PC shows no config diff). Instead it is fired by a group-membership
+  # trigger (objects/events/00_triggers.yml) the moment a ServiceL3Vpn is added
+  # to the l3vpns group on the branch, so the data lands before artifacts
+  # render. Bootstrap still runs it explicitly via scripts/run_generator.py.
   - name: generate_l3vpn
     file_path: generators/generate_l3vpn.py
     targets: l3vpns
     query: l3vpn
     class_name: L3VpnGenerator
+    execute_in_proposed_change: false
     parameters:
       name: name__value
+  # generate_sdwan intentionally still runs in the proposed-change pipeline —
+  # the SD-WAN catalog page is built around that flow. Converting it to the
+  # event-driven trigger pattern (like generate_l3vpn) is a tracked follow-up.
   - name: generate_sdwan
     file_path: generators/generate_sdwan.py
     targets: sdwans

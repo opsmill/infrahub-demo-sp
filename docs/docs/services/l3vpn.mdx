@@ -35,11 +35,16 @@ sequenceDiagram
    `ServiceL3VpnSite` objects to Infrahub. All objects start with
    `status = draft / provisioning`.
 
-3. **Proposed Change** — The catalog opens a `CoreProposedChange` from the
-   feature branch into `main`. This triggers the generator and checks
-   automatically.
-
-4. **Generator run** — `L3VpnGenerator` does all heavy lifting:
+3. **Generator run (event-driven)** — Once the sites exist, the catalog adds
+   the `ServiceL3Vpn` to the `l3vpns` group. That membership change fires the
+   `trigger-l3vpn-generator` group trigger (a `CoreGroupTriggerRule` +
+   `CoreGeneratorAction`, see `objects/events/00_triggers.yml`), which runs
+   `L3VpnGenerator` **on the branch**. The generator is deliberately **not**
+   run inside the proposed-change pipeline (`execute_in_proposed_change: false`
+   in `.infrahub.yml`): in the pipeline it races artifact rendering, which
+   render before the VRF/IPs exist and produce an empty configuration diff. Running it
+   on the branch-change event guarantees the data lands before artifacts render.
+   `L3VpnGenerator` does all heavy lifting:
    - Creates an `IpamVRF` with `vrf_rd = <provider-asn>:<vpn_id>`.
    - Creates matching import and export route targets.
    - Selects the lowest-numbered free interface on the PE.
@@ -49,6 +54,10 @@ sequenceDiagram
      `routing_protocol = ebgp`.
    - Promotes `ServiceL3Vpn.status` to `active` and `ServiceL3VpnSite.status`
      to `active`.
+
+4. **Proposed Change** — Once the generator has finished (service `active`)
+   and the per-PE artifacts are rendered, the catalog opens a
+   `CoreProposedChange` from the feature branch into `main` for review.
 
 5. **Checks** — Four checks must pass before merge is allowed
    (see [Checks](#checks) below).

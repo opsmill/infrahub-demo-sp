@@ -1,0 +1,45 @@
+---
+# Event-driven generator execution for the L3VPN service.
+#
+# generate_l3vpn is removed from the proposed-change CI pipeline
+# (`execute_in_proposed_change: false` in .infrahub.yml) because there it
+# races the artifact validators — artifacts render before the generator
+# materializes the VRF / interfaces / IPs, so the proposed change shows no
+# config diff.
+#
+# Instead it runs event-driven: when the service catalog adds a ServiceL3Vpn
+# to the `l3vpns` group on its branch (after the sites exist), the
+# group-membership trigger fires the generator action. The generator runs and
+# commits on that branch *before* artifacts render, so the diff is correct.
+# `branch_scope: other_branches` restricts firing to non-default branches (the
+# catalog's `service/*` branches); the default branch is seeded explicitly at
+# bootstrap via scripts/run_generator.py.
+#
+# NOTE: this file references the generate_l3vpn CoreGeneratorDefinition, which
+# only exists after the CoreRepository has synced .infrahub.yml, so it is
+# loaded separately (after repo sync) rather than with the bootstrap object
+# set — see the `bootstrap` task in tasks.py.
+#
+# generate_sdwan still runs in the proposed-change pipeline; converting it to
+# this pattern is a follow-up.
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: CoreGeneratorAction
+  data:
+    - name: run-l3vpn-generator
+      description: Run the L3VPN generator against the impacted service.
+      generator: generate_l3vpn
+
+---
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: CoreGroupTriggerRule
+  data:
+    - name: trigger-l3vpn-generator
+      description: Fire the L3VPN generator when a service joins the l3vpns group.
+      branch_scope: other_branches
+      member_update: added
+      group: l3vpns
+      action: run-l3vpn-generator

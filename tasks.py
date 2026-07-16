@@ -302,6 +302,15 @@ def bootstrap(c: Context) -> None:
     c.run("uv run python scripts/run_generator.py generate_sdwan", pty=True)
     _success("SD-WAN generator complete")
 
+    # Load the event triggers now that the CoreRepository has synced
+    # .infrahub.yml (the run_generator steps above block until the
+    # CoreGeneratorDefinition rows exist). The triggers reference those
+    # definitions, so they can only load once the sync is complete — which
+    # is why this file is not part of the bootstrap object set.
+    _step("Loading event triggers (generator actions + group triggers)")
+    c.run("uv run infrahubctl object load objects/events/00_triggers.yml", pty=True)
+    _success("Event triggers loaded")
+
     # Now that the generator has materialized the data the templates
     # depend on, regenerate every artifact — Infrahub's earlier
     # auto-dispatch ran against incomplete state and left artifacts in

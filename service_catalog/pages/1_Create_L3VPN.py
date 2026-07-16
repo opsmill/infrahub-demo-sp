@@ -89,8 +89,8 @@ if submitted:
 
         vpn_id_pool = run_async(client.get(kind="CoreNumberPool", name__value="vpn_id_pool"))
         # `l3vpns` is the target group the `generate_l3vpn` generator runs
-        # against; without membership the catalog-created VPN is invisible
-        # to the generator and downstream artifact/check pipeline.
+        # against. Membership is added *after* the sites exist (below) so the
+        # group-membership trigger fires the generator with complete data.
         l3vpns_group = run_async(client.get(kind="CoreStandardGroup", name__value="l3vpns"))
 
         vpn = run_async(
@@ -101,7 +101,6 @@ if submitted:
                 vpn_id=vpn_id_pool,
                 address_family=address_family,
                 tenant={"hfid": [tenant]},
-                member_of_groups=[l3vpns_group.id],
             )
         )
         run_async(vpn.save())
@@ -131,10 +130,17 @@ if submitted:
             )
             run_async(site_obj.save())
 
-        # Wait for the L3VPN generator (auto-fired by group membership) to
-        # materialize the VRF / interfaces / IPs before triggering artifact
-        # rendering, otherwise downstream artifacts render against stale data
-        # and the proposed change shows no diff against main.
+        # Add the VPN to the `l3vpns` group now that its sites exist. This
+        # membership change fires the `trigger-l3vpn-generator` group trigger
+        # (objects/events/00_triggers.yml), which runs generate_l3vpn on this
+        # branch against the complete VPN+sites data.
+        l3vpns_group.members.add(vpn.id)
+        run_async(l3vpns_group.save())
+
+        # Wait for the L3VPN generator (fired by the group-membership trigger
+        # above) to materialize the VRF / interfaces / IPs before triggering
+        # artifact rendering, otherwise downstream artifacts render against
+        # stale data and the proposed change shows no diff against main.
         def _is_active() -> bool:
             v = run_async(client.get(kind="ServiceL3Vpn", name__value=name))
             return v.status.value == "active"
