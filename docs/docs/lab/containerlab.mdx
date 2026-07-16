@@ -11,8 +11,8 @@ The containerlab artifact (`clab-mpls-topology`) is generated from Infrahub
 data by the `clab_topology` transform and renders a valid containerlab YAML
 topology. It wires up the lab-deployable PE nodes plus the L3VPN CE nodes for
 end-to-end testing. The backbone links are **data-driven** — derived from the
-shared /31 addressing rather than hardcoded — so the lab tracks whatever the
-active dataset's backbone defines.
+shared /31 addressing rather than fixed in the template — so the lab tracks
+whatever backbone the active dataset defines.
 
 Which PEs are deployable depends on the dataset:
 
@@ -115,8 +115,8 @@ Expected output (default **financial** dataset — 8 Arista cEOS PEs plus the fo
 +----+---------------------------------+-----------+---------------------------------+
 ```
 
-On the **isp** dataset the same command brings up just `pe-lon-arista` (ceos)
-and `pe-par-nokia-lab` (srl), plus that dataset's CE nodes.
+On the **isp** dataset the same command brings up just `pe-lon-arista`
+(Arista cEOS) and `pe-par-nokia-lab` (Nokia SR Linux), plus its CE nodes.
 
 ---
 
