@@ -91,7 +91,13 @@ if submitted:
         # `l3vpns` is the target group the `generate_l3vpn` generator runs
         # against. Membership is added *after* the sites exist (below) so the
         # group-membership trigger fires the generator with complete data.
-        l3vpns_group = run_async(client.get(kind="CoreStandardGroup", name__value="l3vpns"))
+        # Fetch with the `members` relationship included: RelationshipManager
+        # .add() raises UninitializedError unless the relationship has been
+        # loaded, so an un-included get() would make the members.add() below
+        # crash the whole catalog flow.
+        l3vpns_group = run_async(
+            client.get(kind="CoreStandardGroup", name__value="l3vpns", include=["members"])
+        )
 
         vpn = run_async(
             client.create(

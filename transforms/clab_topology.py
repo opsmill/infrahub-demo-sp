@@ -16,6 +16,44 @@ TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 LABBED_KINDS = frozenset({"ceos", "srl"})
 
 
+def _pe_kind(pe: dict[str, Any]) -> str | None:
+    """Return a PE's containerlab kind, or ``None`` if it has no platform.
+
+    Args:
+        pe: A ``DcimDevice`` node from the query result.
+
+    Returns:
+        The ``containerlab_os`` value, or ``None`` when the platform (or its
+        ``containerlab_os``) is unset — such a PE has no lab image and is
+        skipped rather than aborting the whole render.
+    """
+    platform = (pe.get("platform") or {}).get("node")
+    if not platform:
+        return None
+    return (platform.get("containerlab_os") or {}).get("value")
+
+
+def _labbed_pes(backbone: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return the backbone PEs that map to a lab-deployable container image.
+
+    This is the single source of truth for "which PEs are lab-deployable";
+    both the node list and the backbone-link derivation consume it, and the
+    template renders the returned nodes directly.
+
+    Args:
+        backbone: The ``TopologyMplsBackbone`` node from the query result.
+
+    Returns:
+        The PE nodes, in query order, whose ``containerlab_os`` is in
+        :data:`LABBED_KINDS`.
+    """
+    return [
+        edge["node"]
+        for edge in backbone.get("pes", {}).get("edges", [])
+        if _pe_kind(edge["node"]) in LABBED_KINDS
+    ]
+
+
 def _backbone_links(backbone: dict[str, Any]) -> list[dict[str, Any]]:
     """Derive lab backbone links from the PEs' core interface addressing.
 
@@ -36,10 +74,9 @@ def _backbone_links(backbone: dict[str, Any]) -> list[dict[str, Any]]:
         ``endpoints`` list of ``{device, iface, kind}`` mappings.
     """
     by_network: dict[str, list[dict[str, str]]] = defaultdict(list)
-    for pe_edge in backbone.get("pes", {}).get("edges", []):
-        pe = pe_edge["node"]
-        kind = pe["platform"]["node"]["containerlab_os"]["value"]
-        if kind not in LABBED_KINDS:
+    for pe in _labbed_pes(backbone):
+        kind = _pe_kind(pe)
+        if kind is None:  # unreachable: _labbed_pes only yields labbed PEs
             continue
         pe_name = pe["name"]["value"]
         for if_edge in pe.get("interfaces", {}).get("edges", []):
@@ -87,4 +124,8 @@ class ClabTopology(InfrahubTransform):
             lstrip_blocks=True,
         )
         template = env.get_template("clab_topology.j2")
-        return template.render(data=data, backbone_links=_backbone_links(backbone))
+        return template.render(
+            data=data,
+            labbed_pes=_labbed_pes(backbone),
+            backbone_links=_backbone_links(backbone),
+        )

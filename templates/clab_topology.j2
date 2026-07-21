@@ -1,11 +1,7 @@
 {% set backbone = data.TopologyMplsBackbone.edges[0].node %}
-{% set labbed_kinds = ['ceos', 'srl'] %}
-{% set labbed_pes = [] %}
-{% for pe_edge in backbone.pes.edges %}
-{% if pe_edge.node.platform.node.containerlab_os.value in labbed_kinds %}
-{% set _ = labbed_pes.append(pe_edge.node) %}
-{% endif %}
-{% endfor %}
+{# `labbed_pes` (the lab-deployable PE nodes) is supplied by the transform so
+   the "which PEs are lab-deployable" rule lives in one place — see
+   transforms/clab_topology.py:_labbed_pes. #}
 {# Translate an Infrahub interface name (e.g. "Ethernet4") to the form clab
    needs for the link endpoint, based on the container kind.
    - ceos: data ports are eth1, eth2, ... (clab maps eth<N> ↔ Ethernet<N>)

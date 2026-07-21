@@ -17,10 +17,12 @@ from transforms.clab_topology import ClabTopology
 
 
 def _platform(name: str, clab_os: str | None) -> dict:
+    """Build a ``platform`` relationship node with the given name and clab OS."""
     return {"node": {"name": {"value": name}, "containerlab_os": {"value": clab_os}}}
 
 
 def _core_iface(name: str, address: str) -> dict:
+    """Build a ``core``-role InterfacePhysical edge carrying a single address."""
     return {
         "node": {
             "__typename": "InterfacePhysical",
@@ -168,12 +170,14 @@ def _all_arista_fixture() -> dict:
 
 
 def _link_strings(parsed: dict) -> list[str]:
+    """Return the rendered topology links as strings for substring assertions."""
     return [str(link) for link in parsed["topology"]["links"]]
 
 
 @pytest.mark.asyncio
 async def test_includes_labbed_pes_only() -> None:
-    """Lab includes Arista cEOS + Nokia SR Linux; excludes Cisco / Juniper."""
+    """Lab includes Arista cEOS + Nokia SR Linux; excludes non-labbed platforms
+    (this fixture carries a Cisco PE, which has no clab image)."""
     rendered = await ClabTopology.__new__(ClabTopology).transform(FIXTURE)
     parsed = yaml.safe_load(rendered)
     nodes = parsed["topology"]["nodes"]
@@ -204,7 +208,7 @@ async def test_renders_backbone_link_between_arista_and_nokia() -> None:
 
 @pytest.mark.asyncio
 async def test_all_arista_backbone_renders_every_link() -> None:
-    """A single-vendor cEOS backbone renders one link per /31 (partial mesh)."""
+    """A single-vendor cEOS backbone renders one link per /31 (here a 4-PE ring)."""
     rendered = await ClabTopology.__new__(ClabTopology).transform(_all_arista_fixture())
     parsed = yaml.safe_load(rendered)
     links = _link_strings(parsed)
