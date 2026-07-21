@@ -1,0 +1,19 @@
+docs/superpowers/specs/2026-07-21-testcontainers-demo-path-integration-design.md
+  s_aa839b5e510e3f::t_1394779e9506e6 1-181
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "f9bfed71cebb9702ad0f8223d1d29d202bc6a776",
+  "prompts": {},
+  "sessions": {
+    "s_aa839b5e510e3f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "972573f4-ef63-4cc8-9425-82313ecf9cb8",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Benoit Kohler <Kohler.benoit@bearchitek.com>"
+    }
+  }
+}
