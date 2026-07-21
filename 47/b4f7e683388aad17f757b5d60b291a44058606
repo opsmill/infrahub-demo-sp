@@ -1,0 +1,25 @@
+service_catalog/pages/1_Create_L3VPN.py
+  s_aa839b5e510e3f::t_c69f7fff152063 94-100
+templates/clab_topology.j2
+  s_aa839b5e510e3f::t_9d3564da9a9a58 2-4
+tests/unit/test_transforms/test_clab_topology.py
+  s_aa839b5e510e3f::t_fb5205724cbfa2 20,25,173,179-180,211
+transforms/clab_topology.py
+  s_aa839b5e510e3f::t_7dc0a01bda6a47 19-56,77-79,127-131
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "47b4f7e683388aad17f757b5d60b291a44058606",
+  "prompts": {},
+  "sessions": {
+    "s_aa839b5e510e3f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "972573f4-ef63-4cc8-9425-82313ecf9cb8",
+        "model": "unknown"
+      },
+      "human_author": "Benoit Kohler <Kohler.benoit@bearchitek.com>"
+    }
+  }
+}
