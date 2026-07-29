@@ -53,7 +53,7 @@ PEs:
 | `ce-ib-lon` | `investment-banking` | `pe-01` Ethernet4 | `ib-advisory-vpn` |
 | `ce-ib-zrh` | `investment-banking` | `pe-08` Ethernet4 | `ib-advisory-vpn` |
 
-They are Arista cEOS boxes with their own rendered config artifact
+They are Arista cEOS boxes with their own rendered configuration artifact
 (`ce-arista-eos`), so the PE-CE eBGP session actually establishes in the
 containerlab topology rather than being modelled only.
 
@@ -63,14 +63,14 @@ key (`L3VPN <vpn name>`). That is what pins the wiring: the generator binds the
 site to that exact port instead of allocating the next free one, and the port is
 already out of the free pool so no later service can claim it.
 
-### Customer AS numbers
+### Customer autonomous system numbers
 
 PE-CE eBGP peer ASNs come from the `customer_asn_pool` number pool
 (65100–65199, `objects/50_pools.yml`). The L3VPN generator allocates **one AS
-per VPN** — a customer is one routing domain across its sites — and links it as
-the VPN's `customer_asn`. A site may still set `bgp_peer_asn` to override it,
-which is how the **isp** dataset peers with pre-agreed customer AS numbers; when
-every eBGP site overrides, no pool ASN is consumed.
+per VPN** — a customer is one routing domain across its sites — and links it
+as `customer_asn` on the VPN. A site may still set `bgp_peer_asn` to override
+it, which is how the **isp** dataset peers with pre-agreed customer AS numbers;
+when every eBGP site overrides, no pool ASN is consumed.
 
 ## L3VPN service flow
 

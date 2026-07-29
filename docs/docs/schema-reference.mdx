@@ -51,7 +51,7 @@ Represents a single PE attachment of an L3VPN to a customer subnet. One site
 |---|---|---|---|---|
 | `name` | Text | Required | Unique within a given `l3vpn` (uniqueness constraint) | User |
 | `routing_protocol` | Dropdown | Required | `ebgp`, `static`, or `connected` | User |
-| `bgp_peer_asn` | Number | Optional | Per-site override for the PE-CE peer AS. Leave unset to use the VPN's `customer_asn` | User |
+| `bgp_peer_asn` | Number | Optional | Per-site override for the PE-CE peer AS. Leave unset to use `customer_asn` on the VPN | User |
 | `static_routes` | JSON | Optional | List of static routes to inject into the VRF | User |
 | `status` | Dropdown | Required | `provisioning` → `active` → `decommissioned`. Defaults to `provisioning` | Generator promotes to `active` |
 
