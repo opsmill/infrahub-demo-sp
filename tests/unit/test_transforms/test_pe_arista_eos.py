@@ -315,3 +315,18 @@ async def test_no_ibgp_sessions_renders_no_neighbors() -> None:
     rendered = await PeAristaEos.__new__(PeAristaEos).transform(fixture)
     assert "neighbor RR-MESH peer group" in rendered  # the group itself is still defined
     assert "remote-as 65000" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_isis_is_enabled_on_the_loopback() -> None:
+    """The loopback must participate in IS-IS, not just the core links.
+
+    iBGP peers loopback-to-loopback (`update-source Loopback0`). If IS-IS never
+    advertises the /32, no PE has a route to any peer's loopback, so every
+    session sits in Active with zero messages and no VPNv4 is exchanged —
+    even though IS-IS adjacencies themselves are up. Verified on a live 8-PE
+    lab: adding this took iBGP from 0/56 to 56/56 established.
+    """
+    rendered = await PeAristaEos.__new__(PeAristaEos).transform(FIXTURE)
+    loopback_block = rendered.split("interface Loopback0", 1)[1].split("\n!", 1)[0]
+    assert "isis enable 1" in loopback_block

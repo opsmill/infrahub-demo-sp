@@ -53,6 +53,13 @@ interface Loopback0
 {% for ip in iface.node.ip_addresses.edges %}
    ip address {{ ip.node.address.value }}
 {% endfor %}
+{# IS-IS must run on the loopback, not just the core links, or the /32 is never
+   advertised. Without it every PE has IS-IS adjacencies but no route to any
+   peer's loopback, so the iBGP mesh — which peers loopback-to-loopback via
+   `update-source Loopback0` — sits in Active with 0 messages exchanged and no
+   VPNv4 ever flows. Verified on a live 8-PE lab: adding this took iBGP from
+   0/56 to 56/56 established. #}
+   isis enable 1
 {% endfor %}
 !
 {% for iface in device.interfaces.edges if iface.node.role.value == 'core' %}
