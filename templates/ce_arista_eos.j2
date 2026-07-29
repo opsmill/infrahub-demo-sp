@@ -1,0 +1,79 @@
+{% import '_macros.j2' as m %}
+{# Format marker for static analyzers (e.g. Batfish) — see pe_arista_eos.j2. #}
+!RANCID-CONTENT-TYPE: arista
+{% set device = data.DcimDevice.edges[0].node %}
+{% set sessions = data.RoutingBGPSession.edges | selectattr('node.local_ip.node') | list %}
+{% set sites = data.ServiceL3VpnSite.edges | selectattr('node.customer_subnet.node') | list %}
+!
+! Arista EOS configuration for {{ device.name.value }} (customer edge)
+!
+hostname {{ device.name.value }}
+!
+! Demo-only: admin user so the lab cEOS container accepts SSH password auth.
+! Replace before any non-local use.
+username admin privilege 15 role network-admin secret 0 admin
+!
+management api http-commands
+   no shutdown
+   ! Demo-only: plain HTTP, see pe_arista_eos.j2.
+   protocol http
+   no protocol https
+!
+management ssh
+   no shutdown
+!
+ip routing
+!
+{# The CE is not VPN-aware: no MPLS, no VRFs, no LDP. It sees a plain routed
+   handoff to the PE and one LAN behind it. #}
+{% for iface in device.interfaces.edges if iface.node.name.value == 'Loopback0' %}
+interface Loopback0
+   description {{ iface.node.description.value }}
+{% for ip in iface.node.ip_addresses.edges %}
+   ip address {{ ip.node.address.value }}
+{% endfor %}
+!
+{% endfor %}
+{% for iface in device.interfaces.edges
+    if iface.node.__typename == 'InterfacePhysical' and iface.node.ip_addresses.edges %}
+interface {{ iface.node.name.value }}
+   description {{ iface.node.description.value }}
+   mtu {{ iface.node.mtu.value }}
+   no switchport
+{% for ip in iface.node.ip_addresses.edges %}
+   ip address {{ ip.node.address.value }}
+{% endfor %}
+!
+{% endfor %}
+{% if sessions %}
+router bgp {{ device.asn.node.asn.value }}
+{% for iface in device.interfaces.edges if iface.node.name.value == 'Loopback0' %}
+{% for ip in iface.node.ip_addresses.edges %}
+   router-id {{ m.ip_only(ip.node.address.value) }}
+{% endfor %}
+{% endfor %}
+{% for session_edge in sessions %}
+{% set session = session_edge.node %}
+   ! {{ session.description.value }}
+   neighbor {{ m.ip_only(session.remote_ip.node.address.value) }} remote-as {{ session.remote_as.node.asn.value }}
+   neighbor {{ m.ip_only(session.remote_ip.node.address.value) }} maximum-routes 12000
+{% endfor %}
+   !
+   address-family ipv4
+{% for session_edge in sessions %}
+      neighbor {{ m.ip_only(session_edge.node.remote_ip.node.address.value) }} activate
+{% endfor %}
+{# Advertise the customer LAN into the VPN. `network` rather than
+   `redistribute connected` so the CE only ever originates the subnets the
+   service actually covers. #}
+{% for site_edge in sites %}
+      network {{ site_edge.node.customer_subnet.node.prefix.value }}
+{% endfor %}
+{% for iface in device.interfaces.edges if iface.node.name.value == 'Loopback0' %}
+{% for ip in iface.node.ip_addresses.edges %}
+      network {{ ip.node.address.value }}
+{% endfor %}
+{% endfor %}
+!
+{% endif %}
+end

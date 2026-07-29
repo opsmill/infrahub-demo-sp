@@ -44,9 +44,16 @@ with st.form("create_l3vpn"):
             key=f"proto_{i}",
             horizontal=True,
         )
+        # 0 means "not specified": the L3VPN generator then allocates this
+        # VPN's customer AS from customer_asn_pool. A non-zero value is a
+        # per-site override for peering with a pre-agreed customer AS.
         asn = (
             st.number_input(
-                "BGP peer ASN", min_value=0, max_value=4294967295, key=f"asn_{i}", value=0
+                "BGP peer ASN (0 = allocate from customer_asn_pool)",
+                min_value=0,
+                max_value=4294967295,
+                key=f"asn_{i}",
+                value=0,
             )
             if proto == "ebgp"
             else None

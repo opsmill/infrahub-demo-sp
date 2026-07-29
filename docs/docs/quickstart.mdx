@@ -39,8 +39,9 @@ This destroys any prior state, starts the containers, loads the schemas,
 the menu, all bootstrap objects (resource pools plus the selected dataset —
 its backbone, tenants, and services), and generates schema protocol bindings.
 The backbone ships inside the dataset: the default **financial** dataset loads
-8 Arista cEOS PEs (`pe-01`…`pe-08`) in a partial mesh, while **isp** loads 4
-multi-vendor PEs in a full mesh.
+8 Arista cEOS PEs (`pe-01`…`pe-08`) in a partial mesh plus 4 pre-provisioned
+Arista cEOS CE routers on the two hub PEs, while **isp** loads 4 multi-vendor
+PEs in a full mesh.
 
 Wait ~30 s after the containers come up before bootstrap runs.
 

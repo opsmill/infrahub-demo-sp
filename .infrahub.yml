@@ -13,6 +13,7 @@ menus:
 queries:
   - {name: l3vpn, file_path: queries/service/l3vpn.gql}
   - {name: pe, file_path: queries/config/pe.gql}
+  - {name: ce, file_path: queries/config/ce.gql}
   - {name: clab_topology, file_path: queries/topology/clab.gql}
   - {name: l3vpn_overlap, file_path: queries/validation/l3vpn_overlap.gql}
   - {name: l3vpn_site_subnet, file_path: queries/validation/l3vpn_site_subnet.gql}
@@ -25,6 +26,7 @@ queries:
   - {name: batfish_backbone, file_path: queries/validation/batfish_backbone.gql}
 python_transforms:
   - {name: pe_arista_eos, class_name: PeAristaEos, file_path: transforms/pe_arista_eos.py}
+  - {name: ce_arista_eos, class_name: CeAristaEos, file_path: transforms/ce_arista_eos.py}
   - {name: pe_cisco_iosxr, class_name: PeCiscoIosXr, file_path: transforms/pe_cisco_iosxr.py}
   - {name: pe_juniper_junos, class_name: PeJuniperJunos, file_path: transforms/pe_juniper_junos.py}
   - {name: pe_nokia_sros, class_name: PeNokiaSrOs, file_path: transforms/pe_nokia_sros.py}
@@ -63,6 +65,12 @@ artifact_definitions:
     content_type: text/plain
     targets: pe_nokia_sros
     transformation: pe_nokia_srlinux
+    parameters: {device: name__value}
+  - name: ce-arista-eos-config
+    artifact_name: ce-arista-eos
+    content_type: text/plain
+    targets: ce_arista_eos
+    transformation: ce_arista_eos
     parameters: {device: name__value}
   - name: clab-mpls-topology
     artifact_name: clab-mpls-topology

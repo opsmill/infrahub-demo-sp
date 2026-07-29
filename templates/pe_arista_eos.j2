@@ -147,7 +147,7 @@ router bgp {{ device.asn.node.asn.value }}
          redistribute connected
 {% for s in sites if s.node.l3vpn.node.name.value == vpn.name.value %}
 {% if s.node.routing_protocol.value == 'ebgp' %}
-      neighbor {{ m.ip_only(s.node.ce_address.node.address.value) }} remote-as {{ s.node.bgp_peer_asn.value }}
+      neighbor {{ m.ip_only(s.node.ce_address.node.address.value) }} remote-as {{ m.peer_asn(s.node) }}
 {% elif s.node.routing_protocol.value == 'static' %}
 {% for sr in s.node.static_routes.value or [] %}
       ! static route: {{ sr.prefix }} via {{ sr.next_hop }}

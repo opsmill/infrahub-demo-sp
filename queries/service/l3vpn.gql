@@ -18,6 +18,14 @@ query L3Vpn($name: String!) {
               static_routes { value }
               status { value }
               pe_device { node { id name { value } platform { node { name { value } } } } }
+              # The CE fields below are inputs this query is allowed to return:
+              # the generator reads them, it never creates them. The objects it
+              # does create must stay out of this query or the query group
+              # destabilises the proposed-change pipeline — see the module
+              # docstring of tests/catalog/test_sdwan_generator_registration.py,
+              # which guards exactly that.
+              ce_device { node { id name { value } } }
+              ce_interface { node { id name { value } } }
               customer_subnet { node { id prefix { value } } }
             }
           }

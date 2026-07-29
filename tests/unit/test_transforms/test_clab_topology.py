@@ -89,41 +89,68 @@ FIXTURE = {
 }
 
 
+def _site(
+    name: str,
+    pe_name: str,
+    pe_platform: tuple[str, str | None],
+    pe_iface: str,
+    *,
+    ce_name: str | None = None,
+    ce_platform: tuple[str, str | None] = ("arista_eos", "ceos"),
+    ce_iface: str = "Ethernet1",
+) -> dict:
+    """Build a ServiceL3VpnSite edge.
+
+    Args:
+        name: Site name.
+        pe_name: PE device name.
+        pe_platform: ``(platform name, containerlab_os)`` for the PE.
+        pe_iface: PE port allocated to this site by the L3VPN generator.
+        ce_name: CE device name, or ``None`` for an unmanaged CE.
+        ce_platform: ``(platform name, containerlab_os)`` for the CE.
+        ce_iface: CE port facing the PE.
+
+    Returns:
+        A single ``edges`` entry shaped like the clab query result.
+    """
+    node: dict = {
+        "name": {"value": name},
+        "pe_device": {"node": {"name": {"value": pe_name}, "platform": _platform(*pe_platform)}},
+        "pe_interface": {"node": {"name": {"value": pe_iface}}},
+        "pe_address": {"node": {"address": {"value": "10.100.0.1/30"}}},
+        "ce_address": {"node": {"address": {"value": "10.100.0.2/30"}}},
+        "ce_device": {"node": None},
+        "ce_interface": {"node": None},
+        "l3vpn": {"node": {"name": {"value": "trading-floor-vpn"}}},
+    }
+    if ce_name:
+        node["ce_device"] = {
+            "node": {"name": {"value": ce_name}, "platform": _platform(*ce_platform)}
+        }
+        node["ce_interface"] = {"node": {"name": {"value": ce_iface}}}
+    return {"node": node}
+
+
 def _fixture_with_sites() -> dict:
     """Fixture extended with two PE-CE sites (Arista cEOS + Nokia SR Linux)."""
     fixture = copy.deepcopy(FIXTURE)
     fixture["ServiceL3VpnSite"] = {
         "edges": [
-            {
-                "node": {
-                    "name": {"value": "london"},
-                    "pe_device": {
-                        "node": {
-                            "name": {"value": "pe-lon-arista"},
-                            "platform": _platform("arista_eos", "ceos"),
-                        }
-                    },
-                    "pe_interface": {"node": {"name": {"value": "Ethernet4"}}},
-                    "pe_address": {"node": {"address": {"value": "10.100.0.1/30"}}},
-                    "ce_address": {"node": {"address": {"value": "10.100.0.2/30"}}},
-                    "l3vpn": {"node": {"name": {"value": "trading-floor-vpn"}}},
-                }
-            },
-            {
-                "node": {
-                    "name": {"value": "paris"},
-                    "pe_device": {
-                        "node": {
-                            "name": {"value": "pe-par-nokia"},
-                            "platform": _platform("nokia_sros", "srl"),
-                        }
-                    },
-                    "pe_interface": {"node": {"name": {"value": "Ethernet4"}}},
-                    "pe_address": {"node": {"address": {"value": "10.100.4.1/30"}}},
-                    "ce_address": {"node": {"address": {"value": "10.100.4.2/30"}}},
-                    "l3vpn": {"node": {"name": {"value": "trading-floor-vpn"}}},
-                }
-            },
+            _site(
+                "london",
+                "pe-lon-arista",
+                ("arista_eos", "ceos"),
+                "Ethernet4",
+                ce_name="ce-trading-lon",
+            ),
+            _site(
+                "paris",
+                "pe-par-nokia",
+                ("nokia_sros", "srl"),
+                "Ethernet4",
+                ce_name="ce-trading-par",
+                ce_platform=("nokia_sros", "srl"),
+            ),
         ]
     }
     return fixture
@@ -237,8 +264,10 @@ async def test_arista_uses_eth_naming_in_clab_links() -> None:
     parsed = yaml.safe_load(rendered)
     # Backbone link arista-nokia
     assert any("pe-lon-arista:eth3" in s for s in _link_strings(parsed))
-    # PE-CE link from Arista — Ethernet4 → eth4
-    assert any("pe-lon-arista:eth4" in s for s in _link_strings(parsed))
+    # PE-CE link from Arista — Ethernet4 → eth4, CE Ethernet1 → eth1
+    assert any(
+        "pe-lon-arista:eth4" in s and "ce-trading-lon:eth1" in s for s in _link_strings(parsed)
+    )
     # No raw EthernetN should appear anywhere
     for s in _link_strings(parsed):
         assert "Ethernet" not in s, f"raw Ethernet name leaked into clab link: {s}"
@@ -251,8 +280,11 @@ async def test_srl_uses_ethernet_1_naming_in_clab_links() -> None:
     parsed = yaml.safe_load(rendered)
     # Backbone link nokia side
     assert any("pe-par-nokia:ethernet-1/1" in s for s in _link_strings(parsed))
-    # PE-CE link from Nokia — Ethernet4 → ethernet-1/4
-    assert any("pe-par-nokia:ethernet-1/4" in s for s in _link_strings(parsed))
+    # PE-CE link from Nokia — Ethernet4 → ethernet-1/4, CE Ethernet1 → ethernet-1/1
+    assert any(
+        "pe-par-nokia:ethernet-1/4" in s and "ce-trading-par:ethernet-1/1" in s
+        for s in _link_strings(parsed)
+    )
 
 
 @pytest.mark.asyncio
@@ -266,14 +298,49 @@ async def test_each_labbed_pe_has_startup_config_path() -> None:
 
 
 @pytest.mark.asyncio
-async def test_ce_default_route_uses_replace_not_add() -> None:
-    """CE linux exec uses 'ip route replace default' — 'add' errors when the
-    container already has a default route via the clab management bridge."""
+async def test_ces_boot_from_a_rendered_config_like_pes() -> None:
+    """CEs are real routers, not netshoot stand-ins.
+
+    They boot the same way the PEs do — their own container kind plus a
+    startup-config artifact — which is what lets the PE-CE eBGP session
+    actually establish in the lab.
+    """
     rendered = await ClabTopology.__new__(ClabTopology).transform(_fixture_with_sites())
-    parsed = yaml.safe_load(rendered)
-    ce_node = next(
-        node for name, node in parsed["topology"]["nodes"].items() if name.startswith("ce-")
+    nodes = yaml.safe_load(rendered)["topology"]["nodes"]
+    assert nodes["ce-trading-lon"] == {
+        "kind": "ceos",
+        "startup-config": "devices/ce-trading-lon.cfg",
+    }
+    assert nodes["ce-trading-par"] == {
+        "kind": "srl",
+        "startup-config": "devices/ce-trading-par.cfg",
+    }
+
+
+@pytest.mark.asyncio
+async def test_site_with_unmanaged_ce_renders_no_ce_node_or_link() -> None:
+    """A site without a ce_device contributes neither a node nor a PE-CE link.
+
+    Sites whose CE the customer owns are still valid; there is just nothing for
+    the lab to boot, and half a link would break `clab deploy`.
+    """
+    fixture = copy.deepcopy(FIXTURE)
+    fixture["ServiceL3VpnSite"] = {
+        "edges": [_site("london", "pe-lon-arista", ("arista_eos", "ceos"), "Ethernet4")]
+    }
+    parsed = yaml.safe_load(await ClabTopology.__new__(ClabTopology).transform(fixture))
+    assert not [name for name in parsed["topology"]["nodes"] if name.startswith("ce-")]
+    assert not [s for s in _link_strings(parsed) if "eth4" in s]
+
+
+@pytest.mark.asyncio
+async def test_site_awaiting_the_generator_renders_no_ce_link() -> None:
+    """No PE port yet (generator hasn't run) → the CE is left out entirely."""
+    fixture = copy.deepcopy(FIXTURE)
+    site = _site(
+        "london", "pe-lon-arista", ("arista_eos", "ceos"), "Ethernet4", ce_name="ce-trading-lon"
     )
-    exec_cmds = ce_node["exec"]
-    assert any(cmd.startswith("ip route replace default via ") for cmd in exec_cmds), exec_cmds
-    assert not any(cmd.startswith("ip route add default ") for cmd in exec_cmds), exec_cmds
+    site["node"]["pe_interface"] = {"node": None}
+    fixture["ServiceL3VpnSite"] = {"edges": [site]}
+    parsed = yaml.safe_load(await ClabTopology.__new__(ClabTopology).transform(fixture))
+    assert "ce-trading-lon" not in parsed["topology"]["nodes"]

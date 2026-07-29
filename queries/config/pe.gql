@@ -87,6 +87,7 @@ query PE($device: String!) {
             name { value }
             vpn_id { value }
             address_family { value }
+            customer_asn { node { asn { value } } }
             vrf {
               node {
                 name { value }

@@ -133,7 +133,7 @@ routing-instances {
                        collapses to the last value, breaking VRFs with
                        multiple CEs at different ASNs. */
                     neighbor {{ m.ip_only(s.node.ce_address.node.address.value) }} {
-                        peer-as {{ s.node.bgp_peer_asn.value }};
+                        peer-as {{ m.peer_asn(s.node) }};
                     }
 {% endif %}
 {% endfor %}

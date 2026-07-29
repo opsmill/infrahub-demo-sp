@@ -39,7 +39,8 @@ async def main() -> None:
         pe_device={"hfid": ["pe-01"]},
         customer_subnet=cust,
         routing_protocol="ebgp",
-        bgp_peer_asn=65501,
+        # No bgp_peer_asn: exercise the default path, where the generator
+        # allocates this VPN's customer AS from customer_asn_pool.
     )
     await site.save()
 

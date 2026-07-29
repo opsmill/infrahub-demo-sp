@@ -45,9 +45,16 @@ time.sleep(40)  # change to 60 or more on slow machines
 RuntimeError: No free physical interface on pe-01
 ```
 
-**Cause:** The `L3VpnGenerator` allocates PE-CE interfaces by picking the
-first `InterfacePhysical` with `status = free` on the target PE. All
-interfaces on that PE are already in use (either `active` or `cust`).
+**Cause:** The `L3VpnGenerator` first looks for an `InterfacePhysical` on the
+target PE already described `L3VPN <vpn name>` — that is how a pre-wired PE-CE
+port is bound. When there is no such port it falls back to the lowest-numbered
+interface with `status = free`, and this error means there is none left: every
+interface on that PE is already `active`.
+
+On the **financial** dataset each PE ships with two free customer-facing
+spares; the ports wired to the pre-provisioned CEs (`Ethernet3`/`Ethernet4` on
+`pe-01` and `pe-08`) are deliberately `active` so they can never be handed to
+another service.
 
 **Fix:** Create a free interface on the PE via the Infrahub UI or GraphQL:
 
@@ -126,15 +133,6 @@ Software Downloads portal (requires an Arista account) and import it:
 ```bash
 docker import cEOS-lab-4.30.0F.tar.xz ceos:latest
 docker image ls ceos
-```
-
-### network-multitool (`ghcr.io/hellt/network-multitool`)
-
-This is a public image. If it fails, you may be hitting Docker Hub rate
-limits. Authenticate with Docker Hub:
-
-```bash
-docker login docker.io
 ```
 
 ---

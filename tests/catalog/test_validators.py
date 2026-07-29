@@ -40,11 +40,24 @@ def test_unique_pe_per_vpn() -> None:
     assert any("PE reused" in e or "pe reused" in e.lower() for e in errors)
 
 
-def test_ebgp_requires_asn() -> None:
+def test_ebgp_without_asn_defers_to_the_pool() -> None:
+    """A blank ASN is valid: the generator allocates from customer_asn_pool."""
     errors = validate_create_l3vpn_form(
         name="a",
         tenant="t",
         sites=[_site(name="s1", proto="ebgp", asn=None), _site(name="s2", pe="pe-par-nokia")],
+    )
+    assert not any("bgp_peer_asn" in e.lower() for e in errors)
+
+
+def test_ebgp_rejects_out_of_range_asn() -> None:
+    errors = validate_create_l3vpn_form(
+        name="a",
+        tenant="t",
+        sites=[
+            _site(name="s1", proto="ebgp", asn=4294967296),
+            _site(name="s2", pe="pe-par-nokia"),
+        ],
     )
     assert any("bgp_peer_asn" in e.lower() for e in errors)
 

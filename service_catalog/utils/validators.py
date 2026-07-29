@@ -36,8 +36,12 @@ def validate_create_l3vpn_form(
 
     for site in sites:
         proto = site.get("routing_protocol")
-        if proto == "ebgp" and not site.get("bgp_peer_asn"):
-            errors.append(f"Site {site['name']}: bgp_peer_asn required for eBGP.")
+        # bgp_peer_asn is optional for eBGP: left blank, the generator allocates
+        # the VPN's customer AS from customer_asn_pool. Only a value that is
+        # present but out of range is an error.
+        asn = site.get("bgp_peer_asn")
+        if proto == "ebgp" and asn is not None and not 1 <= int(asn) <= 4294967295:
+            errors.append(f"Site {site['name']}: bgp_peer_asn must be between 1 and 4294967295.")
         if proto == "static" and not site.get("static_routes"):
             errors.append(f"Site {site['name']}: static_routes required for static.")
 

@@ -7,6 +7,14 @@
 {{ address.split('/')[1] }}
 {%- endmacro %}
 
+{# PE-CE eBGP peer AS for an L3VPN site node. The site's `bgp_peer_asn` is an
+   optional per-site override; otherwise the VPN's `customer_asn` applies,
+   which the generator allocates from `customer_asn_pool`. Mirrors
+   _resolve_site_peer_as in generators/generate_l3vpn.py. #}
+{% macro peer_asn(site) -%}
+{{ site.bgp_peer_asn.value or site.l3vpn.node.customer_asn.node.asn.value }}
+{%- endmacro %}
+
 {# Filter interfaces by role. #}
 {% macro core_interfaces(interfaces) -%}
 {% for iface in interfaces if iface.node.role.value == 'core' -%}

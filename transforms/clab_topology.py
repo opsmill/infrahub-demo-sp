@@ -102,6 +102,52 @@ def _backbone_links(backbone: dict[str, Any]) -> list[dict[str, Any]]:
     return links
 
 
+def _ce_attachments(data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return the lab-deployable PE-CE attachments, one per L3VPN site.
+
+    A site contributes a CE node and a PE-CE link only when everything the lab
+    needs is present: a CE device on a lab-deployable platform, the CE port
+    facing the PE, and the PE port allocated by the L3VPN generator. Sites whose
+    generator hasn't run yet, or whose CE is unmanaged, are skipped rather than
+    rendered as a half-wired node.
+
+    Args:
+        data: Result of the ``clab_topology`` GraphQL query.
+
+    Returns:
+        A deterministically ordered list of attachments, each a dict with
+        ``ce`` and ``pe`` ``{device, iface, kind}`` mappings.
+    """
+    attachments: list[dict[str, Any]] = []
+    for edge in data.get("ServiceL3VpnSite", {}).get("edges", []):
+        site = edge["node"]
+        ce_device = (site.get("ce_device") or {}).get("node")
+        ce_iface = (site.get("ce_interface") or {}).get("node")
+        pe_device = (site.get("pe_device") or {}).get("node")
+        pe_iface = (site.get("pe_interface") or {}).get("node")
+        if not (ce_device and ce_iface and pe_device and pe_iface):
+            continue
+        ce_kind, pe_kind = _pe_kind(ce_device), _pe_kind(pe_device)
+        if ce_kind not in LABBED_KINDS or pe_kind not in LABBED_KINDS:
+            continue
+        attachments.append(
+            {
+                "ce": {
+                    "device": ce_device["name"]["value"],
+                    "iface": ce_iface["name"]["value"],
+                    "kind": ce_kind,
+                },
+                "pe": {
+                    "device": pe_device["name"]["value"],
+                    "iface": pe_iface["name"]["value"],
+                    "kind": pe_kind,
+                },
+            }
+        )
+    attachments.sort(key=lambda a: (a["ce"]["device"], a["ce"]["iface"]))
+    return attachments
+
+
 class ClabTopology(InfrahubTransform):
     """Render a containerlab YAML topology for the lab-deployable subset of PEs."""
 
@@ -128,4 +174,5 @@ class ClabTopology(InfrahubTransform):
             data=data,
             labbed_pes=_labbed_pes(backbone),
             backbone_links=_backbone_links(backbone),
+            ce_attachments=_ce_attachments(data),
         )

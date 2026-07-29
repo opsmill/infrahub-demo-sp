@@ -40,6 +40,8 @@ query Clab($name: String!) {
         pe_interface { node { name { value } } }
         pe_address { node { address { value } } }
         ce_address { node { address { value } } }
+        ce_device { node { name { value } platform { node { name { value } containerlab_os { value } } } } }
+        ce_interface { node { name { value } } }
         l3vpn { node { name { value } } }
       }
     }

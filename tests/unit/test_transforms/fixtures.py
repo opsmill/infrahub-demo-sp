@@ -155,6 +155,7 @@ def pe_fixture_with_site(name: str, loopback: str, net_id: str) -> dict:
     l3vpn_node = {
         "name": {"value": "acme-prod"},
         "vpn_id": {"value": 100},
+        "customer_asn": {"node": {"asn": {"value": 65100}}},
         "vrf": {
             "node": {
                 "name": {"value": "acme-prod"},
@@ -179,6 +180,110 @@ def pe_fixture_with_site(name: str, loopback: str, net_id: str) -> dict:
 
     fixture["ServiceL3VpnSite"] = {"edges": [{"node": site_node}]}
     return fixture
+
+
+def ce_fixture(
+    *,
+    name: str = "ce-trading-lon",
+    asn: int = 65100,
+    loopback: str = "10.0.1.1/32",
+    pe_facing_address: str = "10.100.0.2/30",
+    pe_address: str = "10.100.0.1/30",
+    lan_address: str = "10.200.10.1/24",
+    customer_subnet: str = "10.200.10.0/24",
+    sessions: bool = True,
+) -> dict:
+    """Return a CE query-result fixture for the ``ce`` GraphQL query.
+
+    Args:
+        name: CE hostname.
+        asn: The customer AS the CE peers from (allocated from customer_asn_pool).
+        loopback: Loopback0 address in CIDR notation.
+        pe_facing_address: CE-side address of the PE-CE /30, on Ethernet1.
+        pe_address: PE-side address of the PE-CE /30 (the eBGP neighbor).
+        lan_address: Customer LAN gateway address on Ethernet2.
+        customer_subnet: The LAN prefix the CE advertises into the VPN.
+        sessions: When ``False``, omit the eBGP session — models a CE whose
+            L3VPN generator hasn't run yet.
+
+    Returns:
+        Dictionary matching the shape returned by the ``ce`` GraphQL query.
+    """
+
+    def _iface(typename: str, iface_name: str, description: str, address: str | None) -> dict:
+        addresses = [{"node": {"address": {"value": address}}}] if address else []
+        return {
+            "node": {
+                "__typename": typename,
+                "id": iface_name,
+                "name": {"value": iface_name},
+                "description": {"value": description},
+                "status": {"value": "active"},
+                "role": {"value": "access"},
+                "mtu": {"value": 1500},
+                "ip_addresses": {"edges": addresses},
+            }
+        }
+
+    session_edges = []
+    if sessions:
+        session_edges = [
+            {
+                "node": {
+                    "description": {"value": f"L3VPN CE-PE trading-floor-vpn {name}"},
+                    "local_ip": {"node": {"address": {"value": pe_facing_address}}},
+                    "remote_ip": {"node": {"address": {"value": pe_address}}},
+                    "local_as": {"node": {"asn": {"value": asn}}},
+                    "remote_as": {"node": {"asn": {"value": 65000}}},
+                }
+            }
+        ]
+
+    return {
+        "DcimDevice": {
+            "edges": [
+                {
+                    "node": {
+                        "id": "ce-id",
+                        "name": {"value": name},
+                        "platform": {"node": {"name": {"value": "arista_eos"}}},
+                        "asn": {"node": {"asn": {"value": asn}}},
+                        "interfaces": {
+                            "edges": [
+                                _iface("InterfaceVirtual", "Loopback0", "Router-ID", loopback),
+                                _iface(
+                                    "InterfacePhysical",
+                                    "Ethernet1",
+                                    "To pe-01",
+                                    pe_facing_address,
+                                ),
+                                _iface(
+                                    "InterfacePhysical", "Ethernet2", "Customer LAN", lan_address
+                                ),
+                            ]
+                        },
+                    }
+                }
+            ]
+        },
+        "RoutingBGPSession": {"edges": session_edges},
+        "ServiceL3VpnSite": {
+            "edges": [
+                {
+                    "node": {
+                        "name": {"value": "trading-london"},
+                        "customer_subnet": {"node": {"prefix": {"value": customer_subnet}}},
+                        "l3vpn": {
+                            "node": {
+                                "name": {"value": "trading-floor-vpn"},
+                                "vpn_id": {"value": 100},
+                            }
+                        },
+                    }
+                }
+            ]
+        },
+    }
 
 
 def sdwan_edge_data(

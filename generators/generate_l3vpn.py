@@ -1,7 +1,7 @@
 """L3VPN generator.
 
-Materialises VRF, route targets, PE-CE interfaces, IPs, and the
-optional eBGP session for each site of a ``ServiceL3Vpn``. Idempotent.
+Materialises VRF, route targets, the customer ASN, PE-CE interfaces, IPs, and
+the eBGP sessions on both ends of each site of a ``ServiceL3Vpn``. Idempotent.
 """
 
 from __future__ import annotations
@@ -13,12 +13,15 @@ from typing import Any
 from infrahub_sdk.generator import InfrahubGenerator
 
 from .common import (
+    allocate_asn_from_pool,
     allocate_prefix_from_pool,
     find_or_create_route_target,
     next_free_physical_interface,
 )
 
 LOG = logging.getLogger(__name__)
+
+CUSTOMER_ASN_POOL = "customer_asn_pool"
 
 
 class L3VpnGenerator(InfrahubGenerator):
@@ -27,7 +30,7 @@ class L3VpnGenerator(InfrahubGenerator):
     data: dict[str, Any]
 
     async def generate(self, data: dict[str, Any] | None = None) -> None:
-        """Generate VRF + per-site resources for a single L3VPN."""
+        """Generate VRF, customer ASN, and per-site resources for a single L3VPN."""
         payload = data or self.data
         vpn_edges = payload.get("ServiceL3Vpn", {}).get("edges", [])
         if not vpn_edges:
@@ -43,9 +46,10 @@ class L3VpnGenerator(InfrahubGenerator):
         backbone_as_id: str = backbone_node["asn"]["node"]["id"]
 
         vrf = await self._ensure_vrf(vpn, backbone_asn)
+        customer_as = await self._ensure_customer_as(vpn)
 
         for site_edge in vpn["sites"]["edges"]:
-            await self._materialise_site(site_edge["node"], vrf, vpn, backbone_as_id)
+            await self._materialise_site(site_edge["node"], vrf, vpn, backbone_as_id, customer_as)
 
     async def _ensure_vrf(self, vpn: dict[str, Any], backbone_asn: int) -> Any:
         """Create the VRF (and its RT) if absent. Returns the VRF node."""
@@ -82,92 +86,84 @@ class L3VpnGenerator(InfrahubGenerator):
         await vpn_obj.save(allow_upsert=True)
         return vrf
 
+    async def _ensure_customer_as(self, vpn: dict[str, Any]) -> Any | None:
+        """Return the VPN's customer AS, allocating one from the pool if needed.
+
+        One AS is shared by every eBGP site of the VPN — that is what makes the
+        customer a single routing domain across its sites. The ASN itself comes
+        from ``customer_asn_pool``, so customer AS numbers are never hand-picked.
+
+        Idempotency comes from the AS name (``customer-as-<vpn>``) rather than
+        the generator query: ``customer_asn`` is an object this generator
+        creates, so querying it would destabilise the query group in the
+        proposed-change pipeline — same constraint as ``vrf`` in
+        :meth:`_ensure_vrf`.
+
+        Args:
+            vpn: The ServiceL3Vpn node from the GraphQL query result.
+
+        Returns:
+            The RoutingAutonomousSystem node, or ``None`` when nothing needs one
+            — no eBGP site, or every eBGP site carries its own
+            ``bgp_peer_asn``. Allocating in that case would silently consume a
+            pool ASN that nothing ever peers with.
+        """
+        sites = [edge["node"] for edge in vpn["sites"]["edges"]]
+        if not any(
+            site["routing_protocol"]["value"] == "ebgp"
+            and (site.get("bgp_peer_asn") or {}).get("value") is None
+            for site in sites
+        ):
+            return None
+
+        vpn_name = vpn["name"]["value"]
+        as_name = f"customer-as-{vpn_name}"
+        existing = await self.client.filters(
+            kind="RoutingAutonomousSystem", name__value=as_name, branch=self.branch
+        )
+        if existing:
+            customer_as = existing[0]
+        else:
+            customer_as = await allocate_asn_from_pool(
+                self.client,
+                CUSTOMER_ASN_POOL,
+                self.branch,
+                name=as_name,
+                organization_id=vpn["tenant"]["node"]["id"],
+                description=f"Customer AS for L3VPN {vpn_name} (PE-CE eBGP).",
+            )
+
+        vpn_obj = await self.client.get(kind="ServiceL3Vpn", id=vpn["id"], branch=self.branch)
+        vpn_obj.customer_asn = customer_as
+        await vpn_obj.save(allow_upsert=True)
+        return customer_as
+
     async def _materialise_site(
         self,
         site: dict[str, Any],
         vrf: Any,
         vpn: dict[str, Any],
         backbone_as_id: str,
+        customer_as: Any | None,
     ) -> None:
-        """Allocate interface, /30, IPs, eBGP session if needed.
+        """Allocate interface, /30, IPs, CE binding, and eBGP sessions.
 
         Args:
             site: Site node from the GraphQL query result.
             vrf: The IpamVRF node for this L3VPN.
             vpn: The ServiceL3Vpn node from the GraphQL query result.
             backbone_as_id: Infrahub ID of the backbone RoutingAutonomousSystem node.
+            customer_as: The VPN's customer AS, or ``None`` for non-eBGP VPNs.
         """
         site_obj = await self.client.get(
             kind="ServiceL3VpnSite",
             id=site["id"],
             branch=self.branch,
         )
-        pe_name = site["pe_device"]["node"]["name"]["value"]
-
-        # Idempotency via deterministic keys (client.filters / pool identifier),
-        # NOT the generator query (the query must not return pe_interface /
-        # pe_address / ce_address, which this generator creates — see
-        # queries/service/l3vpn.gql and _ensure_vrf). The per-PE interface is
-        # keyed by its description; the /30 is allocated from the pool under a
-        # per-site identifier (idempotent); the PE/CE IPs are keyed by address.
-        iface_desc = f"L3VPN {vpn['name']['value']}"
-        existing_iface = await self.client.filters(
-            kind="InterfacePhysical",
-            device__name__value=pe_name,
-            description__value=iface_desc,
-            branch=self.branch,
-        )
-        if existing_iface:
-            iface = existing_iface[0]
-        else:
-            iface = await next_free_physical_interface(self.client, pe_name, self.branch)
-            iface.role.value = "cust"
-            iface.status.value = "active"  # remove from the free-interface candidate set
-            iface.description.value = iface_desc
-            await iface.save(allow_upsert=True)
+        iface = await self._ensure_pe_interface(site, vpn)
         site_obj.pe_interface = iface
 
-        p2p = await allocate_prefix_from_pool(
-            self.client,
-            "pe_ce_pool",
-            self.branch,
-            identifier=f"l3vpnsite-{site['id']}",
-            prefix_length=30,
-        )
-        p2p.vrf = vrf
-        await p2p.save(allow_upsert=True)
-
-        net = ipaddress.IPv4Network(p2p.prefix.value)
-        pe_addr = f"{net.network_address + 1}/30"
-        ce_addr = f"{net.network_address + 2}/30"
-        existing_pe = await self.client.filters(
-            kind="IpamIPAddress", address__value=pe_addr, branch=self.branch
-        )
-        if existing_pe:
-            pe_ip = existing_pe[0]
-        else:
-            pe_ip = await self.client.create(
-                kind="IpamIPAddress",
-                branch=self.branch,
-                address=pe_addr,
-                interface=iface,
-                vrf=vrf,
-            )
-            await pe_ip.save(allow_upsert=True)
-        existing_ce = await self.client.filters(
-            kind="IpamIPAddress", address__value=ce_addr, branch=self.branch
-        )
-        if existing_ce:
-            ce_ip = existing_ce[0]
-        else:
-            ce_ip = await self.client.create(
-                kind="IpamIPAddress",
-                branch=self.branch,
-                address=ce_addr,
-                vrf=vrf,
-            )
-            await ce_ip.save(allow_upsert=True)
-
+        pe_ip, ce_ip = await self._allocate_pe_ce_addressing(site, vrf, iface)
         site_obj.pe_address = pe_ip
         site_obj.ce_address = ce_ip
 
@@ -180,34 +176,180 @@ class L3VpnGenerator(InfrahubGenerator):
         await cust_subnet.save(allow_upsert=True)
 
         if site["routing_protocol"]["value"] == "ebgp":
-            tenant_id = vpn["tenant"]["node"]["id"]
+            remote_as = await self._resolve_site_peer_as(site, vpn, customer_as)
             await self._ensure_ebgp_session(
-                site, site_obj, vrf, vpn["name"]["value"], backbone_as_id, tenant_id
+                site, vrf, vpn["name"]["value"], backbone_as_id, remote_as, pe_ip, ce_ip
+            )
+            await self._bind_ce_side(
+                site, vpn["name"]["value"], backbone_as_id, remote_as, pe_ip, ce_ip
             )
 
         site_obj.status.value = "active"  # type: ignore[union-attr]
         await site_obj.save(allow_upsert=True)
 
-    async def _ensure_ebgp_session(
-        self,
-        site: dict[str, Any],
-        site_obj: Any,
-        vrf: Any,
-        vpn_name: str,
-        backbone_as_id: str,
-        tenant_id: str,
-    ) -> None:
-        """Create PE-CE eBGP session if it doesn't already exist.
+    async def _ensure_pe_interface(self, site: dict[str, Any], vpn: dict[str, Any]) -> Any:
+        """Return the PE port for this site, allocating a free one if needed.
+
+        The interface description (``L3VPN <vpn name>``) is the deterministic
+        key. Pre-provisioned PE-CE ports are seeded with exactly that
+        description, so a hand-wired topology binds to the drawn port instead of
+        having one allocated; Service Catalog requests, which seed nothing, fall
+        through to the free-interface allocator.
+
+        Idempotency comes from that key rather than the generator query — the
+        query must not return ``pe_interface``, which this generator writes.
+        See queries/service/l3vpn.gql and :meth:`_ensure_vrf`.
 
         Args:
             site: Site node from the GraphQL query result.
-            site_obj: The live ServiceL3VpnSite Infrahub node.
+            vpn: The ServiceL3Vpn node from the GraphQL query result.
+
+        Returns:
+            The InterfacePhysical node bound to this site.
+        """
+        pe_name = site["pe_device"]["node"]["name"]["value"]
+        iface_desc = f"L3VPN {vpn['name']['value']}"
+        existing_iface = await self.client.filters(
+            kind="InterfacePhysical",
+            device__name__value=pe_name,
+            description__value=iface_desc,
+            branch=self.branch,
+        )
+        iface: Any
+        if existing_iface:
+            iface = existing_iface[0]
+        else:
+            iface = await next_free_physical_interface(self.client, pe_name, self.branch)
+            iface.description.value = iface_desc
+        iface.role.value = "cust"
+        iface.status.value = "active"  # remove from the free-interface candidate set
+        await iface.save(allow_upsert=True)
+        return iface
+
+    async def _allocate_pe_ce_addressing(
+        self, site: dict[str, Any], vrf: Any, iface: Any
+    ) -> tuple[Any, Any]:
+        """Allocate the PE-CE /30 and return its (pe_ip, ce_ip) address nodes.
+
+        The /30 is allocated from ``pe_ce_pool`` under a per-site identifier, so
+        re-running the generator reuses the same prefix; the two host addresses
+        are then keyed by their literal value.
+
+        Args:
+            site: Site node from the GraphQL query result.
+            vrf: The IpamVRF node for this L3VPN.
+            iface: The PE interface the PE-side address attaches to.
+
+        Returns:
+            A ``(pe_ip, ce_ip)`` tuple of IpamIPAddress nodes.
+        """
+        p2p = await allocate_prefix_from_pool(
+            self.client,
+            "pe_ce_pool",
+            self.branch,
+            identifier=f"l3vpnsite-{site['id']}",
+            prefix_length=30,
+        )
+        p2p.vrf = vrf
+        await p2p.save(allow_upsert=True)
+
+        net = ipaddress.IPv4Network(p2p.prefix.value)
+        pe_ip = await self._ensure_ip_address(f"{net.network_address + 1}/30", vrf, iface)
+        ce_ip = await self._ensure_ip_address(f"{net.network_address + 2}/30", vrf, None)
+        return pe_ip, ce_ip
+
+    async def _ensure_ip_address(self, address: str, vrf: Any, iface: Any | None) -> Any:
+        """Return the IpamIPAddress for ``address``, creating it if absent.
+
+        Args:
+            address: The address in CIDR notation.
+            vrf: The IpamVRF to bind the address to.
+            iface: Interface to attach the address to, or ``None`` to leave it
+                unattached (the CE side is attached later, once the CE port is
+                known).
+
+        Returns:
+            The IpamIPAddress node.
+        """
+        existing = await self.client.filters(
+            kind="IpamIPAddress", address__value=address, branch=self.branch
+        )
+        if existing:
+            return existing[0]
+        payload: dict[str, Any] = {"address": address, "vrf": vrf}
+        if iface is not None:
+            payload["interface"] = iface
+        ip_address = await self.client.create(kind="IpamIPAddress", branch=self.branch, **payload)
+        await ip_address.save(allow_upsert=True)
+        return ip_address
+
+    async def _resolve_site_peer_as(
+        self, site: dict[str, Any], vpn: dict[str, Any], customer_as: Any | None
+    ) -> Any:
+        """Return the RoutingAutonomousSystem to peer with on this site.
+
+        The VPN's pool-allocated ``customer_asn`` is the default. A site may
+        override it with an explicit ``bgp_peer_asn`` — used by datasets and
+        Service Catalog requests that must peer with a pre-agreed customer AS
+        rather than one issued from the pool.
+
+        Args:
+            site: Site node from the GraphQL query result.
+            vpn: The ServiceL3Vpn node from the GraphQL query result.
+            customer_as: The VPN's pool-allocated customer AS, if any.
+
+        Returns:
+            The RoutingAutonomousSystem node for the remote (customer) side.
+
+        Raises:
+            RuntimeError: If the site has neither an override nor a customer AS.
+        """
+        override = (site.get("bgp_peer_asn") or {}).get("value")
+        if override is None:
+            if customer_as is None:
+                raise RuntimeError(
+                    f"eBGP site {site['name']['value']} has no bgp_peer_asn and the VPN "
+                    f"{vpn['name']['value']} has no customer ASN"
+                )
+            return customer_as
+
+        remote_asn = int(override)
+        existing = await self.client.filters(
+            kind="RoutingAutonomousSystem", asn__value=remote_asn, branch=self.branch
+        )
+        if existing:
+            return existing[0]
+        remote_as = await self.client.create(
+            kind="RoutingAutonomousSystem",
+            branch=self.branch,
+            name=f"customer-as-{remote_asn}",
+            asn=remote_asn,
+            organization={"id": vpn["tenant"]["node"]["id"]},
+        )
+        await remote_as.save(allow_upsert=True)
+        return remote_as
+
+    async def _ensure_ebgp_session(
+        self,
+        site: dict[str, Any],
+        vrf: Any,
+        vpn_name: str,
+        backbone_as_id: str,
+        remote_as: Any,
+        pe_ip: Any,
+        ce_ip: Any,
+    ) -> None:
+        """Create the PE-side PE-CE eBGP session if it doesn't already exist.
+
+        Args:
+            site: Site node from the GraphQL query result.
             vrf: The IpamVRF node for this L3VPN.
             vpn_name: Human-readable VPN name (for the session description).
             backbone_as_id: Infrahub ID of the backbone RoutingAutonomousSystem — derived
                 from the query result to avoid coupling to a hardcoded AS name.
-            tenant_id: Infrahub ID of the VPN's tenant — used as the owner of the
-                customer-side RoutingAutonomousSystem when one needs to be created.
+            remote_as: The customer-side RoutingAutonomousSystem node.
+            pe_ip: The PE-side IpamIPAddress of the PE-CE /30.
+            ce_ip: The CE-side IpamIPAddress of the PE-CE /30.
         """
         desc = f"L3VPN PE-CE {vpn_name} {site['name']['value']}"
         existing = await self.client.filters(
@@ -223,24 +365,6 @@ class L3VpnGenerator(InfrahubGenerator):
             id=backbone_as_id,
             branch=self.branch,
         )
-        remote_asn = int(site["bgp_peer_asn"]["value"])
-        remote_objs = await self.client.filters(
-            kind="RoutingAutonomousSystem",
-            asn__value=remote_asn,
-            branch=self.branch,
-        )
-        if remote_objs:
-            remote_as = remote_objs[0]
-        else:
-            remote_as = await self.client.create(
-                kind="RoutingAutonomousSystem",
-                branch=self.branch,
-                name=f"customer-as-{remote_asn}",
-                asn=remote_asn,
-                organization={"id": tenant_id},
-            )
-            await remote_as.save(allow_upsert=True)
-
         session = await self.client.create(
             kind="RoutingBGPSession",
             branch=self.branch,
@@ -250,9 +374,78 @@ class L3VpnGenerator(InfrahubGenerator):
             device={"id": site["pe_device"]["node"]["id"]},
             local_as=backbone_as,
             remote_as=remote_as,
-            local_ip=site_obj.pe_address,
-            remote_ip=site_obj.ce_address,
+            local_ip=pe_ip,
+            remote_ip=ce_ip,
             vrf=vrf,
+            status="active",
+        )
+        await session.save(allow_upsert=True)
+
+    async def _bind_ce_side(
+        self,
+        site: dict[str, Any],
+        vpn_name: str,
+        backbone_as_id: str,
+        remote_as: Any,
+        pe_ip: Any,
+        ce_ip: Any,
+    ) -> None:
+        """Attach the CE address and build the CE-side eBGP session.
+
+        Skipped when the site has no ``ce_device`` — an unmanaged CE is still a
+        valid site, it just has no configuration Infrahub owns.
+
+        Args:
+            site: Site node from the GraphQL query result.
+            vpn_name: Human-readable VPN name (for the session description).
+            backbone_as_id: Infrahub ID of the backbone RoutingAutonomousSystem.
+            remote_as: The customer-side RoutingAutonomousSystem node.
+            pe_ip: The PE-side IpamIPAddress of the PE-CE /30.
+            ce_ip: The CE-side IpamIPAddress of the PE-CE /30.
+        """
+        ce_device_node = (site.get("ce_device") or {}).get("node")
+        if not ce_device_node:
+            return
+
+        ce_iface_node = (site.get("ce_interface") or {}).get("node")
+        if ce_iface_node:
+            ce_iface: Any = await self.client.get(
+                kind="InterfacePhysical", id=ce_iface_node["id"], branch=self.branch
+            )
+            ce_iface.description.value = f"To {site['pe_device']['node']['name']['value']}"
+            await ce_iface.save(allow_upsert=True)
+            ce_ip.interface = ce_iface
+            await ce_ip.save(allow_upsert=True)
+
+        # The CE belongs to the customer's AS; recording it on the device keeps
+        # the CE config transform from having to infer it from a session.
+        ce_device = await self.client.get(
+            kind="DcimDevice", id=ce_device_node["id"], branch=self.branch
+        )
+        ce_device.asn = remote_as
+        await ce_device.save(allow_upsert=True)
+
+        desc = f"L3VPN CE-PE {vpn_name} {site['name']['value']}"
+        existing = await self.client.filters(
+            kind="RoutingBGPSession", description__value=desc, branch=self.branch
+        )
+        if existing:
+            return
+
+        backbone_as = await self.client.get(
+            kind="RoutingAutonomousSystem", id=backbone_as_id, branch=self.branch
+        )
+        session = await self.client.create(
+            kind="RoutingBGPSession",
+            branch=self.branch,
+            description=desc,
+            session_type="EXTERNAL",
+            role="peering",
+            device={"id": ce_device_node["id"]},
+            local_as=remote_as,
+            remote_as=backbone_as,
+            local_ip=ce_ip,
+            remote_ip=pe_ip,
             status="active",
         )
         await session.save(allow_upsert=True)

@@ -127,7 +127,7 @@ router bgp {{ device.asn.node.asn.value }}
 {% for s in sites if s.node.l3vpn.node.name.value == vpn.name.value %}
 {% if s.node.routing_protocol.value == 'ebgp' %}
   neighbor {{ m.ip_only(s.node.ce_address.node.address.value) }}
-   remote-as {{ s.node.bgp_peer_asn.value }}
+   remote-as {{ m.peer_asn(s.node) }}
    address-family ipv4 unicast
     route-policy PASS-ALL in
     route-policy PASS-ALL out

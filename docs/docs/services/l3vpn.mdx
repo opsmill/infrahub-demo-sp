@@ -77,7 +77,7 @@ sequenceDiagram
 |---|---|---|
 | `l3vpn_overlap` | `checks/l3vpn_overlap.py` | No two active `ServiceL3Vpn` objects share the same `vpn_id` |
 | `l3vpn_site_subnet` | `checks/l3vpn_site_subnet.py` | The customer subnet is not already claimed by another site in the same VRF |
-| `pe_interface_alloc` | `checks/pe_interface_alloc.py` | The nominated PE interface exists and has `status = free` |
+| `pe_interface_alloc` | `checks/pe_interface_alloc.py` | No PE interface is claimed by more than one L3VPN site |
 | `backbone_session_count` | `checks/backbone_session_count.py` | Every PE in the backbone has its full-mesh complement of N−1 iBGP sessions (N = PE count — 7 each on the 8-PE financial backbone, 3 each on the 4-PE isp backbone) |
 | `batfish_backbone` | `checks/batfish_backbone.py` | Static validation of the rendered backbone configs via Batfish — see [Batfish validation](../validation/batfish.mdx) for the full query battery |
 
@@ -92,10 +92,12 @@ the check result in the Infrahub UI under the proposed change's **Checks** tab.
 |---|---|---|
 | `IpamVRF` | `_ensure_vrf` | Name = VPN name; `vrf_rd` = `<asn>:<vpn_id>` |
 | `IpamRouteTarget` | `find_or_create_route_target` | Same value used for import and export RT |
-| `InterfacePhysical` (updated) | `next_free_physical_interface` | Lowest free-status interface on the PE; role set to `cust` |
+| `RoutingAutonomousSystem` (customer) | `_ensure_customer_as` | One per VPN; ASN allocated from `customer_asn_pool`. Skipped when every eBGP site sets `bgp_peer_asn` |
+| `InterfacePhysical` (updated) | `_ensure_pe_interface` | Reuses a PE port already described `L3VPN <vpn name>` (pre-wired CE links); otherwise the lowest free-status interface. Role set to `cust`, status to `active` |
 | `IpamPrefix` (/30) | `allocate_prefix_from_pool` | Allocated from `pe_ce_pool`; placed in VRF |
-| `IpamIPAddress` × 2 | direct create | `.1` = PE, `.2` = CE within the /30 |
-| `RoutingBGPSession` | `_ensure_ebgp_session` | Only when `routing_protocol = ebgp`; `session_type = EXTERNAL` |
+| `IpamIPAddress` × 2 | `_ensure_ip_address` | `.1` = PE, `.2` = CE within the /30. The CE address is attached to `ce_interface` when the site names one |
+| `RoutingBGPSession` (PE side) | `_ensure_ebgp_session` | Only when `routing_protocol = ebgp`; `session_type = EXTERNAL`, bound to the VRF |
+| `RoutingBGPSession` (CE side) | `_bind_ce_side` | Only when the site names a `ce_device`; the mirror of the PE session, with no VRF (a CE is not VPN-aware) |
 
 The generator is idempotent: re-running it on an L3VPN that already has a VRF
 and allocated addresses will skip re-creation and only update missing fields.
@@ -106,9 +108,10 @@ and allocated addresses will skip re-creation and only update missing fields.
 
 The transform layer renders a full configuration fragment for each PE
 when that PE has at least one active L3VPN site. Configuration sections
-differ by vendor. On the default **financial** backbone every PE is Arista,
-so `trading-floor-vpn` renders the Arista EOS form at all four sites; the
-**isp** dataset, with one PE per vendor, exercises all four forms below:
+differ by vendor. On the default **financial** backbone every PE is Arista, so
+`trading-floor-vpn` and `ib-advisory-vpn` render the Arista EOS form at all
+their sites; the **isp** dataset, with one PE per vendor, exercises all four
+forms below:
 
 ### Arista EOS
 

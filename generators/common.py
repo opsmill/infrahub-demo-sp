@@ -43,6 +43,45 @@ async def allocate_prefix_from_pool(
     )
 
 
+async def allocate_asn_from_pool(
+    client: InfrahubClient,
+    pool_name: str,
+    branch: str,
+    *,
+    name: str,
+    organization_id: str,
+    description: str | None = None,
+) -> Any:
+    """Create a RoutingAutonomousSystem whose ASN comes from a CoreNumberPool.
+
+    Number pools are consumed by handing the pool node itself to the attribute
+    on create; the server allocates the next free value and records it against
+    the pool, so utilisation stays visible in the UI.
+
+    Args:
+        client: Active Infrahub SDK client.
+        pool_name: Name of the CoreNumberPool (e.g. ``customer_asn_pool``).
+        branch: Branch on which to allocate.
+        name: Name for the new autonomous system (its natural key).
+        organization_id: Infrahub ID of the owning organization.
+        description: Optional description for the new autonomous system.
+
+    Returns:
+        The Infrahub node for the newly-created RoutingAutonomousSystem.
+    """
+    pool: Any = await client.get(kind="CoreNumberPool", name__value=pool_name, branch=branch)
+    autonomous_system = await client.create(
+        kind="RoutingAutonomousSystem",
+        branch=branch,
+        name=name,
+        asn=pool,
+        description=description,
+        organization={"id": organization_id},
+    )
+    await autonomous_system.save(allow_upsert=True)
+    return autonomous_system
+
+
 async def find_or_create_route_target(
     client: InfrahubClient,
     name: str,

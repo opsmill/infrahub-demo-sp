@@ -248,3 +248,26 @@ async def test_emits_rancid_arista_format_marker() -> None:
     """
     rendered = await PeAristaEos.__new__(PeAristaEos).transform(FIXTURE)
     assert "!RANCID-CONTENT-TYPE: arista" in rendered
+
+
+@pytest.mark.asyncio
+async def test_pe_ce_neighbor_uses_the_site_asn_override() -> None:
+    """An explicit `bgp_peer_asn` on the site wins over the VPN's customer ASN."""
+    fixture = pe_fixture_with_site("pe-lon-arista", "10.0.0.1/32", "49.0001.0100.0000.0001.00")
+    rendered = await PeAristaEos.__new__(PeAristaEos).transform(fixture)
+    assert "neighbor 10.100.0.2 remote-as 65501" in rendered
+
+
+@pytest.mark.asyncio
+async def test_pe_ce_neighbor_falls_back_to_the_pool_allocated_customer_asn() -> None:
+    """With no site override, the peer AS is the VPN's pool-allocated customer ASN.
+
+    This is the default path for the financial dataset, where customer AS
+    numbers come from `customer_asn_pool` rather than being written into the
+    site data by hand.
+    """
+    fixture = pe_fixture_with_site("pe-lon-arista", "10.0.0.1/32", "49.0001.0100.0000.0001.00")
+    site = fixture["ServiceL3VpnSite"]["edges"][0]["node"]
+    site["bgp_peer_asn"] = {"value": None}
+    rendered = await PeAristaEos.__new__(PeAristaEos).transform(fixture)
+    assert "neighbor 10.100.0.2 remote-as 65100" in rendered

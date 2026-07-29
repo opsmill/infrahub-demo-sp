@@ -6,7 +6,7 @@
    needs for the link endpoint, based on the container kind.
    - ceos: data ports are eth1, eth2, ... (clab maps eth<N> ↔ Ethernet<N>)
    - srl:  data ports must match ethernet-L/P (we use line card 1)
-   - other kinds (linux): pass the name through. #}
+   - any other kind: pass the name through. #}
 {% macro clab_iface(name, kind) -%}
 {%- set port = name | replace('Ethernet', '') -%}
 {%- if kind == 'ceos' -%}eth{{ port }}
@@ -15,7 +15,8 @@
 {%- endif -%}
 {% endmacro %}
 # Containerlab topology for the {{ backbone.name.value }} backbone.
-# Only PEs whose platform has containerlab_os set are included.
+# Only devices whose platform has containerlab_os set are included — the
+# backbone PEs plus the pre-provisioned CE routers attached to them.
 # Nokia SR OS is substituted to SR Linux (`srl`) because the lab uses
 # the publicly available SR Linux image; the per-PE config artifact
 # still renders SR OS canon for the engineer audience.
@@ -43,8 +44,6 @@ topology:
       image: registry.opsmill.io/external/ceos-image:4.29.0.2F
     srl:
       image: ghcr.io/nokia/srlinux:23.10
-    linux:
-      image: nicolaka/netshoot:latest
 
   nodes:
 {% for pe in labbed_pes %}
@@ -52,25 +51,15 @@ topology:
       kind: {{ pe.platform.node.containerlab_os.value }}
       startup-config: devices/{{ pe.name.value }}.cfg
 {% endfor %}
-{# Skip sites whose generator hasn't materialized PE/CE addresses or interfaces yet. #}
-{% set materialized_sites = data.ServiceL3VpnSite.edges
-    | selectattr('node.pe_interface.node')
-    | selectattr('node.pe_address.node')
-    | selectattr('node.ce_address.node')
-    | list %}
-{% for site_edge in materialized_sites %}
-{% set site = site_edge.node %}
-{% set pe_platform = site.pe_device.node.platform.node.name.value %}
-{% if pe_platform in ['arista_eos', 'nokia_sros'] %}
-    ce-{{ site.l3vpn.node.name.value }}-{{ site.pe_device.node.name.value }}:
-      kind: linux
-      exec:
-        - ip addr add {{ site.ce_address.node.address.value }} dev eth1
-        # 'replace' instead of 'add' — the container already has a default
-        # route via the clab management bridge (eth0) at startup; 'add'
-        # errors with RTNETLINK File exists. 'replace' is idempotent.
-        - ip route replace default via {{ site.pe_address.node.address.value.split('/')[0] }}
-{% endif %}
+{# Pre-provisioned CE routers. `ce_attachments` comes from the transform (see
+   transforms/clab_topology.py:_ce_attachments) and only contains sites whose
+   CE, CE port, and generator-allocated PE port are all present and
+   lab-deployable. They boot the same way the PEs do — from a rendered config
+   artifact — so the PE-CE eBGP session actually comes up in the lab. #}
+{% for attachment in ce_attachments %}
+    {{ attachment.ce.device }}:
+      kind: {{ attachment.ce.kind }}
+      startup-config: devices/{{ attachment.ce.device }}.cfg
 {% endfor %}
 
   links:
@@ -82,13 +71,7 @@ topology:
 {% for link in backbone_links %}
     - endpoints: ["{{ link.endpoints[0].device }}:{{ clab_iface(link.endpoints[0].iface, link.endpoints[0].kind) }}", "{{ link.endpoints[1].device }}:{{ clab_iface(link.endpoints[1].iface, link.endpoints[1].kind) }}"]
 {% endfor %}
-{% for site_edge in materialized_sites %}
-{% set site = site_edge.node %}
-{% set pe_platform = site.pe_device.node.platform.node.name.value %}
-{% set pe_kind = site.pe_device.node.platform.node.containerlab_os.value %}
-{% if pe_platform in ['arista_eos', 'nokia_sros'] %}
-    - endpoints:
-        - "{{ site.pe_device.node.name.value }}:{{ clab_iface(site.pe_interface.node.name.value, pe_kind) }}"
-        - "ce-{{ site.l3vpn.node.name.value }}-{{ site.pe_device.node.name.value }}:eth1"
-{% endif %}
+{# PE-CE access links, one per attachment above. #}
+{% for attachment in ce_attachments %}
+    - endpoints: ["{{ attachment.pe.device }}:{{ clab_iface(attachment.pe.iface, attachment.pe.kind) }}", "{{ attachment.ce.device }}:{{ clab_iface(attachment.ce.iface, attachment.ce.kind) }}"]
 {% endfor %}
