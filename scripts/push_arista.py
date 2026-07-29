@@ -25,10 +25,20 @@ import requests
 EAPI_PORT = 80
 WAIT_TIMEOUT_SECONDS = 180
 WAIT_POLL_INTERVAL_SECONDS = 3
-# cEOS accepts TCP a few seconds before eAPI is responsive. Let the
-# startup-config finish loading before we POST commands.
-POST_PORT_SETTLE_SECONDS = 15
 HTTP_TIMEOUT_SECONDS = 120
+
+# cEOS accepts TCP, and answers eAPI, before its agents have finished
+# registering their CLI commands. Push during that window and a plain global
+# command like `ip routing` is rejected with "Unavailable command (not
+# supported on this hardware platform)" — the parser genuinely doesn't know
+# the keyword yet. A fixed sleep can't cover it: how long the agents take
+# scales with how many cEOS nodes the host is booting at once (the financial
+# lab boots twelve). So probe for the capability instead of guessing.
+READY_TIMEOUT_SECONDS = 300
+READY_POLL_INTERVAL_SECONDS = 5
+# A read-only command served by the same routing agent that owns
+# `ip routing`. Once this parses, the config push will too.
+READY_PROBE_CMDS = ("enable", "show ip route summary")
 
 
 def _wait_for_port(host: str, port: int) -> None:
@@ -49,6 +59,65 @@ def _wait_for_port(host: str, port: int) -> None:
     raise TimeoutError(
         f"{host}:{port} never accepted TCP within {WAIT_TIMEOUT_SECONDS}s "
         f"(last error: {last_err!r})"
+    )
+
+
+def _post(host: str, cmds: list[str], timeout: int = HTTP_TIMEOUT_SECONDS) -> dict:
+    """POST ``cmds`` to a node's eAPI and return the decoded JSON-RPC body.
+
+    Args:
+        host: Hostname of the cEOS node.
+        cmds: Commands to run, in order.
+        timeout: HTTP timeout in seconds.
+
+    Returns:
+        The parsed response body — a dict carrying either ``result`` or
+        ``error``.
+    """
+    payload = {
+        "jsonrpc": "2.0",
+        "method": "runCmds",
+        # eAPI auto-handles mode transitions; no explicit `end` needed.
+        "params": {"version": 1, "cmds": cmds, "format": "json"},
+        "id": "push_arista",
+    }
+    resp = requests.post(
+        f"http://{host}:{EAPI_PORT}/command-api",
+        auth=("admin", "admin"),
+        json=payload,
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    body: dict = resp.json()
+    return body
+
+
+def _wait_for_eapi_ready(host: str) -> None:
+    """Block until the node's routing agent answers a read-only probe.
+
+    TCP being open is not enough — see :data:`READY_PROBE_CMDS`. Any error,
+    HTTP or JSON-RPC, is treated as "not ready yet" and retried.
+
+    Raises:
+        TimeoutError: If the probe never succeeds within
+            :data:`READY_TIMEOUT_SECONDS`.
+    """
+    deadline = time.monotonic() + READY_TIMEOUT_SECONDS
+    last: str = "no attempt made"
+    while time.monotonic() < deadline:
+        try:
+            body = _post(host, list(READY_PROBE_CMDS), timeout=30)
+        except Exception as exc:  # noqa: BLE001 - any failure means "not ready"
+            last = repr(exc)
+        else:
+            if "error" not in body:
+                return
+            last = str(body["error"].get("message", body["error"]))
+        time.sleep(READY_POLL_INTERVAL_SECONDS)
+    raise TimeoutError(
+        f"{host} eAPI never became ready within {READY_TIMEOUT_SECONDS}s "
+        f"(last: {last}). The node is probably still booting its agents — "
+        f"check `docker logs clab-…-{host.split('-')[-1]}`."
     )
 
 
@@ -89,29 +158,11 @@ def main(config_path: str, host: str) -> int:
     commands = _strip_comments_and_blanks(text)
     print(f"Waiting for eAPI on {host}:{EAPI_PORT} (up to {WAIT_TIMEOUT_SECONDS}s)…")
     _wait_for_port(host, EAPI_PORT)
-    print(f"Port open; letting cEOS settle for {POST_PORT_SETTLE_SECONDS}s…")
-    time.sleep(POST_PORT_SETTLE_SECONDS)
+    print(f"Port open; waiting for agents to register their CLI (up to {READY_TIMEOUT_SECONDS}s)…")
+    _wait_for_eapi_ready(host)
 
-    payload = {
-        "jsonrpc": "2.0",
-        "method": "runCmds",
-        "params": {
-            "version": 1,
-            # eAPI auto-handles mode transitions; no explicit `end` needed.
-            "cmds": ["enable", "configure", *commands, "write memory"],
-            "format": "json",
-        },
-        "id": "push_arista",
-    }
     print(f"POST http://{host}:{EAPI_PORT}/command-api  ({len(commands)} cmds)…")
-    resp = requests.post(
-        f"http://{host}:{EAPI_PORT}/command-api",
-        auth=("admin", "admin"),
-        json=payload,
-        timeout=HTTP_TIMEOUT_SECONDS,
-    )
-    resp.raise_for_status()
-    body = resp.json()
+    body = _post(host, ["enable", "configure", *commands, "write memory"])
     if "error" in body:
         err = body["error"]
         message = err.get("message", "unknown")

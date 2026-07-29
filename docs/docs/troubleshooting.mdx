@@ -78,6 +78,45 @@ Repeat for whichever PE is out of free interfaces.
 
 ---
 
+## Configuration push fails: "not supported on this hardware platform"
+
+**Symptom:**
+
+```text
+eAPI error: CLI command 11 of 57 'ip routing' failed: invalid command
+last result: {'errors': ["Unavailable command (not supported on this hardware
+platform) (at token 1: 'routing')"]}
+```
+
+**Cause:** The node answered eAPI before its agents finished registering their
+CLI commands, so the parser genuinely did not know the `routing` keyword yet.
+It is a timing problem, not a configuration problem — the same file pushes
+cleanly to the nodes that had longer to boot, which is why the failure tends to
+appear part-way through a run.
+
+**Fix:** None needed. `scripts/push_arista.py` polls a read-only command served
+by the same agent that owns `ip routing`, and only pushes once that answers. If
+it times out instead, the node is genuinely stuck — check
+`docker logs clab-mpls-backbone-1-<node>`. Booting twelve cEOS nodes is
+memory-hungry; give Docker more RAM if nodes are being killed.
+
+---
+
+## Pushed configuration does not match Infrahub
+
+**Symptom:** The pushed command counts or interface names do not match what
+Infrahub shows, or a device rejects interfaces the topology does not have.
+
+**Cause:** `lab/devices/*.cfg` are fetched once by `invoke lab.deploy` and then
+reused by `invoke lab.push-arista`. After the dataset or a service changes, the
+files on disk are stale.
+
+**Fix:** Re-run `invoke lab.deploy`. It re-fetches the topology artifact and
+every per-device configuration, then redeploys the lab so the running nodes and
+the configuration files agree.
+
+---
+
 ## Port conflict: Infrahub already running
 
 **Symptom:**
