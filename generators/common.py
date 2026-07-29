@@ -58,6 +58,14 @@ async def allocate_asn_from_pool(
     on create; the server allocates the next free value and records it against
     the pool, so utilisation stays visible in the UI.
 
+    This saves WITHOUT ``allow_upsert``. ``RoutingAutonomousSystem``'s
+    human-friendly ID is ``[asn__value, name__value]``, and ``asn`` is what the
+    pool assigns — so the HFID is different on every attempt and can never
+    match an existing row. The server rejects that combination outright
+    ("Attribute 'asn' is sourced from a CoreNumberPool and is part of this
+    node's HFID"). Idempotency has to come from the caller instead: look the AS
+    up by its stable ``name`` first and only call this when it is absent.
+
     Args:
         client: Active Infrahub SDK client.
         pool_name: Name of the CoreNumberPool (e.g. ``customer_asn_pool``).
@@ -78,7 +86,7 @@ async def allocate_asn_from_pool(
         description=description,
         organization={"id": organization_id},
     )
-    await autonomous_system.save(allow_upsert=True)
+    await autonomous_system.save()
     return autonomous_system
 
 

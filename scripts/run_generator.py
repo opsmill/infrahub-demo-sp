@@ -18,10 +18,25 @@ import sys
 import time
 
 from infrahub_sdk import InfrahubClientSync
-from infrahub_sdk.exceptions import NodeNotFoundError
+from infrahub_sdk.exceptions import GraphQLError, NodeNotFoundError
 
 SYNC_TIMEOUT_SECONDS = 120
 SYNC_POLL_INTERVAL_SECONDS = 3
+
+_FAILURE_HINT = """
+The generator's traceback is server-side. To see it:
+
+    docker compose -p sp-demo logs task-worker --tail 200
+
+Most common cause: the server runs the code it CLONED, not your working tree.
+If the clone is pinned to a different ref than the branch you loaded data
+from, new data meets old code. Check the registered ref:
+
+    uv run infrahubctl object load lab/github-repo.yml   # what bootstrap wrote
+
+and either push your branch (bootstrap pins the clone to the checked-out
+branch), or set INFRAHUB_GIT_LOCAL=true to mount the working tree instead.
+""".strip()
 
 
 def _wait_for_generator(client: InfrahubClientSync, name: str) -> object:
@@ -62,16 +77,24 @@ def main() -> int:
 
     client = InfrahubClientSync()
     generator = _wait_for_generator(client, args.name)
-    response = client.execute_graphql(
-        """
-        mutation Run($id: String!) {
-          CoreGeneratorDefinitionRun(data: { id: $id }, wait_until_completion: true) {
-            ok
-          }
-        }
-        """,
-        variables={"id": generator.id},
-    )
+    try:
+        response = client.execute_graphql(
+            """
+            mutation Run($id: String!) {
+              CoreGeneratorDefinitionRun(data: { id: $id }, wait_until_completion: true) {
+                ok
+              }
+            }
+            """,
+            variables={"id": generator.id},
+        )
+    except GraphQLError as exc:
+        # The server reports only "One or more generators failed" — the real
+        # traceback stays in the task worker. Say where to find it, and name
+        # the usual cause, rather than re-raising an opaque stack trace.
+        print(f"Generator {args.name!r} failed server-side: {exc}", file=sys.stderr)
+        print(_FAILURE_HINT, file=sys.stderr)
+        return 1
     if not response.get("CoreGeneratorDefinitionRun", {}).get("ok"):
         print(f"Generator {args.name!r} run did not report ok: {response}", file=sys.stderr)
         return 1

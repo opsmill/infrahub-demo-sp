@@ -26,6 +26,9 @@ INFRAHUB_VERSION = os.getenv("INFRAHUB_VERSION", "stable")
 INFRAHUB_SERVICE_CATALOG = os.getenv("INFRAHUB_SERVICE_CATALOG", "false").lower() == "true"
 INFRAHUB_GIT_LOCAL = os.getenv("INFRAHUB_GIT_LOCAL", "false").lower() == "true"
 INFRAHUB_DATASET = os.getenv("INFRAHUB_DATASET", "financial")
+# Git ref the server clones for transforms/generators/checks. Defaults to the
+# branch you have checked out, NOT to `main` — see _github_repo_ref.
+INFRAHUB_REPO_REF = os.getenv("INFRAHUB_REPO_REF", "")
 INFRAHUB_ENTERPRISE = os.getenv("INFRAHUB_ENTERPRISE", "false").lower() == "true"
 LOCAL_COMPOSE_FILE = REPO_ROOT / "docker-compose.yml"
 OVERRIDE_FILE = REPO_ROOT / "docker-compose.override.yml"
@@ -223,6 +226,65 @@ def destroy(c: Context) -> None:
 
 
 DATASETS_DIR = REPO_ROOT / "objects" / "datasets"
+GITHUB_REPO_TEMPLATE = REPO_ROOT / "objects" / "git-repo" / "github.yml"
+# Rendered repo object goes under lab/ because lab/* is gitignored — the ref
+# is machine-specific and must never be committed.
+RENDERED_REPO_FILE = REPO_ROOT / "lab" / "github-repo.yml"
+
+
+def _github_repo_ref(c: Context) -> str:
+    """Return the git ref the server should clone for `.infrahub.yml` code.
+
+    Object data is loaded from the working tree, but transforms, generators,
+    queries and checks are read by the server from a *clone*. Pinning that
+    clone to `main` while the working tree is on a feature branch runs new data
+    against old code — the failure is opaque ("One or more generators failed")
+    because the traceback is server-side. So the ref follows the checked-out
+    branch by default.
+
+    Args:
+        c: Invoke context, used to shell out to git.
+
+    Returns:
+        The ref to clone: ``INFRAHUB_REPO_REF`` if set, else the current branch,
+        falling back to ``main`` when the branch can't be determined.
+    """
+    if INFRAHUB_REPO_REF:
+        return INFRAHUB_REPO_REF
+    result = c.run("git rev-parse --abbrev-ref HEAD", hide=True, warn=True)
+    branch = (result.stdout or "").strip() if result.ok else ""
+    if not branch or branch == "HEAD":  # detached
+        return "main"
+    return branch
+
+
+def _render_github_repo_file(c: Context, ref: str) -> Path:
+    """Write a CoreReadOnlyRepository object pinned to ``ref``.
+
+    Args:
+        c: Invoke context, used to check the ref is reachable on the remote.
+        ref: Git ref to pin the repository to.
+
+    Returns:
+        Path to the rendered object file.
+    """
+    spec = yaml.safe_load(GITHUB_REPO_TEMPLATE.read_text())
+    spec["spec"]["data"][0]["ref"] = ref
+    RENDERED_REPO_FILE.parent.mkdir(parents=True, exist_ok=True)
+    RENDERED_REPO_FILE.write_text(yaml.safe_dump(spec, sort_keys=False))
+
+    # The server clones over HTTPS, so an unpushed local branch is invisible to
+    # it and the sync fails with a bare "couldn't find remote ref".
+    probe = c.run(
+        f"git ls-remote --exit-code --heads origin {shlex.quote(ref)}", hide=True, warn=True
+    )
+    if not probe.ok:
+        _wait(
+            f"Ref '{ref}' is not on origin — the server clones over HTTPS and will not "
+            f"find it. Push the branch, or set INFRAHUB_GIT_LOCAL=true to mount the "
+            f"working tree instead."
+        )
+    return RENDERED_REPO_FILE
 
 
 def _dataset_files(dataset: str) -> list[Path]:
@@ -276,10 +338,13 @@ def bootstrap(c: Context) -> None:
         c.run(f"uv run infrahubctl object load {shlex.quote(str(path))}", pty=True)
     _success("Bootstrap objects loaded")
 
-    repo_file = (
-        "objects/git-repo/local-dev.yml" if INFRAHUB_GIT_LOCAL else "objects/git-repo/github.yml"
-    )
-    _step(f"Registering CoreRepository ({repo_file})")
+    if INFRAHUB_GIT_LOCAL:
+        repo_file = "objects/git-repo/local-dev.yml"
+        _step(f"Registering CoreRepository ({repo_file})")
+    else:
+        ref = _github_repo_ref(c)
+        repo_file = str(_render_github_repo_file(c, ref).relative_to(REPO_ROOT))
+        _step(f"Registering CoreReadOnlyRepository (github.com @ {ref})")
     c.run(f"uv run infrahubctl object load {shlex.quote(repo_file)}", pty=True)
     _success("CoreRepository registered")
 

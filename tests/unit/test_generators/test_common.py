@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from generators.common import (
+    allocate_asn_from_pool,
     allocate_prefix_from_pool,
     find_or_create_device,
     find_or_create_route_target,
@@ -178,3 +179,57 @@ async def test_find_or_create_device_creates_with_hfid_relations() -> None:
     assert kwargs["device_type"] == {"hfid": ["cEdge-1000"]}
     assert kwargs["location"] == {"hfid": ["fra"]}
     new_dev.save.assert_awaited_once_with(allow_upsert=True)
+
+
+@pytest.mark.asyncio
+async def test_allocate_asn_hands_the_pool_node_to_the_attribute() -> None:
+    """The pool node itself is the attribute value — that is what allocates.
+
+    Passing a plain int would bypass the pool entirely, so the number would
+    not be recorded against it and utilisation would stay at zero.
+    """
+    client = MagicMock()
+    client.get = AsyncMock(return_value="pool-node")
+    created = MagicMock(save=AsyncMock())
+    client.create = AsyncMock(return_value=created)
+
+    await allocate_asn_from_pool(
+        client,
+        "customer_asn_pool",
+        "main",
+        name="customer-as-acme",
+        organization_id="org-1",
+    )
+
+    assert client.get.await_args.kwargs["name__value"] == "customer_asn_pool"
+    assert client.create.await_args.kwargs["asn"] == "pool-node"
+    assert client.create.await_args.kwargs["name"] == "customer-as-acme"
+
+
+@pytest.mark.asyncio
+async def test_allocate_asn_does_not_upsert() -> None:
+    """A pool-sourced attribute inside the HFID makes upsert invalid.
+
+    RoutingAutonomousSystem's HFID is [asn__value, name__value] and the pool
+    issues a fresh `asn` on every attempt, so the HFID can never match an
+    existing row. The server rejects the combination outright:
+
+        Attribute 'asn' is sourced from a CoreNumberPool and is part of this
+        node's human-friendly identifier (HFID) ... an upsert cannot match an
+        existing node by it
+
+    Idempotency belongs to the caller, which looks the AS up by its stable
+    `name` first. Regression test: this failed only against a real server,
+    because the local SDK build carries no such guard.
+    """
+    client = MagicMock()
+    client.get = AsyncMock(return_value="pool-node")
+    created = MagicMock(save=AsyncMock())
+    client.create = AsyncMock(return_value=created)
+
+    await allocate_asn_from_pool(
+        client, "customer_asn_pool", "main", name="customer-as-acme", organization_id="org-1"
+    )
+
+    created.save.assert_awaited_once_with()
+    assert "allow_upsert" not in created.save.await_args.kwargs

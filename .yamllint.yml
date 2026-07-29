@@ -8,6 +8,9 @@ ignore: |
   /docs/pnpm-lock.yaml
   /docs/build
   /docs/.docusaurus
+  # Runtime-only, gitignored, and machine-generated (rendered clab topology
+  # and the repo object bootstrap pins to the checked-out branch).
+  /lab
 
 rules:
   line-length:
