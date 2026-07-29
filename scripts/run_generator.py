@@ -32,7 +32,7 @@ Most common cause: the server runs the code it CLONED, not your working tree.
 If the clone is pinned to a different ref than the branch you loaded data
 from, new data meets old code. Check the registered ref:
 
-    uv run infrahubctl object load lab/github-repo.yml   # what bootstrap wrote
+    cat lab/git-repo.yml        # the ref bootstrap actually registered
 
 and either push your branch (bootstrap pins the clone to the checked-out
 branch), or set INFRAHUB_GIT_LOCAL=true to mount the working tree instead.

@@ -226,27 +226,27 @@ def destroy(c: Context) -> None:
 
 
 DATASETS_DIR = REPO_ROOT / "objects" / "datasets"
-GITHUB_REPO_TEMPLATE = REPO_ROOT / "objects" / "git-repo" / "github.yml"
+GIT_REPO_DIR = REPO_ROOT / "objects" / "git-repo"
 # Rendered repo object goes under lab/ because lab/* is gitignored — the ref
 # is machine-specific and must never be committed.
-RENDERED_REPO_FILE = REPO_ROOT / "lab" / "github-repo.yml"
+RENDERED_REPO_FILE = REPO_ROOT / "lab" / "git-repo.yml"
 
 
-def _github_repo_ref(c: Context) -> str:
-    """Return the git ref the server should clone for `.infrahub.yml` code.
+def _repo_ref(c: Context) -> str:
+    """Return the git ref the server should read `.infrahub.yml` code from.
 
     Object data is loaded from the working tree, but transforms, generators,
     queries and checks are read by the server from a *clone*. Pinning that
     clone to `main` while the working tree is on a feature branch runs new data
-    against old code — the failure is opaque ("One or more generators failed")
-    because the traceback is server-side. So the ref follows the checked-out
-    branch by default.
+    against old code — and the failure is opaque ("One or more generators
+    failed") because the traceback stays server-side. So the ref follows the
+    checked-out branch by default.
 
     Args:
         c: Invoke context, used to shell out to git.
 
     Returns:
-        The ref to clone: ``INFRAHUB_REPO_REF`` if set, else the current branch,
+        The ref to use: ``INFRAHUB_REPO_REF`` if set, else the current branch,
         falling back to ``main`` when the branch can't be determined.
     """
     if INFRAHUB_REPO_REF:
@@ -258,32 +258,49 @@ def _github_repo_ref(c: Context) -> str:
     return branch
 
 
-def _render_github_repo_file(c: Context, ref: str) -> Path:
-    """Write a CoreReadOnlyRepository object pinned to ``ref``.
+def _render_repo_file(c: Context, ref: str) -> Path:
+    """Write the repository object, pinned to ``ref``.
+
+    Both registration modes pin a branch and both default to ``main`` on disk,
+    so both need rewriting — a local mount pointed at ``main`` reads stale code
+    just as surely as a GitHub clone does.
 
     Args:
-        c: Invoke context, used to check the ref is reachable on the remote.
+        c: Invoke context, used to verify the ref is visible to the server.
         ref: Git ref to pin the repository to.
 
     Returns:
         Path to the rendered object file.
     """
-    spec = yaml.safe_load(GITHUB_REPO_TEMPLATE.read_text())
-    spec["spec"]["data"][0]["ref"] = ref
+    template = GIT_REPO_DIR / ("local-dev.yml" if INFRAHUB_GIT_LOCAL else "github.yml")
+    spec = yaml.safe_load(template.read_text())
+    # CoreRepository calls it `default_branch`; CoreReadOnlyRepository, `ref`.
+    key = "default_branch" if INFRAHUB_GIT_LOCAL else "ref"
+    spec["spec"]["data"][0][key] = ref
     RENDERED_REPO_FILE.parent.mkdir(parents=True, exist_ok=True)
     RENDERED_REPO_FILE.write_text(yaml.safe_dump(spec, sort_keys=False))
 
-    # The server clones over HTTPS, so an unpushed local branch is invisible to
-    # it and the sync fails with a bare "couldn't find remote ref".
-    probe = c.run(
-        f"git ls-remote --exit-code --heads origin {shlex.quote(ref)}", hide=True, warn=True
-    )
-    if not probe.ok:
-        _wait(
-            f"Ref '{ref}' is not on origin — the server clones over HTTPS and will not "
-            f"find it. Push the branch, or set INFRAHUB_GIT_LOCAL=true to mount the "
-            f"working tree instead."
+    if INFRAHUB_GIT_LOCAL:
+        # The server clones the mounted repo, so it sees committed history
+        # only — uncommitted edits to generators/transforms are invisible.
+        dirty = c.run("git status --porcelain", hide=True, warn=True)
+        if dirty.ok and (dirty.stdout or "").strip():
+            _wait(
+                "Working tree has uncommitted changes. The server clones committed "
+                "history, so those edits will NOT be used — commit them first."
+            )
+    else:
+        # The server clones over HTTPS, so an unpushed local branch is invisible
+        # to it and the sync fails with a bare "couldn't find remote ref".
+        probe = c.run(
+            f"git ls-remote --exit-code --heads origin {shlex.quote(ref)}", hide=True, warn=True
         )
+        if not probe.ok:
+            _wait(
+                f"Ref '{ref}' is not on origin — the server clones over HTTPS and will not "
+                f"find it. Push the branch, or set INFRAHUB_GIT_LOCAL=true to mount the "
+                f"working tree instead."
+            )
     return RENDERED_REPO_FILE
 
 
@@ -338,13 +355,11 @@ def bootstrap(c: Context) -> None:
         c.run(f"uv run infrahubctl object load {shlex.quote(str(path))}", pty=True)
     _success("Bootstrap objects loaded")
 
-    if INFRAHUB_GIT_LOCAL:
-        repo_file = "objects/git-repo/local-dev.yml"
-        _step(f"Registering CoreRepository ({repo_file})")
-    else:
-        ref = _github_repo_ref(c)
-        repo_file = str(_render_github_repo_file(c, ref).relative_to(REPO_ROOT))
-        _step(f"Registering CoreReadOnlyRepository (github.com @ {ref})")
+    ref = _repo_ref(c)
+    repo_file = str(_render_repo_file(c, ref).relative_to(REPO_ROOT))
+    source = "/upstream mount" if INFRAHUB_GIT_LOCAL else "github.com"
+    kind = "CoreRepository" if INFRAHUB_GIT_LOCAL else "CoreReadOnlyRepository"
+    _step(f"Registering {kind} ({source} @ {ref})")
     c.run(f"uv run infrahubctl object load {shlex.quote(repo_file)}", pty=True)
     _success("CoreRepository registered")
 
