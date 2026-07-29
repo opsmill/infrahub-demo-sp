@@ -246,3 +246,48 @@ async def test_pe_interface_is_matched_by_description_before_allocating() -> Non
 
     assert prewired.status.value == "active", "pre-wired port must leave the free pool"
     assert prewired.role.value == "cust"
+
+
+@pytest.mark.asyncio
+async def test_second_run_touches_every_object_it_owns() -> None:
+    """A re-run must re-save everything it owns, or tracking deletes it.
+
+    The SDK runs generators inside
+    `start_tracking(..., delete_unused_nodes=True)`: any node a previous run
+    created and this run does not touch is reaped as orphaned. Early-returning
+    on "it already exists" is what made `invoke bootstrap` destructive on a
+    populated database — VRFs, customer ASNs, PE addresses and PE-CE sessions
+    were all deleted, while the CE address and PE interface survived only
+    because their code paths happened to re-save.
+
+    Simulates the second run: every lookup finds an existing object, so the
+    generator creates nothing and must instead have saved each one.
+    """
+    gen, client = _generator(_payload([_site(ce_device="ce-trading-lon")]))
+
+    owned: dict[str, MagicMock] = {}
+
+    async def _filters(**kwargs: Any) -> list[Any]:
+        kind = kwargs.get("kind")
+        if kwargs.get("status__value") == "free":
+            return []
+        if kind in (
+            "IpamVRF",
+            "RoutingAutonomousSystem",
+            "IpamIPAddress",
+            "RoutingBGPSession",
+            "InterfacePhysical",
+        ):
+            key = f"{kind}:{sorted(kwargs.items())!r}"
+            owned.setdefault(key, MagicMock(save=AsyncMock()))
+            return [owned[key]]
+        return []
+
+    client.filters = AsyncMock(side_effect=_filters)
+    await gen.generate()
+
+    assert owned, "expected the second run to find pre-existing objects"
+    untouched = [k.split(":")[0] for k, m in owned.items() if not m.save.await_count]
+    assert not untouched, f"these existing objects were never re-saved: {sorted(set(untouched))}"
+    assert not _creates(client, "IpamVRF"), "second run should not recreate the VRF"
+    assert not _creates(client, "RoutingBGPSession"), "second run should not recreate sessions"

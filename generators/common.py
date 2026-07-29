@@ -98,6 +98,10 @@ async def find_or_create_route_target(
     """Return the IpamRouteTarget with this name, creating it if absent."""
     rt = await client.filters(kind="IpamRouteTarget", name__value=name, branch=branch)
     if rt:
+        # Touch it: generators run under `delete_unused_nodes=True`, so an
+        # existing node returned without a save is reaped as orphaned. See the
+        # module docstring of generators/generate_l3vpn.py.
+        await rt[0].save(allow_upsert=True)
         return rt[0]
     obj = await client.create(kind="IpamRouteTarget", branch=branch, name=name)
     await obj.save(allow_upsert=True)
@@ -160,6 +164,9 @@ async def find_or_create_device(
     """
     existing = await client.filters(kind="DcimDevice", name__value=name, branch=branch)
     if existing:
+        # Touch it — see find_or_create_route_target above. Without this the
+        # SD-WAN edge devices are deleted on the generator's second run.
+        await existing[0].save(allow_upsert=True)
         return existing[0]
     device = await client.create(
         kind="DcimDevice",

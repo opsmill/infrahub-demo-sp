@@ -133,6 +133,16 @@ nodes:
     order_by:
       - remote_as__asn__value
     display_label: description__value
+    # `description` is this node's natural key, and already used as one: the
+    # L3VPN generator looks sessions up by it. Without it declared here the node
+    # has no key at all, so `infrahubctl object load` inserts instead of
+    # upserting and every re-run of `invoke bootstrap` duplicated all 56 iBGP
+    # sessions (56 -> 112 -> 168), which in turn duplicated every neighbour line
+    # in the rendered PE configs.
+    human_friendly_id:
+      - description__value
+    uniqueness_constraints:
+      - [description__value]
     attributes:
       - name: import_policies
         kind: Text

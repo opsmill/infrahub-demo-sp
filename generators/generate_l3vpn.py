@@ -2,6 +2,16 @@
 
 Materialises VRF, route targets, the customer ASN, PE-CE interfaces, IPs, and
 the eBGP sessions on both ends of each site of a ``ServiceL3Vpn``. Idempotent.
+
+GENERATOR TRACKING: the SDK runs `generate()` inside
+`start_tracking(..., delete_unused_nodes=True)`. Any node a previous run created
+that this run does not *touch* is treated as unused and deleted. So every object
+this generator owns must be re-saved on every run, even when it already exists
+and needs no change — a bare "found it, return early" silently orphans it. That
+is what made `invoke bootstrap` destructive on a populated database: VRFs,
+customer ASNs, PE addresses and PE-CE sessions were all reaped, while the CE
+address and PE interface survived precisely because their code paths re-saved
+them.
 """
 
 from __future__ import annotations
@@ -67,6 +77,7 @@ class L3VpnGenerator(InfrahubGenerator):
         )
         if existing_vrf:
             vrf = existing_vrf[0]
+            await vrf.save(allow_upsert=True)  # touch: keep it out of the reaper
         else:
             rt = await find_or_create_route_target(self.client, rd, self.branch)
             vrf = await self.client.create(
@@ -123,6 +134,7 @@ class L3VpnGenerator(InfrahubGenerator):
         )
         if existing:
             customer_as = existing[0]
+            await customer_as.save(allow_upsert=True)  # touch: see module docstring
         else:
             customer_as = await allocate_asn_from_pool(
                 self.client,
@@ -275,7 +287,9 @@ class L3VpnGenerator(InfrahubGenerator):
             kind="IpamIPAddress", address__value=address, branch=self.branch
         )
         if existing:
-            return existing[0]
+            ip_address = existing[0]
+            await ip_address.save(allow_upsert=True)  # touch: see module docstring
+            return ip_address
         payload: dict[str, Any] = {"address": address, "vrf": vrf}
         if iface is not None:
             payload["interface"] = iface
@@ -318,7 +332,9 @@ class L3VpnGenerator(InfrahubGenerator):
             kind="RoutingAutonomousSystem", asn__value=remote_asn, branch=self.branch
         )
         if existing:
-            return existing[0]
+            override_as = existing[0]
+            await override_as.save(allow_upsert=True)  # touch: see module docstring
+            return override_as
         remote_as = await self.client.create(
             kind="RoutingAutonomousSystem",
             branch=self.branch,
@@ -358,6 +374,7 @@ class L3VpnGenerator(InfrahubGenerator):
             branch=self.branch,
         )
         if existing:
+            await existing[0].save(allow_upsert=True)  # touch: see module docstring
             return
 
         backbone_as = await self.client.get(
@@ -430,6 +447,7 @@ class L3VpnGenerator(InfrahubGenerator):
             kind="RoutingBGPSession", description__value=desc, branch=self.branch
         )
         if existing:
+            await existing[0].save(allow_upsert=True)  # touch: see module docstring
             return
 
         backbone_as = await self.client.get(

@@ -63,9 +63,16 @@ async def test_allocate_prefix_with_pool_default_length() -> None:
 
 
 @pytest.mark.asyncio
-async def test_find_or_create_route_target_returns_existing() -> None:
-    """If a route-target exists, return it instead of creating a new one."""
-    existing = MagicMock()
+async def test_find_or_create_route_target_reuses_and_touches_existing() -> None:
+    """An existing route-target is reused, and re-saved so tracking keeps it.
+
+    Generators run under `start_tracking(delete_unused_nodes=True)`, so any node
+    a previous run created and this run does not touch is deleted as orphaned.
+    Returning an existing node without re-saving it is therefore not a harmless
+    optimisation — it is what made `invoke bootstrap` destroy generator-created
+    objects on a populated database.
+    """
+    existing = MagicMock(save=AsyncMock())
     client = MagicMock()
     client.filters = AsyncMock(return_value=[existing])
     client.create = AsyncMock()
@@ -74,6 +81,7 @@ async def test_find_or_create_route_target_returns_existing() -> None:
 
     assert result is existing
     client.create.assert_not_called()
+    existing.save.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -129,9 +137,16 @@ async def test_next_free_physical_interface_raises_when_none_available() -> None
 
 
 @pytest.mark.asyncio
-async def test_find_or_create_device_returns_existing() -> None:
-    """Idempotency: an existing DcimDevice with the same name is returned unchanged."""
-    existing = MagicMock()
+async def test_find_or_create_device_reuses_and_touches_existing() -> None:
+    """An existing DcimDevice is reused, and re-saved so tracking keeps it.
+
+    Generators run under `start_tracking(delete_unused_nodes=True)`, so any node
+    a previous run created and this run does not touch is deleted as orphaned.
+    Returning an existing node without re-saving it is therefore not a harmless
+    optimisation — it is what made `invoke bootstrap` destroy generator-created
+    objects on a populated database.
+    """
+    existing = MagicMock(save=AsyncMock())
     client = MagicMock()
     client.filters = AsyncMock(return_value=[existing])
     client.create = AsyncMock()
@@ -148,6 +163,7 @@ async def test_find_or_create_device_returns_existing() -> None:
 
     assert result is existing
     client.create.assert_not_called()
+    existing.save.assert_awaited_once()
 
 
 @pytest.mark.asyncio
