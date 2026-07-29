@@ -9,6 +9,9 @@
 {% set isis = data.MplsIsisProcess.edges[0].node %}
 {% set ldp = data.MplsLdpProcess.edges[0].node %}
 {% set bgp = data.MplsBgpProcess.edges[0].node %}
+{# iBGP neighbours come from RoutingBGPSession filtered by device, not from
+   MplsBgpProcess.sessions — nothing ever populates that relationship. #}
+{% set ibgp_sessions = data.RoutingBGPSession.edges %}
 {% set sites = data.ServiceL3VpnSite.edges
     | selectattr('node.pe_interface.node')
     | selectattr('node.pe_address.node')
@@ -78,8 +81,14 @@ interface {{ site.pe_interface.node.name.value }}
 router isis 1
    net {{ isis.net_id.value }}
    is-type {{ isis.level.value }}
+{# IPv4 only. Enabling `address-family ipv6 unicast` here while no interface
+   carries an IPv6 address stops cEOS forming any adjacency at all: hellos are
+   received and parsed (the IIH counters climb) but every one is discarded, so
+   `show isis neighbors` stays empty and each router elects itself DIS. Verified
+   by bisection on a live 8-PE lab — removing this line alone took the backbone
+   from 0/30 adjacencies to 30/30. Re-add it only alongside real IPv6
+   addressing on the core interfaces. #}
    address-family ipv4 unicast
-   address-family ipv6 unicast
 !
 mpls ldp
    router-id {{ ldp.router_id.value }}
@@ -114,7 +123,7 @@ router bgp {{ device.asn.node.asn.value }}
    ! Extended-community propagation is mandatory for route-targets to
    ! traverse the iBGP mesh — without it VPNv4 routes import nowhere.
    neighbor RR-MESH send-community extended
-{% for session in bgp.sessions.edges if session.node.session_type.value == 'INTERNAL' %}
+{% for session in ibgp_sessions %}
    neighbor {{ m.ip_only(session.node.remote_ip.node.address.value) }} peer group RR-MESH
    neighbor {{ m.ip_only(session.node.remote_ip.node.address.value) }} remote-as {{ session.node.remote_as.node.asn.value }}
    neighbor {{ m.ip_only(session.node.remote_ip.node.address.value) }} update-source Loopback0
@@ -122,7 +131,7 @@ router bgp {{ device.asn.node.asn.value }}
    !
 {% for af in bgp.address_families.value %}
    address-family {{ af | replace('vpnv4', 'vpn-ipv4') | replace('vpnv6', 'vpn-ipv6') }}
-{% for session in bgp.sessions.edges if session.node.session_type.value == 'INTERNAL' %}
+{% for session in ibgp_sessions %}
       neighbor {{ m.ip_only(session.node.remote_ip.node.address.value) }} activate
 {% endfor %}
 {% endfor %}

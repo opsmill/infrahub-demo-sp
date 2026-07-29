@@ -110,22 +110,22 @@ def pe_fixture(name: str, loopback: str, net_id: str) -> dict:
                     "node": {
                         "router_id": {"value": loopback_ip},
                         "address_families": {"value": ["vpnv4", "vpnv6"]},
-                        "sessions": {
-                            "edges": [
-                                {
-                                    "node": {
-                                        "description": {"value": "iBGP to peer"},
-                                        "session_type": {"value": "INTERNAL"},
-                                        "local_ip": {"node": {"address": {"value": loopback}}},
-                                        "remote_ip": {
-                                            "node": {"address": {"value": "10.0.0.1/32"}}
-                                        },
-                                        "local_as": {"node": {"asn": {"value": 65000}}},
-                                        "remote_as": {"node": {"asn": {"value": 65000}}},
-                                    }
-                                }
-                            ]
-                        },
+                    }
+                }
+            ]
+        },
+        # iBGP sessions are queried from RoutingBGPSession by device, not via
+        # MplsBgpProcess.sessions (which nothing populates).
+        "RoutingBGPSession": {
+            "edges": [
+                {
+                    "node": {
+                        "description": {"value": "iBGP to peer"},
+                        "session_type": {"value": "INTERNAL"},
+                        "local_ip": {"node": {"address": {"value": loopback}}},
+                        "remote_ip": {"node": {"address": {"value": "10.0.0.1/32"}}},
+                        "local_as": {"node": {"asn": {"value": 65000}}},
+                        "remote_as": {"node": {"asn": {"value": 65000}}},
                     }
                 }
             ]

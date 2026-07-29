@@ -96,20 +96,21 @@ FIXTURE = {
                 "node": {
                     "router_id": {"value": "10.0.0.1"},
                     "address_families": {"value": ["vpnv4", "vpnv6"]},
-                    "sessions": {
-                        "edges": [
-                            {
-                                "node": {
-                                    "description": {"value": "lon-arista to fra-cisco"},
-                                    "session_type": {"value": "INTERNAL"},
-                                    "local_ip": {"node": {"address": {"value": "10.0.0.1/32"}}},
-                                    "remote_ip": {"node": {"address": {"value": "10.0.0.2/32"}}},
-                                    "local_as": {"node": {"asn": {"value": 65000}}},
-                                    "remote_as": {"node": {"asn": {"value": 65000}}},
-                                }
-                            }
-                        ]
-                    },
+                }
+            }
+        ]
+    },
+    # Queried by device from RoutingBGPSession, not via MplsBgpProcess.sessions.
+    "RoutingBGPSession": {
+        "edges": [
+            {
+                "node": {
+                    "description": {"value": "lon-arista to fra-cisco"},
+                    "session_type": {"value": "INTERNAL"},
+                    "local_ip": {"node": {"address": {"value": "10.0.0.1/32"}}},
+                    "remote_ip": {"node": {"address": {"value": "10.0.0.2/32"}}},
+                    "local_as": {"node": {"asn": {"value": 65000}}},
+                    "remote_as": {"node": {"asn": {"value": 65000}}},
                 }
             }
         ]
@@ -271,3 +272,46 @@ async def test_pe_ce_neighbor_falls_back_to_the_pool_allocated_customer_asn() ->
     site["bgp_peer_asn"] = {"value": None}
     rendered = await PeAristaEos.__new__(PeAristaEos).transform(fixture)
     assert "neighbor 10.100.0.2 remote-as 65100" in rendered
+
+
+@pytest.mark.asyncio
+async def test_isis_does_not_enable_an_ipv6_address_family() -> None:
+    """IS-IS must be IPv4-only while the dataset carries no IPv6 addressing.
+
+    With `address-family ipv6 unicast` configured and no IPv6 address on any
+    interface, cEOS silently refuses every adjacency: IIH counters climb but
+    `show isis neighbors` stays empty and each router elects itself DIS.
+    Verified by bisection on a live 8-PE lab — removing that one line took the
+    backbone from 0/30 adjacencies to 30/30.
+    """
+    rendered = await PeAristaEos.__new__(PeAristaEos).transform(FIXTURE)
+    isis_block = rendered.split("router isis 1", 1)[1].split("\n!", 1)[0]
+    assert "address-family ipv4 unicast" in isis_block
+    assert "address-family ipv6 unicast" not in isis_block
+
+
+@pytest.mark.asyncio
+async def test_renders_ibgp_neighbors_from_the_session_list() -> None:
+    """iBGP neighbours must come from RoutingBGPSession, keyed by device.
+
+    They used to be read from `MplsBgpProcess.sessions`, which nothing ever
+    populates — so `router bgp` rendered with a peer group and no peers, and the
+    backbone overlay never came up on any PE. Regression guard: the rendered
+    config must contain a real neighbour.
+    """
+    rendered = await PeAristaEos.__new__(PeAristaEos).transform(FIXTURE)
+    assert "neighbor 10.0.0.2 peer group RR-MESH" in rendered
+    assert "neighbor 10.0.0.2 remote-as 65000" in rendered
+    assert "neighbor 10.0.0.2 update-source Loopback0" in rendered
+
+
+@pytest.mark.asyncio
+async def test_no_ibgp_sessions_renders_no_neighbors() -> None:
+    """A PE with no sessions yet must not emit a dangling neighbor line."""
+    import copy
+
+    fixture = copy.deepcopy(FIXTURE)
+    fixture["RoutingBGPSession"] = {"edges": []}
+    rendered = await PeAristaEos.__new__(PeAristaEos).transform(fixture)
+    assert "neighbor RR-MESH peer group" in rendered  # the group itself is still defined
+    assert "remote-as 65000" not in rendered
