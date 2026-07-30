@@ -21,7 +21,10 @@ query CE($device: String!) {
               }
               ... on InterfaceVirtual {
                 dot1q_id { value }
-                parent_interface { node { name { value } } }
+                # `parent_interface` peers on the InterfaceHasSubInterface generic,
+                # which has no `name` — it must be reached through an inline
+                # fragment on the concrete kind.
+                parent_interface { node { ... on InterfacePhysical { name { value } } } }
                 ip_addresses { edges { node { address { value } } } }
               }
             }
