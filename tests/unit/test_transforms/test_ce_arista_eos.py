@@ -91,3 +91,40 @@ async def test_interface_without_an_address_is_skipped() -> None:
     cfg = await _render(data)
     assert "interface Ethernet1" not in cfg
     assert "interface Ethernet2" in cfg
+
+
+@pytest.mark.asyncio
+async def test_renders_tagged_subinterface_for_the_customer_vlan() -> None:
+    """The private side is a dot1q sub-interface carrying the allocated VLAN.
+
+    The VLAN comes from that customer's own pool, so the tag identifies the
+    customer. The LAN gateway lives on the sub-interface, not the parent port.
+    """
+    cfg = await _render(ce_fixture(vlan=110, lan_address="10.200.10.1/24"))
+    assert "interface Ethernet2.110" in cfg
+    assert "encapsulation dot1q vlan 110" in cfg
+    sub = cfg.split("interface Ethernet2.110", 1)[1].split("\n!", 1)[0]
+    assert "ip address 10.200.10.1/24" in sub
+
+
+@pytest.mark.asyncio
+async def test_dot1q_parent_is_rendered_but_unaddressed() -> None:
+    """The parent port must still appear, even though it carries no address.
+
+    Rendering physical ports on "has an address" alone would drop the parent of
+    a tagged handoff entirely, and the sub-interface would have nothing to
+    hang off on the device.
+    """
+    cfg = await _render(ce_fixture(vlan=110))
+    parent = cfg.split("interface Ethernet2\n", 1)[1].split("\n!", 1)[0]
+    assert "no switchport" in parent
+    assert "ip address" not in parent
+
+
+@pytest.mark.asyncio
+async def test_loopback_is_not_treated_as_a_subinterface() -> None:
+    """Loopback0 is virtual too, but has no VLAN or parent — it must not be tagged."""
+    cfg = await _render(ce_fixture())
+    loopback = cfg.split("interface Loopback0", 1)[1].split("\n!", 1)[0]
+    assert "encapsulation" not in loopback
+    assert "ip address 10.0.1.1/32" in loopback

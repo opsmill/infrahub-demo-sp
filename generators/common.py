@@ -180,3 +180,58 @@ async def find_or_create_device(
     )
     await device.save(allow_upsert=True)
     return device
+
+
+async def allocate_vlan_subinterface(
+    client: InfrahubClient,
+    branch: str,
+    *,
+    pool_name: str,
+    parent: Any,
+    device_name: str,
+    parent_name: str,
+    description: str,
+) -> Any:
+    """Create a dot1q sub-interface whose VLAN ID comes from a CoreNumberPool.
+
+    The VLAN is allocated by handing the pool node to ``dot1q_id`` on create.
+    Pools allocate on create only, which is why the VLAN lands on a
+    sub-interface the generator makes rather than on the pre-provisioned parent
+    port — there is nothing to allocate into on an object that already exists.
+
+    Unlike the customer ASN, ``dot1q_id`` is not part of this node's
+    human-friendly ID (``[device__name__value, name__value]``), so saving with
+    ``allow_upsert`` is safe here.
+
+    Args:
+        client: Active Infrahub SDK client.
+        branch: Branch on which to allocate.
+        pool_name: Name of the CoreNumberPool holding the customer's VLANs.
+        parent: The parent InterfacePhysical node.
+        device_name: Name of the device the sub-interface belongs to.
+        parent_name: Name of the parent port (e.g. ``Ethernet2``).
+        description: Description for the new sub-interface.
+
+    Returns:
+        The InterfaceVirtual node, with ``dot1q_id`` populated by the pool.
+    """
+    pool: Any = await client.get(kind="CoreNumberPool", name__value=pool_name, branch=branch)
+    # The name cannot be known before allocation (it embeds the VLAN), so create
+    # with a placeholder, read back the assigned VLAN, then set the real name.
+    sub: Any = await client.create(
+        kind="InterfaceVirtual",
+        branch=branch,
+        name=f"{parent_name}.pending",
+        description=description,
+        status="active",
+        role="access",
+        mtu=1500,
+        dot1q_id=pool,
+        device={"hfid": [device_name]},
+        parent_interface=parent,
+    )
+    await sub.save()
+    vlan = int(sub.dot1q_id.value)
+    sub.name.value = f"{parent_name}.{vlan}"
+    await sub.save(allow_upsert=True)
+    return sub

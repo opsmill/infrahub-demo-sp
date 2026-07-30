@@ -1,0 +1,32 @@
+---
+# Per-customer VLAN pools for the private (customer LAN) side of each CE.
+#
+# One pool per customer, with non-overlapping ranges, so a VLAN ID identifies
+# which customer it belongs to at a glance. `generate_l3vpn` allocates from the
+# pool named by the VPN's `vlan_pool` relationship and puts the result on a
+# dot1q sub-interface of the CE's private port.
+#
+# The pools target `InterfaceVirtual.dot1q_id` rather than the physical port:
+# number pools allocate when a node is *created*, and the sub-interface is what
+# the generator creates. The parent physical port already exists as static data
+# in 65_ce.yml, so there is nothing to allocate into there.
+#
+# Dataset-specific because the customers are: the `isp` overlay has its own
+# tenants and would need its own pools.
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: CoreNumberPool
+  data:
+    - name: vlan_pool_markets_trading
+      description: Private-side VLAN IDs for the Markets & Trading customer.
+      node: InterfaceVirtual
+      node_attribute: dot1q_id
+      start_range: 100
+      end_range: 199
+    - name: vlan_pool_investment_banking
+      description: Private-side VLAN IDs for the Investment Banking customer.
+      node: InterfaceVirtual
+      node_attribute: dot1q_id
+      start_range: 200
+      end_range: 299

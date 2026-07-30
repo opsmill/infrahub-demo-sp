@@ -4,6 +4,21 @@
 {% set device = data.DcimDevice.edges[0].node %}
 {% set sessions = data.RoutingBGPSession.edges | selectattr('node.local_ip.node') | list %}
 {% set sites = data.ServiceL3VpnSite.edges | selectattr('node.customer_subnet.node') | list %}
+{# Sub-interfaces are InterfaceVirtual rows with a parent and a VLAN tag; the
+   loopback is virtual too but has neither, so it is excluded. Built with an
+   explicit loop rather than chained selectattr, because a dotted selectattr
+   path raises on any node that lacks the key instead of skipping it. #}
+{% set subinterfaces = [] %}
+{% set subinterface_parents = [] %}
+{% for edge in device.interfaces.edges %}
+{% set n = edge.node %}
+{% if n.__typename == 'InterfaceVirtual'
+      and n.dot1q_id is defined and n.dot1q_id and n.dot1q_id.value
+      and n.parent_interface is defined and n.parent_interface and n.parent_interface.node %}
+{% set _ = subinterfaces.append(n) %}
+{% set _ = subinterface_parents.append(n.parent_interface.node.name.value) %}
+{% endif %}
+{% endfor %}
 !
 ! Arista EOS configuration for {{ device.name.value }} (customer edge)
 !
@@ -34,13 +49,28 @@ interface Loopback0
 {% endfor %}
 !
 {% endfor %}
+{# A physical port is worth rendering if it carries an address, or if it is the
+   parent of a dot1q sub-interface — the parent of a tagged handoff is
+   deliberately unaddressed, so an address check alone would omit it. #}
 {% for iface in device.interfaces.edges
-    if iface.node.__typename == 'InterfacePhysical' and iface.node.ip_addresses.edges %}
+    if iface.node.__typename == 'InterfacePhysical'
+       and (iface.node.ip_addresses.edges or iface.node.name.value in subinterface_parents) %}
 interface {{ iface.node.name.value }}
    description {{ iface.node.description.value }}
    mtu {{ iface.node.mtu.value }}
    no switchport
 {% for ip in iface.node.ip_addresses.edges %}
+   ip address {{ ip.node.address.value }}
+{% endfor %}
+!
+{% endfor %}
+{# dot1q sub-interfaces: the customer VLAN handoff. The VLAN comes from that
+   customer's pool, so the tag differs per customer and per site. #}
+{% for iface in subinterfaces %}
+interface {{ iface.name.value }}
+   description {{ iface.description.value }}
+   encapsulation dot1q vlan {{ iface.dot1q_id.value }}
+{% for ip in iface.ip_addresses.edges %}
    ip address {{ ip.node.address.value }}
 {% endfor %}
 !

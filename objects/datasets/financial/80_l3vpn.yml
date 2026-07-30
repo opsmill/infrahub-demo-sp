@@ -21,6 +21,10 @@ spec:
 # still supported as a per-site override for datasets and Service Catalog
 # requests that need a specific AS.
 #
+# `vlan_pool` names the customer's VLAN pool (52_vlan_pools.yml). The generator
+# allocates one VLAN from it per site and hangs a dot1q sub-interface off that
+# site's `ce_private_interface`, carrying the VLAN and the LAN gateway address.
+#
 # Each site names the CE it terminates on. `pe_interface` is not set here —
 # the generator matches the pre-provisioned PE port by its description
 # ("L3VPN <vpn name>", see objects/datasets/financial/60_backbone.yml) so the
@@ -37,6 +41,7 @@ spec:
     - name: trading-floor-vpn
       description: Markets & Trading floor L3VPN — London and Zurich trading floors.
       vpn_id: 100
+      vlan_pool: vlan_pool_markets_trading
       address_family: ipv4
       status: draft
       tenant:
@@ -52,18 +57,21 @@ spec:
             pe_device: pe-01
             ce_device: ce-trading-lon
             ce_interface: ["ce-trading-lon", "Ethernet1"]
+            ce_private_interface: ["ce-trading-lon", "Ethernet2"]
             customer_subnet: ["10.200.10.0/24", "default"]
             routing_protocol: ebgp
           - name: trading-zurich
             pe_device: pe-08
             ce_device: ce-trading-zrh
             ce_interface: ["ce-trading-zrh", "Ethernet1"]
+            ce_private_interface: ["ce-trading-zrh", "Ethernet2"]
             customer_subnet: ["10.200.20.0/24", "default"]
             routing_protocol: ebgp
 
     - name: ib-advisory-vpn
       description: Investment Banking advisory L3VPN — London and Zurich deal floors.
       vpn_id: 101
+      vlan_pool: vlan_pool_investment_banking
       address_family: ipv4
       status: draft
       tenant:
@@ -79,11 +87,13 @@ spec:
             pe_device: pe-01
             ce_device: ce-ib-lon
             ce_interface: ["ce-ib-lon", "Ethernet1"]
+            ce_private_interface: ["ce-ib-lon", "Ethernet2"]
             customer_subnet: ["10.200.30.0/24", "default"]
             routing_protocol: ebgp
           - name: ib-zurich
             pe_device: pe-08
             ce_device: ce-ib-zrh
             ce_interface: ["ce-ib-zrh", "Ethernet1"]
+            ce_private_interface: ["ce-ib-zrh", "Ethernet2"]
             customer_subnet: ["10.200.40.0/24", "default"]
             routing_protocol: ebgp

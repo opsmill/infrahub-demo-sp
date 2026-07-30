@@ -127,9 +127,11 @@ spec:
 ---
 # CE physical interfaces.
 #
-# Ethernet1 (PE-facing) carries no IP here on purpose — `generate_l3vpn`
-# allocates the PE-CE /30 and attaches the CE address to it.
-# Ethernet2 is the customer LAN gateway, matching the site's customer_subnet.
+# Neither port carries an IP here, on purpose. `generate_l3vpn` allocates the
+# PE-CE /30 and attaches the CE address to Ethernet1. Ethernet2 is the *parent*
+# of a dot1q sub-interface the generator creates: the VLAN comes from the
+# customer's pool (52_vlan_pools.yml) and the LAN gateway address is derived
+# from the site's customer_subnet, so neither is duplicated here.
 apiVersion: infrahub.app/v1
 kind: Object
 spec:
@@ -142,10 +144,6 @@ spec:
       status: active
       role: access
       device: ce-trading-lon
-      ip_addresses:
-        kind: IpamIPAddress
-        data:
-          - address: 10.200.10.1/24
 
     - {name: Ethernet1, description: To pe-01 Ethernet4, mtu: 1500, status: active, role: upstream, device: ce-ib-lon}
     - name: Ethernet2
@@ -154,10 +152,6 @@ spec:
       status: active
       role: access
       device: ce-ib-lon
-      ip_addresses:
-        kind: IpamIPAddress
-        data:
-          - address: 10.200.30.1/24
 
     - {name: Ethernet1, description: To pe-08 Ethernet3, mtu: 1500, status: active, role: upstream, device: ce-trading-zrh}
     - name: Ethernet2
@@ -166,10 +160,6 @@ spec:
       status: active
       role: access
       device: ce-trading-zrh
-      ip_addresses:
-        kind: IpamIPAddress
-        data:
-          - address: 10.200.20.1/24
 
     - {name: Ethernet1, description: To pe-08 Ethernet4, mtu: 1500, status: active, role: upstream, device: ce-ib-zrh}
     - name: Ethernet2
@@ -178,7 +168,3 @@ spec:
       status: active
       role: access
       device: ce-ib-zrh
-      ip_addresses:
-        kind: IpamIPAddress
-        data:
-          - address: 10.200.40.1/24

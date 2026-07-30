@@ -191,6 +191,7 @@ def ce_fixture(
     pe_address: str = "10.100.0.1/30",
     lan_address: str = "10.200.10.1/24",
     customer_subnet: str = "10.200.10.0/24",
+    vlan: int = 110,
     sessions: bool = True,
 ) -> dict:
     """Return a CE query-result fixture for the ``ce`` GraphQL query.
@@ -203,6 +204,7 @@ def ce_fixture(
         pe_address: PE-side address of the PE-CE /30 (the eBGP neighbor).
         lan_address: Customer LAN gateway address on Ethernet2.
         customer_subnet: The LAN prefix the CE advertises into the VPN.
+        vlan: dot1q tag on the private-side sub-interface, from the customer pool.
         sessions: When ``False``, omit the eBGP session — models a CE whose
             L3VPN generator hasn't run yet.
 
@@ -210,20 +212,34 @@ def ce_fixture(
         Dictionary matching the shape returned by the ``ce`` GraphQL query.
     """
 
-    def _iface(typename: str, iface_name: str, description: str, address: str | None) -> dict:
+    def _iface(
+        typename: str,
+        iface_name: str,
+        description: str,
+        address: str | None,
+        *,
+        dot1q: int | None = None,
+        parent: str | None = None,
+    ) -> dict:
         addresses = [{"node": {"address": {"value": address}}}] if address else []
-        return {
-            "node": {
-                "__typename": typename,
-                "id": iface_name,
-                "name": {"value": iface_name},
-                "description": {"value": description},
-                "status": {"value": "active"},
-                "role": {"value": "access"},
-                "mtu": {"value": 1500},
-                "ip_addresses": {"edges": addresses},
-            }
+        node: dict = {
+            "__typename": typename,
+            "id": iface_name,
+            "name": {"value": iface_name},
+            "description": {"value": description},
+            "status": {"value": "active"},
+            "role": {"value": "access"},
+            "mtu": {"value": 1500},
+            "ip_addresses": {"edges": addresses},
         }
+        if typename == "InterfaceVirtual":
+            # The `ce` query returns these for every InterfaceVirtual; the
+            # loopback simply has them empty.
+            node["dot1q_id"] = {"value": dot1q}
+            node["parent_interface"] = (
+                {"node": {"name": {"value": parent}}} if parent else {"node": None}
+            )
+        return {"node": node}
 
     session_edges = []
     if sessions:
@@ -257,8 +273,14 @@ def ce_fixture(
                                     "To pe-01",
                                     pe_facing_address,
                                 ),
+                                _iface("InterfacePhysical", "Ethernet2", "Customer LAN", None),
                                 _iface(
-                                    "InterfacePhysical", "Ethernet2", "Customer LAN", lan_address
+                                    "InterfaceVirtual",
+                                    f"Ethernet2.{vlan}",
+                                    "Customer LAN (customer VLAN)",
+                                    lan_address,
+                                    dot1q=vlan,
+                                    parent="Ethernet2",
                                 ),
                             ]
                         },

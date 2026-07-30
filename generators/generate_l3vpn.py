@@ -25,6 +25,7 @@ from infrahub_sdk.generator import InfrahubGenerator
 from .common import (
     allocate_asn_from_pool,
     allocate_prefix_from_pool,
+    allocate_vlan_subinterface,
     find_or_create_route_target,
     next_free_physical_interface,
 )
@@ -186,6 +187,8 @@ class L3VpnGenerator(InfrahubGenerator):
         )
         cust_subnet.vrf = vrf
         await cust_subnet.save(allow_upsert=True)
+
+        await self._ensure_private_vlan(site, vpn)
 
         if site["routing_protocol"]["value"] == "ebgp":
             remote_as = await self._resolve_site_peer_as(site, vpn, customer_as)
@@ -467,3 +470,77 @@ class L3VpnGenerator(InfrahubGenerator):
             status="active",
         )
         await session.save(allow_upsert=True)
+
+    async def _ensure_private_vlan(self, site: dict[str, Any], vpn: dict[str, Any]) -> None:
+        """Put a dot1q sub-interface carrying the customer's VLAN on the CE.
+
+        The VLAN comes from the pool the VPN names in ``vlan_pool`` — one pool
+        per customer, so their ranges stay separate. The sub-interface carries
+        the customer LAN gateway (first usable address of the site's
+        ``customer_subnet``), which is why the parent port holds no address.
+
+        Skipped when the site names no ``ce_private_interface`` or the VPN names
+        no ``vlan_pool``: an unmanaged CE has no private side for us to configure.
+
+        Idempotency is by parent: on a re-run the existing sub-interface is found
+        and re-saved rather than reallocated, so the VLAN is stable and the
+        tracking reaper leaves it alone (see the module docstring).
+
+        Args:
+            site: Site node from the GraphQL query result.
+            vpn: The ServiceL3Vpn node from the GraphQL query result.
+        """
+        parent_node = (site.get("ce_private_interface") or {}).get("node")
+        pool_node = (vpn.get("vlan_pool") or {}).get("node")
+        if not parent_node or not pool_node:
+            return
+
+        parent: Any = await self.client.get(
+            kind="InterfacePhysical", id=parent_node["id"], branch=self.branch
+        )
+        device_name = site["ce_device"]["node"]["name"]["value"]
+        parent_name = parent_node["name"]["value"]
+
+        # Find an existing sub-interface of this parent. Looking it up by name is
+        # circular — the name embeds the VLAN we have not allocated yet — so
+        # match on the parent instead.
+        existing = await self.client.filters(
+            kind="InterfaceVirtual",
+            device__name__value=device_name,
+            parent_interface__ids=[parent_node["id"]],
+            branch=self.branch,
+        )
+        description = f"{parent.description.value} (customer VLAN)"
+        sub: Any
+        if existing:
+            sub = existing[0]
+            await sub.save(allow_upsert=True)  # touch: see module docstring
+        else:
+            sub = await allocate_vlan_subinterface(
+                self.client,
+                self.branch,
+                pool_name=pool_node["name"]["value"],
+                parent=parent,
+                device_name=device_name,
+                parent_name=parent_name,
+                description=description,
+            )
+
+        # The LAN gateway lives on the sub-interface, not the parent. Assigning
+        # `interface` on every run also migrates it off the parent port for
+        # anyone whose database predates the sub-interface layout.
+        subnet = ipaddress.IPv4Network(site["customer_subnet"]["node"]["prefix"]["value"])
+        gateway = f"{subnet.network_address + 1}/{subnet.prefixlen}"
+        existing_ip = await self.client.filters(
+            kind="IpamIPAddress", address__value=gateway, branch=self.branch
+        )
+        gateway_ip: Any
+        if existing_ip:
+            gateway_ip = existing_ip[0]
+        else:
+            gateway_ip = await self.client.create(
+                kind="IpamIPAddress", branch=self.branch, address=gateway
+            )
+        gateway_ip.interface = sub
+        gateway_ip.description.value = f"{device_name} customer LAN gateway"
+        await gateway_ip.save(allow_upsert=True)

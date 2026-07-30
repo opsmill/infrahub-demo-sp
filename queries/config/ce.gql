@@ -20,6 +20,8 @@ query CE($device: String!) {
                 ip_addresses { edges { node { address { value } } } }
               }
               ... on InterfaceVirtual {
+                dot1q_id { value }
+                parent_interface { node { name { value } } }
                 ip_addresses { edges { node { address { value } } } }
               }
             }
