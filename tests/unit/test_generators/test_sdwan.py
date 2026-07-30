@@ -157,15 +157,24 @@ async def test_lan_address_first_usable_in_subnet() -> None:
 
 
 @pytest.mark.asyncio
-async def test_existing_lan_address_not_recreated() -> None:
-    """When the LAN IP already exists (filters returns it), it is reused — no create."""
+async def test_existing_lan_address_reused_and_touched() -> None:
+    """An existing LAN IP is reused, and re-saved so tracking keeps it.
+
+    Reuse alone is not enough: generators run under
+    `start_tracking(delete_unused_nodes=True)`, so an existing node returned
+    without a save is reaped as orphaned. Observed on a live server as the LAN
+    addresses oscillating — 57 IPs after init, 54 after one re-bootstrap, 57
+    after the next — because each run deleted what the previous one had made.
+    """
     payload = _svc_payload(sites=[_site()])
-    gen, client = _make_gen(payload, existing_ip=[MagicMock(id="ip-existing")])
+    existing_lan_ip = MagicMock(id="ip-existing", save=AsyncMock())
+    gen, client = _make_gen(payload, existing_ip=[existing_lan_ip])
     with patch("generators.generate_sdwan.find_or_create_device", new=AsyncMock()):
         await gen.generate()
     assert not any(
         c for c in client.create.await_args_list if c.kwargs.get("kind") == "IpamIPAddress"
     )
+    existing_lan_ip.save.assert_awaited_once()
 
 
 @pytest.mark.asyncio
