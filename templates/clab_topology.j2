@@ -44,6 +44,10 @@ topology:
       image: registry.opsmill.io/external/ceos-image:4.29.0.2F
     srl:
       image: ghcr.io/nokia/srlinux:23.10
+    linux:
+      # Simulated customer machines on the CE LAN side. netshoot carries
+      # iproute2, so it can tag its own frames with the customer VLAN.
+      image: nicolaka/netshoot:latest
 
   nodes:
 {% for pe in labbed_pes %}
@@ -61,6 +65,24 @@ topology:
       kind: {{ attachment.ce.kind }}
       startup-config: devices/{{ attachment.ce.device }}.cfg
 {% endfor %}
+{# Simulated customer machines. Without one attached, the CE LAN port has no
+   carrier: it stays down, the dot1q sub-interface sits lowerlayerdown, and the
+   customer prefix is never advertised (a down interface contributes no
+   connected route for the BGP `network` statement to match). Each host tags
+   with the same VLAN the CE expects, so the encapsulation is exercised rather
+   than merely configured. See transforms/clab_topology.py:_lan_hosts. #}
+{% for host in lan_hosts %}
+    {{ host.name }}:
+      kind: linux
+      exec:
+        - ip link set eth1 up
+        - ip link add link eth1 name eth1.{{ host.vlan }} type vlan id {{ host.vlan }}
+        - ip link set eth1.{{ host.vlan }} up
+        - ip addr add {{ host.address }} dev eth1.{{ host.vlan }}
+        # 'replace' not 'add': the container already has a default route via the
+        # clab management bridge, and 'add' fails with RTNETLINK File exists.
+        - ip route replace default via {{ host.gateway }}
+{% endfor %}
 
   links:
 {# Backbone p2p links, derived in the transform by pairing the core
@@ -74,4 +96,8 @@ topology:
 {# PE-CE access links, one per attachment above. #}
 {% for attachment in ce_attachments %}
     - endpoints: ["{{ attachment.pe.device }}:{{ clab_iface(attachment.pe.iface, attachment.pe.kind) }}", "{{ attachment.ce.device }}:{{ clab_iface(attachment.ce.iface, attachment.ce.kind) }}"]
+{% endfor %}
+{# CE-to-customer LAN links. These give the CE private port carrier. #}
+{% for host in lan_hosts %}
+    - endpoints: ["{{ host.ce.device }}:{{ clab_iface(host.ce.iface, host.ce.kind) }}", "{{ host.name }}:eth1"]
 {% endfor %}

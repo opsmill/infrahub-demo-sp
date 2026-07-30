@@ -15,6 +15,10 @@ TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 # containerlab_os values that map to a lab-deployable container image.
 LABBED_KINDS = frozenset({"ceos", "srl"})
 
+# Host offset within the customer LAN for the simulated customer machine. The
+# gateway is .1 (on the CE sub-interface), so .10 is safely clear of it.
+LAN_HOST_OFFSET = 10
+
 
 def _pe_kind(pe: dict[str, Any]) -> str | None:
     """Return a PE's containerlab kind, or ``None`` if it has no platform.
@@ -148,6 +152,74 @@ def _ce_attachments(data: dict[str, Any]) -> list[dict[str, Any]]:
     return attachments
 
 
+def _lan_hosts(data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return one simulated customer host per CE private (LAN) side.
+
+    Without something attached, a CE's LAN port has no carrier: the port stays
+    down, the dot1q sub-interface hanging off it sits ``lowerlayerdown``, and the
+    customer prefix is never advertised because a down interface contributes no
+    connected route for the BGP ``network`` statement to match. Attaching a host
+    gives the port carrier and makes the VLAN carry real traffic.
+
+    The host is lab scaffolding, not managed infrastructure, so it is synthesised
+    here rather than modelled in Infrahub — the same treatment the CE stand-ins
+    had before they became real cEOS routers.
+
+    It tags its own frames with the same VLAN the CE expects, so the dot1q
+    encapsulation is genuinely exercised rather than merely configured.
+
+    Args:
+        data: Result of the ``clab_topology`` GraphQL query.
+
+    Returns:
+        A deterministically ordered list of hosts, each a dict with ``name``,
+        ``vlan``, ``address``, ``gateway``, and the ``ce`` endpoint to wire to.
+    """
+    # device name -> the tagged sub-interface on it (VLAN + gateway address)
+    tagged: dict[str, dict[str, Any]] = {}
+    for edge in data.get("InterfaceVirtual", {}).get("edges", []):
+        node = edge["node"]
+        vlan = (node.get("dot1q_id") or {}).get("value")
+        addresses = [
+            a["node"]["address"]["value"] for a in (node.get("ip_addresses") or {}).get("edges", [])
+        ]
+        if not vlan or not addresses:
+            continue
+        tagged[node["device"]["node"]["name"]["value"]] = {
+            "vlan": vlan,
+            "gateway": addresses[0],
+        }
+
+    hosts: list[dict[str, Any]] = []
+    for edge in data.get("ServiceL3VpnSite", {}).get("edges", []):
+        site = edge["node"]
+        ce_device = (site.get("ce_device") or {}).get("node")
+        private = (site.get("ce_private_interface") or {}).get("node")
+        if not ce_device or not private:
+            continue
+        ce_name = ce_device["name"]["value"]
+        if _pe_kind(ce_device) not in LABBED_KINDS or ce_name not in tagged:
+            continue
+        gateway = tagged[ce_name]["gateway"]
+        network = ipaddress.ip_interface(gateway).network
+        host_ip = network.network_address + LAN_HOST_OFFSET
+        hosts.append(
+            {
+                "name": f"host-{ce_name}",
+                "vlan": tagged[ce_name]["vlan"],
+                "address": f"{host_ip}/{network.prefixlen}",
+                "gateway": str(ipaddress.ip_interface(gateway).ip),
+                "ce": {
+                    "device": ce_name,
+                    "iface": private["name"]["value"],
+                    "kind": _pe_kind(ce_device),
+                },
+            }
+        )
+    hosts.sort(key=lambda h: h["name"])
+    return hosts
+
+
 class ClabTopology(InfrahubTransform):
     """Render a containerlab YAML topology for the lab-deployable subset of PEs."""
 
@@ -175,4 +247,5 @@ class ClabTopology(InfrahubTransform):
             labbed_pes=_labbed_pes(backbone),
             backbone_links=_backbone_links(backbone),
             ce_attachments=_ce_attachments(data),
+            lan_hosts=_lan_hosts(data),
         )

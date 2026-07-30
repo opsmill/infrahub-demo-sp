@@ -86,6 +86,7 @@ FIXTURE = {
         ]
     },
     "ServiceL3VpnSite": {"edges": []},
+    "InterfaceVirtual": {"edges": []},
 }
 
 
@@ -98,6 +99,7 @@ def _site(
     ce_name: str | None = None,
     ce_platform: tuple[str, str | None] = ("arista_eos", "ceos"),
     ce_iface: str = "Ethernet1",
+    ce_private_iface: str | None = "Ethernet2",
 ) -> dict:
     """Build a ServiceL3VpnSite edge.
 
@@ -121,6 +123,7 @@ def _site(
         "ce_address": {"node": {"address": {"value": "10.100.0.2/30"}}},
         "ce_device": {"node": None},
         "ce_interface": {"node": None},
+        "ce_private_interface": {"node": None},
         "l3vpn": {"node": {"name": {"value": "trading-floor-vpn"}}},
     }
     if ce_name:
@@ -128,7 +131,23 @@ def _site(
             "node": {"name": {"value": ce_name}, "platform": _platform(*ce_platform)}
         }
         node["ce_interface"] = {"node": {"name": {"value": ce_iface}}}
+        node["ce_private_interface"] = (
+            {"node": {"name": {"value": ce_private_iface}}} if ce_private_iface else {"node": None}
+        )
     return {"node": node}
+
+
+def _subif(device: str, vlan: int, gateway: str, parent: str = "Ethernet2") -> dict:
+    """Build a tagged sub-interface edge as the clab query returns it."""
+    return {
+        "node": {
+            "name": {"value": f"{parent}.{vlan}"},
+            "dot1q_id": {"value": vlan},
+            "device": {"node": {"name": {"value": device}}},
+            "parent_interface": {"node": {"name": {"value": parent}}},
+            "ip_addresses": {"edges": [{"node": {"address": {"value": gateway}}}]},
+        }
+    }
 
 
 def _fixture_with_sites() -> dict:
@@ -151,6 +170,12 @@ def _fixture_with_sites() -> dict:
                 ce_name="ce-trading-par",
                 ce_platform=("nokia_sros", "srl"),
             ),
+        ]
+    }
+    fixture["InterfaceVirtual"] = {
+        "edges": [
+            _subif("ce-trading-lon", 100, "10.200.10.1/24"),
+            _subif("ce-trading-par", 200, "10.200.20.1/24"),
         ]
     }
     return fixture
@@ -193,6 +218,7 @@ def _all_arista_fixture() -> dict:
             ]
         },
         "ServiceL3VpnSite": {"edges": []},
+        "InterfaceVirtual": {"edges": []},
     }
 
 
@@ -344,3 +370,48 @@ async def test_site_awaiting_the_generator_renders_no_ce_link() -> None:
     fixture["ServiceL3VpnSite"] = {"edges": [site]}
     parsed = yaml.safe_load(await ClabTopology.__new__(ClabTopology).transform(fixture))
     assert "ce-trading-lon" not in parsed["topology"]["nodes"]
+
+
+@pytest.mark.asyncio
+async def test_lan_host_attached_to_each_ce_private_side() -> None:
+    """Each CE LAN port gets a host, tagging with the CE's own VLAN.
+
+    Without one the port has no carrier: it stays down, the dot1q sub-interface
+    sits lowerlayerdown, and the customer prefix is never advertised because a
+    down interface contributes no connected route for `network` to match.
+    """
+    parsed = yaml.safe_load(
+        await ClabTopology.__new__(ClabTopology).transform(_fixture_with_sites())
+    )
+    nodes = parsed["topology"]["nodes"]
+    assert nodes["host-ce-trading-lon"]["kind"] == "linux"
+    execs = " ".join(nodes["host-ce-trading-lon"]["exec"])
+    assert "type vlan id 100" in execs, execs
+    assert "ip addr add 10.200.10.10/24 dev eth1.100" in execs, execs
+    # Gateway is the CE sub-interface address, and the route must be idempotent.
+    assert "ip route replace default via 10.200.10.1" in execs, execs
+
+
+@pytest.mark.asyncio
+async def test_lan_link_wires_host_to_the_ce_private_port() -> None:
+    """The LAN link must land on the CE's private port, not the PE-facing one."""
+    parsed = yaml.safe_load(
+        await ClabTopology.__new__(ClabTopology).transform(_fixture_with_sites())
+    )
+    links = _link_strings(parsed)
+    assert any("ce-trading-lon:eth2" in s and "host-ce-trading-lon:eth1" in s for s in links), links
+    # The PE-facing link is still eth1 on the CE.
+    assert any("ce-trading-lon:eth1" in s and "pe-lon-arista" in s for s in links), links
+
+
+@pytest.mark.asyncio
+async def test_no_lan_host_without_an_allocated_vlan() -> None:
+    """A CE whose VLAN has not been allocated yet gets no host.
+
+    Rendering one would mean guessing the tag, and a mismatched tag is worse
+    than an absent host: the link would come up and silently blackhole.
+    """
+    fixture = _fixture_with_sites()
+    fixture["InterfaceVirtual"] = {"edges": []}
+    parsed = yaml.safe_load(await ClabTopology.__new__(ClabTopology).transform(fixture))
+    assert not [n for n in parsed["topology"]["nodes"] if n.startswith("host-")]
