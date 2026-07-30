@@ -291,3 +291,35 @@ async def test_second_run_touches_every_object_it_owns() -> None:
     assert not untouched, f"these existing objects were never re-saved: {sorted(set(untouched))}"
     assert not _creates(client, "IpamVRF"), "second run should not recreate the VRF"
     assert not _creates(client, "RoutingBGPSession"), "second run should not recreate sessions"
+
+
+@pytest.mark.asyncio
+async def test_route_target_is_ensured_even_when_the_vrf_already_exists() -> None:
+    """The RT must be touched on every run, not only when creating the VRF.
+
+    Reaching `find_or_create_route_target` only through the create branch left
+    the RT untouched whenever the VRF already existed, so the tracking reaper
+    deleted it. `vrf.import_rt` went null and the PE config artifact then failed
+    to render with `UndefinedError: 'None' has no attribute 'name'` — observed on
+    pe-01 and pe-08 after a re-bootstrap.
+    """
+    gen, client = _generator(_payload())
+    existing_vrf = MagicMock(save=AsyncMock())
+
+    async def _filters(**kwargs: Any) -> list[Any]:
+        if kwargs.get("kind") == "IpamVRF":
+            return [existing_vrf]
+        if kwargs.get("status__value") == "free":
+            return []
+        return []
+
+    client.filters = AsyncMock(side_effect=_filters)
+    await gen.generate()
+
+    assert _creates(client, "IpamRouteTarget"), (
+        "the route target must be ensured on the VRF-reuse path too"
+    )
+    # Re-bound on both sides, so a VRF that already lost its RT is repaired.
+    assert existing_vrf.import_rt is not None
+    assert existing_vrf.export_rt is not None
+    assert existing_vrf.save.await_count >= 1

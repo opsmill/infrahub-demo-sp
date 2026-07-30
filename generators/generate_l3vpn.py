@@ -76,11 +76,18 @@ class L3VpnGenerator(InfrahubGenerator):
         existing_vrf = await self.client.filters(
             kind="IpamVRF", name__value=vpn_name, branch=self.branch
         )
+        # Ensure the route target on EVERY run, not just when creating the VRF.
+        # Reaching it only through the create branch left it untouched whenever
+        # the VRF already existed, so the reaper deleted it: `vrf.import_rt` went
+        # null and the PE template then died on `import_rt.node.name`. Re-binding
+        # it here also repairs a VRF that already lost its RT that way.
+        rt = await find_or_create_route_target(self.client, rd, self.branch)
         if existing_vrf:
             vrf = existing_vrf[0]
-            await vrf.save(allow_upsert=True)  # touch: keep it out of the reaper
+            vrf.import_rt = rt
+            vrf.export_rt = rt
+            await vrf.save(allow_upsert=True)
         else:
-            rt = await find_or_create_route_target(self.client, rd, self.branch)
             vrf = await self.client.create(
                 kind="IpamVRF",
                 branch=self.branch,
