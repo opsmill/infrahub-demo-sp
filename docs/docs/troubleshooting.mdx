@@ -117,6 +117,43 @@ the configuration files agree.
 
 ---
 
+## LDP does not start, so inter-site VPN traffic fails
+
+**Symptom:** Every prefix is exchanged correctly — IS-IS is up, the iBGP mesh is
+up, PE-CE eBGP is up, and each PE holds the customer prefixes in the right VRF —
+but a host on one customer site cannot reach the same customer's other site. On
+any PE:
+
+```text
+show mpls ldp neighbor
+! Agent 'LdpAgent' is not running
+! LDP is not enabled
+```
+
+**Cause:** Not a configuration defect. The rendered PE configuration contains the
+full `mpls ldp` block, including `no shutdown` and the per-interface statements,
+and it pushes without error — but cEOS never starts the LDP agent. It appears
+to be a limitation of the cEOS-lab image rather than something the configuration
+can influence.
+
+**Consequence:** An L3VPN needs an MPLS label path between PEs to carry VPN
+traffic. Without LDP there is no transport, so VPNv4 routes cannot be used for
+forwarding even though BGP has exchanged them. The control plane is complete and
+demonstrable; the data plane between sites is not.
+
+**What still works:** everything up to the label path — IS-IS adjacencies, the
+full iBGP mesh, PE-CE eBGP, VRF route import/export, and customer LAN
+reachability *within* a site (host to its own CE gateway over the tagged VLAN).
+
+**Fix:** None known against the pinned image
+(`registry.opsmill.io/external/ceos-image:4.29.0.2F`, which reports itself as
+4.28.9M). If you have a newer cEOS locally, point the `ceos` kind at it in
+`templates/clab_topology.j2` and redeploy — a build whose LDP agent starts is the
+most likely route to a working data plane. Segment routing instead of LDP would
+be the other option, and a larger change.
+
+---
+
 ## Port conflict: Infrahub already running
 
 **Symptom:**

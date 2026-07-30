@@ -46,6 +46,16 @@ Which PEs that yields depends on the active dataset:
 - **isp** — only `pe-lon-arista` (cEOS) and `pe-par-nokia` (SR Linux) are
   deployable; `pe-fra-cisco` and `pe-ams-juniper` are omitted.
 
+:::note MPLS data plane
+
+The lab brings up IS-IS, the full iBGP mesh and PE-CE eBGP, and every customer
+prefix lands in the right VRF. It does **not** forward traffic between customer
+sites: cEOS never starts its LDP agent, so there is no MPLS label path between
+PEs. See
+[Troubleshooting](../troubleshooting.mdx#ldp-does-not-start-so-inter-site-vpn-traffic-fails).
+
+:::
+
 CE nodes are real routers, not stand-ins. On **financial** the four
 pre-provisioned CEs are Arista cEOS and boot from their own `ce-arista-eos`
 configuration artifact, so the PE-CE eBGP session establishes in the lab. A

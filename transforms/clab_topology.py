@@ -20,6 +20,23 @@ LABBED_KINDS = frozenset({"ceos", "srl"})
 LAN_HOST_OFFSET = 10
 
 
+def _lan_host_name(ce_name: str) -> str:
+    """Return the container name for the machine on a CE's LAN.
+
+    Named `cust-<site>` rather than `host-<ce name>`: the latter embeds the CE's
+    own name, so `host-ce-ib-zrh` reads as if it were `ce-ib-zrh` itself and gets
+    mistaken for the router. `cust-ib-zrh` cannot be confused with it.
+
+    Args:
+        ce_name: Name of the CE router, e.g. ``ce-ib-zrh``.
+
+    Returns:
+        The host container name, e.g. ``cust-ib-zrh``.
+    """
+    suffix = ce_name[len("ce-") :] if ce_name.startswith("ce-") else ce_name
+    return f"cust-{suffix}"
+
+
 def _pe_kind(pe: dict[str, Any]) -> str | None:
     """Return a PE's containerlab kind, or ``None`` if it has no platform.
 
@@ -205,7 +222,7 @@ def _lan_hosts(data: dict[str, Any]) -> list[dict[str, Any]]:
         host_ip = network.network_address + LAN_HOST_OFFSET
         hosts.append(
             {
-                "name": f"host-{ce_name}",
+                "name": _lan_host_name(ce_name),
                 "vlan": tagged[ce_name]["vlan"],
                 "address": f"{host_ip}/{network.prefixlen}",
                 "gateway": str(ipaddress.ip_interface(gateway).ip),

@@ -384,8 +384,8 @@ async def test_lan_host_attached_to_each_ce_private_side() -> None:
         await ClabTopology.__new__(ClabTopology).transform(_fixture_with_sites())
     )
     nodes = parsed["topology"]["nodes"]
-    assert nodes["host-ce-trading-lon"]["kind"] == "linux"
-    execs = " ".join(nodes["host-ce-trading-lon"]["exec"])
+    assert nodes["cust-trading-lon"]["kind"] == "linux"
+    execs = " ".join(nodes["cust-trading-lon"]["exec"])
     assert "type vlan id 100" in execs, execs
     assert "ip addr add 10.200.10.10/24 dev eth1.100" in execs, execs
     # Gateway is the CE sub-interface address, and the route must be idempotent.
@@ -399,7 +399,7 @@ async def test_lan_link_wires_host_to_the_ce_private_port() -> None:
         await ClabTopology.__new__(ClabTopology).transform(_fixture_with_sites())
     )
     links = _link_strings(parsed)
-    assert any("ce-trading-lon:eth2" in s and "host-ce-trading-lon:eth1" in s for s in links), links
+    assert any("ce-trading-lon:eth2" in s and "cust-trading-lon:eth1" in s for s in links), links
     # The PE-facing link is still eth1 on the CE.
     assert any("ce-trading-lon:eth1" in s and "pe-lon-arista" in s for s in links), links
 
@@ -414,4 +414,18 @@ async def test_no_lan_host_without_an_allocated_vlan() -> None:
     fixture = _fixture_with_sites()
     fixture["InterfaceVirtual"] = {"edges": []}
     parsed = yaml.safe_load(await ClabTopology.__new__(ClabTopology).transform(fixture))
-    assert not [n for n in parsed["topology"]["nodes"] if n.startswith("host-")]
+    assert not [n for n in parsed["topology"]["nodes"] if n.startswith("cust-")]
+
+
+def test_lan_host_name_cannot_be_confused_with_the_ce() -> None:
+    """`cust-<site>`, not `host-<ce name>`.
+
+    The old form embedded the CE's own name, so `host-ce-ib-zrh` read as if it
+    were the router `ce-ib-zrh` and was mistaken for it.
+    """
+    from transforms.clab_topology import _lan_host_name
+
+    assert _lan_host_name("ce-ib-zrh") == "cust-ib-zrh"
+    assert _lan_host_name("ce-trading-lon") == "cust-trading-lon"
+    # A CE not following the ce- convention still gets an unambiguous name.
+    assert _lan_host_name("branch-router-7") == "cust-branch-router-7"
