@@ -7,10 +7,21 @@
 # materializes the VRF / interfaces / IPs, so the proposed change shows no
 # config diff.
 #
-# Instead it runs event-driven: when the service catalog adds a ServiceL3Vpn
-# to the `l3vpns` group on its branch (after the sites exist), the
-# group-membership trigger fires the generator action. The generator runs and
-# commits on that branch *before* artifacts render, so the diff is correct.
+# Instead it runs event-driven, from two rules that share one action:
+#
+#   trigger-l3vpn-generator                a ServiceL3Vpn JOINS the l3vpns group
+#   trigger-l3vpn-generator-sites-changed  a site is added to / removed from an
+#                                          already-grouped ServiceL3Vpn
+#
+# The first covers the Service Catalog's create flow: it adds the VPN to the
+# group after the sites exist, so the generator runs against complete data and
+# commits on the branch *before* artifacts render. The second covers editing a
+# service that is already in the group — membership does not change then, so the
+# group rule cannot fire, and without it a new site got no PE port, no /30 and
+# no session, and the proposed change showed no diff for it. Removal matters too:
+# re-running is what lets the generator's own tracking reap the PE port, /30 and
+# session that the deleted site left behind.
+#
 # `branch_scope: other_branches` restricts firing to non-default branches (the
 # catalog's `service/*` branches); the default branch is seeded explicitly at
 # bootstrap via scripts/run_generator.py.
@@ -40,6 +51,57 @@ spec:
     - name: trigger-l3vpn-generator
       description: Fire the L3VPN generator when a service joins the l3vpns group.
       branch_scope: other_branches
+      # `added` and `removed` are the only two choices — there is no "changed".
+      # Membership is unchanged when an already-grouped service is edited, which
+      # is what the node rule below is for.
       member_update: added
       group: l3vpns
       action: run-l3vpn-generator
+
+---
+# Editing an already-grouped service.
+#
+# node_kind is ServiceL3Vpn and not ServiceL3VpnSite, and that is forced rather
+# than chosen: a generator action dispatches with the TRIGGERING node's id as
+# its target, and the server rejects a target that is not a member of the
+# generator definition's group ("Target <id> is not part of the group"). Sites
+# are never group members, so a site-scoped rule would only produce one failed
+# generator flow per site edit.
+#
+# Adding or removing a site still reaches this rule, because creating or deleting
+# a child records the parent's `sites` relationship as changed and the parent gets
+# its own node.updated event. The match is named after the relationship on
+# ServiceL3Vpn (`sites`), not its identifier (`l3vpn__site`).
+#
+# `modification_type: updated` rather than `added` — it matches any change to the
+# relationship, where `added` would ignore a site being removed.
+#
+# Matching on a relationship rather than leaving `matches` empty also keeps the
+# generator from re-triggering itself: the generator writes ServiceL3Vpn.status,
+# .vrf and .customer_asn, and an unmatched rule would fire on those writes.
+# (Its re-save of unchanged nodes is safe either way — Infrahub gates node
+# events on a real diff, so a no-op save emits nothing.)
+#
+# KNOWN GAP: editing an existing site's own fields — customer_subnet,
+# bgp_peer_asn, ce_device — cannot fire the generator. An attribute edit on the
+# child produces no event for the parent, and a site-scoped rule cannot
+# dispatch, so no rule can observe it. To force a run on the branch, take the
+# VPN out of the l3vpns group and put it back: that is a membership change, so
+# the group rule above fires. On the default branch, run
+# `uv run python scripts/run_generator.py generate_l3vpn`.
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: CoreNodeTriggerRule
+  data:
+    - name: trigger-l3vpn-generator-sites-changed
+      description: Re-run the L3VPN generator when a site is added to or removed from a service.
+      branch_scope: other_branches
+      node_kind: ServiceL3Vpn
+      mutation_action: updated
+      action: run-l3vpn-generator
+      matches:
+        kind: CoreNodeTriggerRelationshipMatch
+        data:
+          - relationship_name: sites
+            modification_type: updated

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from scripts import fetch_lab_configs
 
@@ -58,7 +61,7 @@ def _fake_response(body: bytes) -> MagicMock:
     return resp
 
 
-def test_writes_one_file_per_labbed_device(tmp_path) -> None:
+def test_writes_one_file_per_labbed_device(tmp_path: Path) -> None:
     """Every (role, containerlab_os) pair in the table gets a config file.
 
     Covers both roles the lab boots: the backbone PEs and the pre-provisioned
@@ -100,7 +103,7 @@ def test_writes_one_file_per_labbed_device(tmp_path) -> None:
     assert (tmp_path / "ce-trading-lon.cfg").read_bytes() == b"ce-cfg"
 
 
-def test_ce_uses_the_ce_artifact_definition(tmp_path) -> None:
+def test_ce_uses_the_ce_artifact_definition(tmp_path: Path) -> None:
     """A cEOS CE resolves ce-arista-eos-config, not the PE definition.
 
     Role and clab kind together pick the definition — a CE and a PE are both
@@ -131,7 +134,7 @@ def test_ce_uses_the_ce_artifact_definition(tmp_path) -> None:
     assert definition_names == ["ce-arista-eos-config"]
 
 
-def test_device_with_unsupported_kind_is_skipped(tmp_path) -> None:
+def test_device_with_unsupported_kind_is_skipped(tmp_path: Path) -> None:
     """A device whose containerlab_os isn't in the table doesn't get fetched.
 
     DEFINITION_BY_ROLE_AND_KIND today only covers ceos/srl. Other kinds
@@ -155,7 +158,7 @@ def test_device_with_unsupported_kind_is_skipped(tmp_path) -> None:
     client.get.assert_not_called()
 
 
-def test_device_with_no_platform_is_skipped(tmp_path) -> None:
+def test_device_with_no_platform_is_skipped(tmp_path: Path) -> None:
     """Devices without a platform peer must not crash the loop (defensive read)."""
     client = _client(devices_by_role={"pe": [_device("pe-orphan", None)]})
 
@@ -172,7 +175,9 @@ def test_device_with_no_platform_is_skipped(tmp_path) -> None:
     assert list(tmp_path.iterdir()) == []
 
 
-def test_artifact_without_storage_id_logs_warning_continues(tmp_path, capsys) -> None:
+def test_artifact_without_storage_id_logs_warning_continues(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     """Missing storage_id → warn on stderr, don't crash, return 1 if no others wrote."""
     pe = _device("pe-lon-arista", "ceos")
     client = _client(
@@ -194,7 +199,7 @@ def test_artifact_without_storage_id_logs_warning_continues(tmp_path, capsys) ->
     assert "no storage_id" in capsys.readouterr().err
 
 
-def test_missing_artifact_logs_warning(tmp_path, capsys) -> None:
+def test_missing_artifact_logs_warning(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """A device that has no matching CoreArtifact yet logs and skips."""
     pe = _device("pe-par-nokia", "srl")
     client = _client(devices_by_role={"pe": [pe]}, artifacts_by_device_id={pe.id: []})

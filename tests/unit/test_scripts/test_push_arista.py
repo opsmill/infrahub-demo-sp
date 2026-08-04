@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+from typing import Any
+
+import pytest
 
 SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "push_arista.py"
 spec = importlib.util.spec_from_file_location("push_arista", SCRIPT)
@@ -54,7 +57,9 @@ class _Resp:
         return self._body
 
 
-def test_ready_probe_retries_until_the_routing_agent_answers(monkeypatch) -> None:
+def test_ready_probe_retries_until_the_routing_agent_answers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """cEOS answers eAPI before its agents register their CLI commands.
 
     Pushing in that window fails on a plain `ip routing` with "not supported
@@ -68,7 +73,10 @@ def test_ready_probe_retries_until_the_routing_agent_answers(monkeypatch) -> Non
     ]
     calls: list[list[str]] = []
 
-    def fake_post(url, auth, json, timeout):  # noqa: A002 - mirror requests' signature
+    def fake_post(  # noqa: A002 - mirror requests' signature
+        url: str, auth: tuple[str, str], json: dict[str, Any], timeout: int
+    ) -> _Resp:
+        """Return the next canned eAPI response, recording the commands sent."""
         calls.append(json["params"]["cmds"])
         return _Resp(responses[len(calls) - 1])
 
@@ -81,11 +89,16 @@ def test_ready_probe_retries_until_the_routing_agent_answers(monkeypatch) -> Non
     assert calls[0] == list(push_arista.READY_PROBE_CMDS)
 
 
-def test_ready_probe_treats_transport_errors_as_not_ready(monkeypatch) -> None:
+def test_ready_probe_treats_transport_errors_as_not_ready(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A refused connection mid-boot is a retry, not a crash."""
     state = {"n": 0}
 
-    def fake_post(url, auth, json, timeout):  # noqa: A002
+    def fake_post(  # noqa: A002
+        url: str, auth: tuple[str, str], json: dict[str, Any], timeout: int
+    ) -> _Resp:
+        """Fail the first two attempts at transport level, then answer."""
         state["n"] += 1
         if state["n"] < 3:
             raise OSError("connection reset by peer")
@@ -98,7 +111,7 @@ def test_ready_probe_treats_transport_errors_as_not_ready(monkeypatch) -> None:
     assert state["n"] == 3
 
 
-def test_ready_probe_times_out_with_the_last_error(monkeypatch) -> None:
+def test_ready_probe_times_out_with_the_last_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """Give up eventually, and say what the node was still complaining about."""
     monkeypatch.setattr(
         push_arista.requests,
@@ -116,7 +129,7 @@ def test_ready_probe_times_out_with_the_last_error(monkeypatch) -> None:
         raise AssertionError("expected TimeoutError")
 
 
-def test_push_does_not_sleep_a_fixed_settle_window(monkeypatch) -> None:
+def test_push_does_not_sleep_a_fixed_settle_window(monkeypatch: pytest.MonkeyPatch) -> None:
     """The blind settle sleep is gone — readiness is probed, not guessed.
 
     A fixed sleep cannot scale with how many cEOS nodes the host boots at

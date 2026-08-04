@@ -37,6 +37,32 @@ def _lan_host_name(ce_name: str) -> str:
     return f"cust-{suffix}"
 
 
+def _lan_host_address(network: ipaddress.IPv4Network | ipaddress.IPv6Network) -> Any | None:
+    """Return the customer host's address inside ``network``, or ``None``.
+
+    :data:`LAN_HOST_OFFSET` is the preferred offset, but adding it blindly walks
+    straight out of any prefix shorter than a /28: a /30 gateway of ``x.x.x.1``
+    yielded a host at ``x.x.x.10``, in a different network, so ``ip route replace
+    default via <gateway>`` failed with "Network is unreachable" and the host came
+    up silently useless. Fall back to the last usable address when the offset does
+    not fit, and give up when the prefix has no room for a host beside the
+    gateway.
+
+    Args:
+        network: The customer LAN the gateway sits in.
+
+    Returns:
+        An address strictly inside ``network`` and clear of the ``.1`` gateway, or
+        ``None`` when the prefix is too small to hold one.
+    """
+    # .0 network, .1 gateway, and (IPv4) a broadcast address at the top.
+    usable = network.num_addresses - 3 if network.version == 4 else network.num_addresses - 2
+    if usable < 1:
+        return None
+    offset = LAN_HOST_OFFSET if LAN_HOST_OFFSET <= usable + 1 else usable + 1
+    return network.network_address + offset
+
+
 def _pe_kind(pe: dict[str, Any]) -> str | None:
     """Return a PE's containerlab kind, or ``None`` if it has no platform.
 
@@ -123,7 +149,7 @@ def _backbone_links(backbone: dict[str, Any]) -> list[dict[str, Any]]:
     return links
 
 
-def _ce_attachments(data: dict[str, Any]) -> list[dict[str, Any]]:
+def _ce_attachments(data: dict[str, Any], backbone: dict[str, Any]) -> list[dict[str, Any]]:
     """Return the lab-deployable PE-CE attachments, one per L3VPN site.
 
     A site contributes a CE node and a PE-CE link only when everything the lab
@@ -132,14 +158,25 @@ def _ce_attachments(data: dict[str, Any]) -> list[dict[str, Any]]:
     generator hasn't run yet, or whose CE is unmanaged, are skipped rather than
     rendered as a half-wired node.
 
+    The site's PE must also belong to the backbone being rendered. The query
+    returns every ``ServiceL3VpnSite`` in the database, unfiltered, so a site
+    hanging off some other backbone's PE would otherwise emit a link endpoint
+    naming a node this topology never declares — which containerlab rejects
+    outright, taking the whole lab down rather than just that site.
+
     Args:
         data: Result of the ``clab_topology`` GraphQL query.
+        backbone: The ``TopologyMplsBackbone`` node being rendered.
 
     Returns:
         A deterministically ordered list of attachments, each a dict with
         ``ce`` and ``pe`` ``{device, iface, kind}`` mappings.
     """
+    backbone_pes = {pe["name"]["value"] for pe in _labbed_pes(backbone)}
     attachments: list[dict[str, Any]] = []
+    # Two sites naming the same pair of ports describe one cable, and clab rejects
+    # the same endpoint appearing in two links.
+    seen_links: set[tuple[str, str, str, str]] = set()
     for edge in data.get("ServiceL3VpnSite", {}).get("edges", []):
         site = edge["node"]
         ce_device = (site.get("ce_device") or {}).get("node")
@@ -151,6 +188,17 @@ def _ce_attachments(data: dict[str, Any]) -> list[dict[str, Any]]:
         ce_kind, pe_kind = _pe_kind(ce_device), _pe_kind(pe_device)
         if ce_kind not in LABBED_KINDS or pe_kind not in LABBED_KINDS:
             continue
+        if pe_device["name"]["value"] not in backbone_pes:
+            continue
+        link_key = (
+            pe_device["name"]["value"],
+            pe_iface["name"]["value"],
+            ce_device["name"]["value"],
+            ce_iface["name"]["value"],
+        )
+        if link_key in seen_links:
+            continue
+        seen_links.add(link_key)
         attachments.append(
             {
                 "ce": {
@@ -169,7 +217,7 @@ def _ce_attachments(data: dict[str, Any]) -> list[dict[str, Any]]:
     return attachments
 
 
-def _lan_hosts(data: dict[str, Any]) -> list[dict[str, Any]]:
+def _lan_hosts(data: dict[str, Any], attachments: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Return one simulated customer host per CE private (LAN) side.
 
     Without something attached, a CE's LAN port has no carrier: the port stays
@@ -185,29 +233,48 @@ def _lan_hosts(data: dict[str, Any]) -> list[dict[str, Any]]:
     It tags its own frames with the same VLAN the CE expects, so the dot1q
     encapsulation is genuinely exercised rather than merely configured.
 
+    A host is emitted only for a CE that ``attachments`` actually declares as a
+    node. The gate here used to be weaker than the one in
+    :func:`_ce_attachments`, so a site whose ``pe_interface`` had not been
+    allocated yet — the state the generator leaves behind if it fails between
+    creating the sub-interface and saving the site — produced a link to a CE that
+    was never declared, and containerlab refused to deploy the entire lab.
+
     Args:
         data: Result of the ``clab_topology`` GraphQL query.
+        attachments: The PE-CE attachments from :func:`_ce_attachments`, i.e. the
+            CEs this topology declares.
 
     Returns:
         A deterministically ordered list of hosts, each a dict with ``name``,
         ``vlan``, ``address``, ``gateway``, and the ``ce`` endpoint to wire to.
     """
-    # device name -> the tagged sub-interface on it (VLAN + gateway address)
-    tagged: dict[str, dict[str, Any]] = {}
+    declared_ces = {a["ce"]["device"] for a in attachments}
+
+    # (device name, parent port) -> the tagged sub-interface on it. Keying by
+    # device alone let a CE with two tagged sub-interfaces keep only the last, so
+    # a site could be handed another site's VLAN and gateway.
+    tagged: dict[tuple[str, str], dict[str, Any]] = {}
     for edge in data.get("InterfaceVirtual", {}).get("edges", []):
         node = edge["node"]
         vlan = (node.get("dot1q_id") or {}).get("value")
         addresses = [
             a["node"]["address"]["value"] for a in (node.get("ip_addresses") or {}).get("edges", [])
         ]
-        if not vlan or not addresses:
+        parent = (node.get("parent_interface") or {}).get("node")
+        if not vlan or not addresses or not parent:
             continue
-        tagged[node["device"]["node"]["name"]["value"]] = {
-            "vlan": vlan,
-            "gateway": addresses[0],
-        }
+        key = (node["device"]["node"]["name"]["value"], parent["name"]["value"])
+        tagged[key] = {"vlan": vlan, "gateway": addresses[0]}
 
     hosts: list[dict[str, Any]] = []
+    used_names: set[str] = set()
+    # One CE LAN port carries one cable, so it gets exactly one host — even when
+    # two sites name it. Renaming the second host was not enough: both entries
+    # still wired to the same `<ce>:<port>` endpoint, and containerlab rejects an
+    # endpoint that appears in two links, taking the whole lab down. Same guard
+    # as `seen_links` in _ce_attachments.
+    wired_ports: set[tuple[str, str]] = set()
     for edge in data.get("ServiceL3VpnSite", {}).get("edges", []):
         site = edge["node"]
         ce_device = (site.get("ce_device") or {}).get("node")
@@ -215,20 +282,37 @@ def _lan_hosts(data: dict[str, Any]) -> list[dict[str, Any]]:
         if not ce_device or not private:
             continue
         ce_name = ce_device["name"]["value"]
-        if _pe_kind(ce_device) not in LABBED_KINDS or ce_name not in tagged:
+        if _pe_kind(ce_device) not in LABBED_KINDS or ce_name not in declared_ces:
             continue
-        gateway = tagged[ce_name]["gateway"]
+        private_name = private["name"]["value"]
+        if (ce_name, private_name) in wired_ports:
+            continue
+        sub = tagged.get((ce_name, private_name))
+        if sub is None:
+            continue
+        gateway = sub["gateway"]
         network = ipaddress.ip_interface(gateway).network
-        host_ip = network.network_address + LAN_HOST_OFFSET
+        host_ip = _lan_host_address(network)
+        if host_ip is None:
+            continue
+        # A CE terminating two sites on *different* LAN ports needs two hosts, so
+        # the name has to be disambiguated by port rather than by CE alone.
+        name = _lan_host_name(ce_name)
+        if name in used_names:
+            name = f"{name}-{private_name.replace('/', '-').lower()}"
+            if name in used_names:
+                continue
+        used_names.add(name)
+        wired_ports.add((ce_name, private_name))
         hosts.append(
             {
-                "name": _lan_host_name(ce_name),
-                "vlan": tagged[ce_name]["vlan"],
+                "name": name,
+                "vlan": sub["vlan"],
                 "address": f"{host_ip}/{network.prefixlen}",
                 "gateway": str(ipaddress.ip_interface(gateway).ip),
                 "ce": {
                     "device": ce_name,
-                    "iface": private["name"]["value"],
+                    "iface": private_name,
                     "kind": _pe_kind(ce_device),
                 },
             }
@@ -252,6 +336,7 @@ class ClabTopology(InfrahubTransform):
             Rendered containerlab YAML as plain text.
         """
         backbone = data["TopologyMplsBackbone"]["edges"][0]["node"]
+        ce_attachments = _ce_attachments(data, backbone)
         env = Environment(
             loader=FileSystemLoader(TEMPLATES_DIR),
             keep_trailing_newline=True,
@@ -263,6 +348,6 @@ class ClabTopology(InfrahubTransform):
             data=data,
             labbed_pes=_labbed_pes(backbone),
             backbone_links=_backbone_links(backbone),
-            ce_attachments=_ce_attachments(data),
-            lan_hosts=_lan_hosts(data),
+            ce_attachments=ce_attachments,
+            lan_hosts=_lan_hosts(data, ce_attachments),
         )

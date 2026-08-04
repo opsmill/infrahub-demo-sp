@@ -76,8 +76,14 @@ if submitted:
     # branch — saves the user from orphaned half-created services. Belt and
     # braces: the try/except below catches the same collision on a real race.
     requested_subnets = [s["lan_subnet"] for s in sites]
+    # Scoped to the provider namespace: SD-WAN LAN subnets are created there,
+    # while each L3VPN's customer prefixes live in a namespace of their own. An
+    # unscoped query would count an L3VPN customer's private subnet as a
+    # collision and refuse a request that is in fact free.
     existing_prefixes = run_async(
-        client_main.filters(kind="IpamPrefix", prefix__values=requested_subnets)
+        client_main.filters(
+            kind="IpamPrefix", prefix__values=requested_subnets, ip_namespace__name__value="default"
+        )
     )
     existing_subnets = {p.prefix.value for p in existing_prefixes}
     collisions = [s for s in requested_subnets if s in existing_subnets]

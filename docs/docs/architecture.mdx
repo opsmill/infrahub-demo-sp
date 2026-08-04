@@ -82,10 +82,14 @@ When an operator creates an L3VPN through the Streamlit catalog:
 3. It adds the `ServiceL3Vpn` to the `l3vpns` group. A group-membership
    trigger (`objects/events/00_triggers.yml`) fires `L3VpnGenerator` **on the
    branch**, which materialises the VRF, route targets, PE-CE interfaces, IP
-   addresses, and an eBGP session if the routing protocol is set to `ebgp`.
+   addresses, and an eBGP session if the routing protocol is set to `ebgp`, all
+   inside the customer's own IP namespace.
    The generator runs event-driven rather than in the proposed-change pipeline
    (`execute_in_proposed_change: false`) so its data lands before artifacts
    render — otherwise the pipeline races and the configuration diff comes out empty.
+   A second rule in the same file re-runs the generator when a site is added to
+   or removed from a service that is already in the group; see
+   [services/l3vpn](./services/l3vpn.mdx) for what that rule cannot cover.
 4. Once the generator finishes, per-PE configuration artifacts are rendered by
    the transform layer against the now-complete branch data.
 5. The catalog opens a `CoreProposedChange` targeting `main`.

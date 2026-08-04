@@ -40,8 +40,19 @@ def validate_create_l3vpn_form(
         # the VPN's customer AS from customer_asn_pool. Only a value that is
         # present but out of range is an error.
         asn = site.get("bgp_peer_asn")
-        if proto == "ebgp" and asn is not None and not 1 <= int(asn) <= 4294967295:
-            errors.append(f"Site {site['name']}: bgp_peer_asn must be between 1 and 4294967295.")
+        if proto == "ebgp" and asn is not None:
+            # Coerce defensively: this function's contract is to RETURN errors,
+            # so a non-numeric value (empty string from a JSON payload, a typo
+            # from a non-Streamlit caller) must be reported, not raised.
+            try:
+                asn_value = int(asn)
+            except (TypeError, ValueError):
+                errors.append(f"Site {site['name']}: bgp_peer_asn must be a number (got {asn!r}).")
+            else:
+                if not 1 <= asn_value <= 4294967295:
+                    errors.append(
+                        f"Site {site['name']}: bgp_peer_asn must be between 1 and 4294967295."
+                    )
         if proto == "static" and not site.get("static_routes"):
             errors.append(f"Site {site['name']}: static_routes required for static.")
 

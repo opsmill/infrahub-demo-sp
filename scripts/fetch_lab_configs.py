@@ -23,8 +23,15 @@ from typing import Any
 
 from infrahub_sdk import InfrahubClientSync
 
-# (device role, clab kind) -> CoreArtifactDefinition name. A role/kind pair
-# that isn't listed here has no lab-deployable config and is skipped.
+# Which kinds containerlab actually boots is decided in one place — the topology
+# transform — so this script and the rendered topology cannot disagree about
+# which devices need a startup-config.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from transforms.clab_topology import LABBED_KINDS  # noqa: E402
+
+# (device role, clab kind) -> CoreArtifactDefinition name. Every lab-deployable
+# role/kind pair needs an entry; a labbed device with no entry is an error, since
+# the topology declares a startup-config for it regardless.
 DEFINITION_BY_ROLE_AND_KIND: dict[tuple[str, str], str] = {
     ("pe", "ceos"): "pe-arista-eos-config",
     ("pe", "srl"): "pe-nokia-srlinux-config",
@@ -100,17 +107,32 @@ def main() -> int:
     client = InfrahubClientSync()
 
     written = 0
+    missing: list[str] = []
     for role in LAB_ROLES:
         devices = client.filters(kind="DcimDevice", role__value=role, prefetch_relationships=True)
         for device in devices:
             platform = device.platform.peer if device.platform and device.platform.peer else None
             kind = platform.containerlab_os.value if platform else None
-            definition_name = DEFINITION_BY_ROLE_AND_KIND.get((role, kind)) if kind else None
+            if kind not in LABBED_KINDS:
+                # Not lab-deployable at all: the topology transform skips it too,
+                # so no startup-config is expected for it.
+                continue
+            definition_name = DEFINITION_BY_ROLE_AND_KIND.get((role, kind))
             if not definition_name:
+                # Lab-deployable but unmapped: if the topology declares this
+                # node it also declares a startup-config for it, so silence
+                # here becomes a containerlab failure later. Say so and fail.
+                print(
+                    f"error: no artifact definition for role={role} kind={kind} "
+                    f"({device.name.value}); add it to DEFINITION_BY_ROLE_AND_KIND",
+                    file=sys.stderr,
+                )
+                missing.append(device.name.value)
                 continue
 
             content = _artifact_content(client, definition_name, device)
             if content is None:
+                missing.append(device.name.value)
                 continue
 
             out_path = out_dir / f"{device.name.value}.cfg"
@@ -118,6 +140,19 @@ def main() -> int:
             print(f"wrote {out_path}")
             written += 1
 
+    if missing:
+        # Non-zero even when some configs were written: the rendered topology
+        # names a startup-config for every node it declares, so a partial fetch
+        # makes `containerlab deploy` abort on the missing file. Failing here
+        # reports the real cause instead. A CE whose site the generator has not
+        # materialised is not in the topology at all, so this can over-report —
+        # the trade is a clear error over a cryptic containerlab one.
+        print(
+            f"error: no config written for {len(missing)} labbed device(s): "
+            f"{', '.join(sorted(missing))}",
+            file=sys.stderr,
+        )
+        return 1
     return 0 if written else 1
 
 

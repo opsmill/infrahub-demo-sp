@@ -23,16 +23,42 @@ from typing import Any
 from infrahub_sdk.generator import InfrahubGenerator
 
 from .common import (
+    DEFAULT_IP_NAMESPACE,
     allocate_asn_from_pool,
     allocate_prefix_from_pool,
     allocate_vlan_subinterface,
     find_or_create_route_target,
     next_free_physical_interface,
+    touch,
 )
 
 LOG = logging.getLogger(__name__)
 
 CUSTOMER_ASN_POOL = "customer_asn_pool"
+
+
+def _customer_namespace(site: dict[str, Any]) -> tuple[str | None, str]:
+    """Return the IP namespace of a site's customer prefix.
+
+    The customer's address space is whichever namespace their ``customer_subnet``
+    was created in — ``vrf-<vpn name>`` when the datasets or the Service Catalog
+    made it, ``default`` for a prefix created by hand. Reading it here rather
+    than deriving the name keeps the generator out of the business of owning it:
+    see the note on DEFAULT_IP_NAMESPACE in generators/common.py for what
+    happened when it did.
+
+    Args:
+        site: Site node from the GraphQL query result.
+
+    Returns:
+        A ``(namespace_id, namespace_name)`` tuple. The id is ``None`` when the
+        query returned no namespace, in which case the name is ``default`` and
+        callers fall back to filtering by that name.
+    """
+    subnet = (site.get("customer_subnet") or {}).get("node") or {}
+    namespace = (subnet.get("ip_namespace") or {}).get("node") or {}
+    name = (namespace.get("name") or {}).get("value") or DEFAULT_IP_NAMESPACE
+    return namespace.get("id"), name
 
 
 class L3VpnGenerator(InfrahubGenerator):
@@ -56,14 +82,31 @@ class L3VpnGenerator(InfrahubGenerator):
         backbone_asn = int(backbone_node["asn"]["node"]["asn"]["value"])
         backbone_as_id: str = backbone_node["asn"]["node"]["id"]
 
-        vrf = await self._ensure_vrf(vpn, backbone_asn)
+        # The VRF is bound to the namespace the customer's prefixes live in.
+        # Taken from the first site because the VRF is per VPN, while each site's
+        # own gateway is placed in that site's prefix namespace — so a VPN whose
+        # sites somehow span namespaces still produces correct per-site
+        # addressing.
+        sites = [edge["node"] for edge in vpn["sites"]["edges"]]
+        vrf_ns_id = _customer_namespace(sites[0])[0] if sites else None
+
+        vrf = await self._ensure_vrf(vpn, backbone_asn, vrf_ns_id)
         customer_as = await self._ensure_customer_as(vpn)
 
-        for site_edge in vpn["sites"]["edges"]:
-            await self._materialise_site(site_edge["node"], vrf, vpn, backbone_as_id, customer_as)
+        for site in sites:
+            await self._materialise_site(site, vrf, vpn, backbone_as_id, customer_as)
 
-    async def _ensure_vrf(self, vpn: dict[str, Any], backbone_asn: int) -> Any:
-        """Create the VRF (and its RT) if absent. Returns the VRF node."""
+    async def _ensure_vrf(
+        self, vpn: dict[str, Any], backbone_asn: int, namespace_id: str | None
+    ) -> Any:
+        """Create the VRF (and its RT) if absent. Returns the VRF node.
+
+        Args:
+            vpn: The ServiceL3Vpn node from the GraphQL query result.
+            backbone_asn: The backbone AS number, the left half of the RD/RT.
+            namespace_id: Infrahub id of the namespace holding this customer's
+                address space, or ``None`` to bind the VRF to ``default``.
+        """
         vpn_id = int(vpn["vpn_id"]["value"])
         rd = f"{backbone_asn}:{vpn_id}"
 
@@ -82,10 +125,24 @@ class L3VpnGenerator(InfrahubGenerator):
         # null and the PE template then died on `import_rt.node.name`. Re-binding
         # it here also repairs a VRF that already lost its RT that way.
         rt = await find_or_create_route_target(self.client, rd, self.branch)
+        # Re-bound on every run for the same reason the RD and RTs are: setting it
+        # only on create left an adopted VRF pointing at whatever it had, which
+        # for every VRF made before this convention was the shared `default`.
+        # Referenced by id, never saved as a node — the generator does not own
+        # the namespace (see generators/common.py).
+        namespace_ref: dict[str, Any] = (
+            {"id": namespace_id} if namespace_id else {"hfid": [DEFAULT_IP_NAMESPACE]}
+        )
         if existing_vrf:
             vrf = existing_vrf[0]
+            # Re-assert the RD for the same reason the RTs are re-asserted: it is
+            # derived from backbone_asn:vpn_id, so setting it only on create left
+            # an adopted VRF with a stale RD (or, since `vrf_rd` is optional, none
+            # at all — the PE template then rendered a literal `rd None`).
+            vrf.vrf_rd.value = rd  # type: ignore[union-attr]
             vrf.import_rt = rt
             vrf.export_rt = rt
+            vrf.namespace = namespace_ref
             await vrf.save(allow_upsert=True)
         else:
             vrf = await self.client.create(
@@ -95,7 +152,7 @@ class L3VpnGenerator(InfrahubGenerator):
                 vrf_rd=rd,
                 import_rt=rt,
                 export_rt=rt,
-                namespace={"hfid": ["default"]},
+                namespace=namespace_ref,
             )
             await vrf.save(allow_upsert=True)
 
@@ -141,8 +198,7 @@ class L3VpnGenerator(InfrahubGenerator):
             kind="RoutingAutonomousSystem", name__value=as_name, branch=self.branch
         )
         if existing:
-            customer_as = existing[0]
-            await customer_as.save(allow_upsert=True)  # touch: see module docstring
+            customer_as = await touch(existing[0])
         else:
             customer_as = await allocate_asn_from_pool(
                 self.client,
@@ -195,7 +251,7 @@ class L3VpnGenerator(InfrahubGenerator):
         cust_subnet.vrf = vrf
         await cust_subnet.save(allow_upsert=True)
 
-        await self._ensure_private_vlan(site, vpn)
+        await self._ensure_private_vlan(site, vpn, vrf)
 
         if site["routing_protocol"]["value"] == "ebgp":
             remote_as = await self._resolve_site_peer_as(site, vpn, customer_as)
@@ -280,7 +336,9 @@ class L3VpnGenerator(InfrahubGenerator):
         ce_ip = await self._ensure_ip_address(f"{net.network_address + 2}/30", vrf, None)
         return pe_ip, ce_ip
 
-    async def _ensure_ip_address(self, address: str, vrf: Any, iface: Any | None) -> Any:
+    async def _ensure_ip_address(
+        self, address: str, vrf: Any, iface: Any | None, namespace_id: str | None = None
+    ) -> Any:
         """Return the IpamIPAddress for ``address``, creating it if absent.
 
         Args:
@@ -289,20 +347,45 @@ class L3VpnGenerator(InfrahubGenerator):
             iface: Interface to attach the address to, or ``None`` to leave it
                 unattached (the CE side is attached later, once the CE port is
                 known).
+            namespace_id: Infrahub id of the namespace the address belongs to, or
+                ``None`` for the ``default`` namespace, which holds
+                provider-owned space.
 
         Returns:
             The IpamIPAddress node.
         """
+        # Both the lookup and the create are namespace-scoped. The same address
+        # string exists in as many namespaces as there are customers using that
+        # private range — that is what namespaces are for — and IpamIPAddress is
+        # unique on [address__value, ip_namespace]. An unscoped lookup returns
+        # whichever row it finds first, so it could hand back another customer's
+        # address and re-point it at this interface.
+        ns_filter: dict[str, Any] = (
+            {"ip_namespace__ids": [namespace_id]}
+            if namespace_id
+            else {"ip_namespace__name__value": DEFAULT_IP_NAMESPACE}
+        )
         existing = await self.client.filters(
-            kind="IpamIPAddress", address__value=address, branch=self.branch
+            kind="IpamIPAddress", address__value=address, branch=self.branch, **ns_filter
         )
         if existing:
             ip_address = existing[0]
+            # Re-assert the VRF and interface for the same reason the RD and RTs
+            # are re-asserted in _ensure_vrf: binding them only on create meant an
+            # address adopted from a previous run kept whatever it had. The /30 is
+            # allocated per site identifier, so it survives a change of PE port —
+            # and stayed attached to the old port, leaving the new interface with
+            # no address and PE-CE eBGP unable to come up.
+            ip_address.vrf = vrf
+            if iface is not None:
+                ip_address.interface = iface
             await ip_address.save(allow_upsert=True)  # touch: see module docstring
             return ip_address
         payload: dict[str, Any] = {"address": address, "vrf": vrf}
         if iface is not None:
             payload["interface"] = iface
+        if namespace_id:
+            payload["ip_namespace"] = {"id": namespace_id}
         ip_address = await self.client.create(kind="IpamIPAddress", branch=self.branch, **payload)
         await ip_address.save(allow_upsert=True)
         return ip_address
@@ -342,9 +425,7 @@ class L3VpnGenerator(InfrahubGenerator):
             kind="RoutingAutonomousSystem", asn__value=remote_asn, branch=self.branch
         )
         if existing:
-            override_as = existing[0]
-            await override_as.save(allow_upsert=True)  # touch: see module docstring
-            return override_as
+            return await touch(existing[0])
         remote_as = await self.client.create(
             kind="RoutingAutonomousSystem",
             branch=self.branch,
@@ -378,13 +459,18 @@ class L3VpnGenerator(InfrahubGenerator):
             ce_ip: The CE-side IpamIPAddress of the PE-CE /30.
         """
         desc = f"L3VPN PE-CE {vpn_name} {site['name']['value']}"
+        # Scoped by device, because that is what keys the node: RoutingBGPSession
+        # is unique on [device, description__value] (schemas/extensions/
+        # routing_bgp/bgp.yml), so a description alone no longer identifies one
+        # session and an unscoped lookup could adopt another router's.
         existing = await self.client.filters(
             kind="RoutingBGPSession",
             description__value=desc,
+            device__ids=[site["pe_device"]["node"]["id"]],
             branch=self.branch,
         )
         if existing:
-            await existing[0].save(allow_upsert=True)  # touch: see module docstring
+            await touch(existing[0])
             return
 
         backbone_as = await self.client.get(
@@ -439,25 +525,54 @@ class L3VpnGenerator(InfrahubGenerator):
             ce_iface: Any = await self.client.get(
                 kind="InterfacePhysical", id=ce_iface_node["id"], branch=self.branch
             )
-            ce_iface.description.value = f"To {site['pe_device']['node']['name']['value']}"
+            # Only describe the port if nothing already does. The datasets seed a
+            # richer description that names the far-end port ("To pe-01
+            # Ethernet3"); overwriting it with "To pe-01" every run discarded
+            # that detail permanently and made the rendered CE config drift from
+            # the checked-in data.
+            if not ce_iface.description.value:
+                ce_iface.description.value = f"To {site['pe_device']['node']['name']['value']}"
             await ce_iface.save(allow_upsert=True)
             ce_ip.interface = ce_iface
             await ce_ip.save(allow_upsert=True)
 
-        # The CE belongs to the customer's AS; recording it on the device keeps
-        # the CE config transform from having to infer it from a session.
+        # The CE belongs to the customer's AS; recording it on the device gives
+        # the CE config transform the AS for its single `router bgp` instance.
+        #
+        # `DcimDevice.asn` is cardinality one, so it holds exactly one AS while a
+        # CE terminating sites of two L3VPNs has two. Assigning unconditionally
+        # meant whichever site the generator processed last won, and the rendered
+        # `router bgp <asn>` then claimed that AS for both peerings — the other
+        # session came up with the wrong local AS and never established. So the
+        # first site to need it claims it, and any site whose AS differs is
+        # carried per neighbour instead: the CE template reads
+        # RoutingBGPSession.local_as and emits `local-as` for the odd ones out.
         ce_device = await self.client.get(
             kind="DcimDevice", id=ce_device_node["id"], branch=self.branch
         )
-        ce_device.asn = remote_as
-        await ce_device.save(allow_upsert=True)
+        current_as_id = getattr(ce_device.asn, "id", None)
+        if current_as_id in (None, remote_as.id):
+            ce_device.asn = remote_as
+            await ce_device.save(allow_upsert=True)
+        else:
+            LOG.info(
+                "CE %s already carries a different AS; leaving it and relying on the "
+                "per-session local AS for L3VPN %s",
+                ce_device_node["name"]["value"],
+                vpn_name,
+            )
+            await touch(ce_device)
 
         desc = f"L3VPN CE-PE {vpn_name} {site['name']['value']}"
+        # Scoped by device — see the matching lookup in _ensure_ebgp_session.
         existing = await self.client.filters(
-            kind="RoutingBGPSession", description__value=desc, branch=self.branch
+            kind="RoutingBGPSession",
+            description__value=desc,
+            device__ids=[ce_device_node["id"]],
+            branch=self.branch,
         )
         if existing:
-            await existing[0].save(allow_upsert=True)  # touch: see module docstring
+            await touch(existing[0])
             return
 
         backbone_as = await self.client.get(
@@ -478,7 +593,9 @@ class L3VpnGenerator(InfrahubGenerator):
         )
         await session.save(allow_upsert=True)
 
-    async def _ensure_private_vlan(self, site: dict[str, Any], vpn: dict[str, Any]) -> None:
+    async def _ensure_private_vlan(
+        self, site: dict[str, Any], vpn: dict[str, Any], vrf: Any
+    ) -> None:
         """Put a dot1q sub-interface carrying the customer's VLAN on the CE.
 
         The VLAN comes from the pool the VPN names in ``vlan_pool`` — one pool
@@ -489,38 +606,66 @@ class L3VpnGenerator(InfrahubGenerator):
         Skipped when the site names no ``ce_private_interface`` or the VPN names
         no ``vlan_pool``: an unmanaged CE has no private side for us to configure.
 
-        Idempotency is by parent: on a re-run the existing sub-interface is found
-        and re-saved rather than reallocated, so the VLAN is stable and the
-        tracking reaper leaves it alone (see the module docstring).
+        Idempotency is by site: on a re-run this site's existing sub-interface is
+        found and re-saved rather than reallocated, so the VLAN is stable and the
+        tracking reaper leaves it alone (see the module docstring). A database
+        written before the key became per-site has one sub-interface described
+        the old way; the first run after this change allocates the site's own and
+        the reaper removes the stale one.
 
         Args:
             site: Site node from the GraphQL query result.
             vpn: The ServiceL3Vpn node from the GraphQL query result.
+            vrf: The IpamVRF node for this L3VPN, bound to the LAN gateway address
+                so it is scoped the same way the PE-CE addresses are.
         """
         parent_node = (site.get("ce_private_interface") or {}).get("node")
         pool_node = (vpn.get("vlan_pool") or {}).get("node")
-        if not parent_node or not pool_node:
+        # `ce_device` is independently optional from `ce_private_interface`, so it
+        # has to be guarded the same way `_bind_ce_side` guards it — reaching
+        # through it unconditionally raised TypeError mid-site, after the PE port
+        # had been claimed but before `site_obj` was saved.
+        ce_device_node = (site.get("ce_device") or {}).get("node")
+        if not parent_node or not pool_node or not ce_device_node:
             return
 
         parent: Any = await self.client.get(
             kind="InterfacePhysical", id=parent_node["id"], branch=self.branch
         )
-        device_name = site["ce_device"]["node"]["name"]["value"]
+        device_name = ce_device_node["name"]["value"]
         parent_name = parent_node["name"]["value"]
 
-        # Find an existing sub-interface of this parent. Looking it up by name is
-        # circular — the name embeds the VLAN we have not allocated yet — so
-        # match on the parent instead.
+        # Find this site's sub-interface on the parent. Looking it up by name is
+        # circular — the name embeds the VLAN we have not allocated yet — so the
+        # description is the key, and it names the site.
+        #
+        # Keying on the parent alone was wrong once a CE port carries the LAN
+        # side of two services: the second site adopted the first site's
+        # sub-interface, so it kept the first customer's VLAN, its own vlan_pool
+        # was never consumed, and both customers' gateways ended up in one
+        # broadcast domain. Each site needs its own VLAN because each has its own
+        # customer_subnet and therefore its own gateway.
+        description = f"L3VPN {vpn['name']['value']} {site['name']['value']} customer VLAN"
         existing = await self.client.filters(
             kind="InterfaceVirtual",
             device__name__value=device_name,
             parent_interface__ids=[parent_node["id"]],
+            description__value=description,
             branch=self.branch,
         )
-        description = f"{parent.description.value} (customer VLAN)"
         sub: Any
         if existing:
             sub = existing[0]
+            # Repair a placeholder left behind by an interrupted allocation. The
+            # sub-interface is created as `<parent>.pending` and renamed once the
+            # pool has assigned a VLAN (see allocate_vlan_subinterface); if that
+            # second save never landed, the name stayed `.pending` and the CE
+            # template rendered `interface Ethernet2.pending`, which EOS rejects.
+            # This lookup matches on the parent, not the name, so it is the only
+            # place that can notice and fix it.
+            vlan_id = getattr(sub.dot1q_id, "value", None)
+            if str(sub.name.value).endswith(".pending") and vlan_id:
+                sub.name.value = f"{parent_name}.{int(vlan_id)}"
             await sub.save(allow_upsert=True)  # touch: see module docstring
         else:
             sub = await allocate_vlan_subinterface(
@@ -538,16 +683,40 @@ class L3VpnGenerator(InfrahubGenerator):
         # anyone whose database predates the sub-interface layout.
         subnet = ipaddress.IPv4Network(site["customer_subnet"]["node"]["prefix"]["value"])
         gateway = f"{subnet.network_address + 1}/{subnet.prefixlen}"
-        existing_ip = await self.client.filters(
-            kind="IpamIPAddress", address__value=gateway, branch=self.branch
+        own_description = f"{device_name} customer LAN gateway"
+
+        # The gateway goes in the same namespace as the prefix it belongs to, so
+        # two L3VPNs holding the identical customer subnet never meet here —
+        # IpamIPAddress is unique on [address__value, ip_namespace].
+        #
+        # What is left to guard is a collision *within* one namespace: two sites
+        # of the same VPN whose customer_subnet is the same prefix (a data error
+        # the l3vpn_site_subnet check reports). Ownership is decided by which
+        # interface the address is on, not by its description — an address with an
+        # empty or foreign description used to slip through the description test
+        # and get silently re-pointed, taking the other site's gateway with it.
+        namespace_id, namespace_name = _customer_namespace(site)
+        ns_filter: dict[str, Any] = (
+            {"ip_namespace__ids": [namespace_id]}
+            if namespace_id
+            else {"ip_namespace__name__value": DEFAULT_IP_NAMESPACE}
         )
-        gateway_ip: Any
+        existing_ip = await self.client.filters(
+            kind="IpamIPAddress", address__value=gateway, branch=self.branch, **ns_filter
+        )
         if existing_ip:
-            gateway_ip = existing_ip[0]
-        else:
-            gateway_ip = await self.client.create(
-                kind="IpamIPAddress", branch=self.branch, address=gateway
-            )
-        gateway_ip.interface = sub
-        gateway_ip.description.value = f"{device_name} customer LAN gateway"
+            attached_to = getattr(existing_ip[0].interface, "id", None)
+            if attached_to not in (None, sub.id):
+                claimed_by = str(getattr(existing_ip[0].description, "value", "") or "?")
+                raise RuntimeError(
+                    f"LAN gateway {gateway} in namespace {namespace_name} is already "
+                    f"attached to another interface ({claimed_by}). Two sites of L3VPN "
+                    f"{vpn['name']['value']} share the customer subnet {subnet}; give "
+                    f"them distinct prefixes."
+                )
+
+        # _ensure_ip_address already binds `interface` to `sub` and saves; only
+        # the description still needs writing.
+        gateway_ip = await self._ensure_ip_address(gateway, vrf, sub, namespace_id=namespace_id)
+        gateway_ip.description.value = own_description
         await gateway_ip.save(allow_upsert=True)

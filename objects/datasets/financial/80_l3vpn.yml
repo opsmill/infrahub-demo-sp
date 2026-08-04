@@ -1,4 +1,24 @@
 ---
+# One IPAM namespace per L3VPN, holding that customer's address space.
+#
+# Customer LANs are private space the customer picked, so two customers may use
+# the same prefix — IpamPrefix is unique on [prefix__value, ip_namespace], so
+# without a namespace each the second one would resolve to the first one's row
+# and the two VPNs would fight over its `vrf`. The generator binds the same
+# namespace to the VRF it creates, and puts each site's LAN gateway address in
+# it (see generators/common.py: ip_namespace_name). Provider space — the PE-CE
+# /30s from pe_ce_pool — stays in `default`.
+#
+# These must load before the prefixes below, which reference them by name.
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: IpamNamespace
+  data:
+    - {name: vrf-trading-floor-vpn, description: Customer address space for L3VPN trading-floor-vpn.}
+    - {name: vrf-ib-advisory-vpn, description: Customer address space for L3VPN ib-advisory-vpn.}
+
+---
 # Customer LAN prefixes, one per CE. These are the subnets configured on each
 # CE's Ethernet2 and advertised into the VPN over PE-CE eBGP; the generator
 # binds them to the VPN's VRF.
@@ -7,10 +27,10 @@ kind: Object
 spec:
   kind: IpamPrefix
   data:
-    - {prefix: 10.200.10.0/24, description: Trading floor LAN — London, status: active, role: public}
-    - {prefix: 10.200.20.0/24, description: Trading floor LAN — Zurich, status: active, role: public}
-    - {prefix: 10.200.30.0/24, description: Deal floor LAN — London, status: active, role: public}
-    - {prefix: 10.200.40.0/24, description: Deal floor LAN — Zurich, status: active, role: public}
+    - {prefix: 10.200.10.0/24, description: Trading floor LAN — London, status: active, role: public, ip_namespace: vrf-trading-floor-vpn}
+    - {prefix: 10.200.20.0/24, description: Trading floor LAN — Zurich, status: active, role: public, ip_namespace: vrf-trading-floor-vpn}
+    - {prefix: 10.200.30.0/24, description: Deal floor LAN — London, status: active, role: public, ip_namespace: vrf-ib-advisory-vpn}
+    - {prefix: 10.200.40.0/24, description: Deal floor LAN — Zurich, status: active, role: public, ip_namespace: vrf-ib-advisory-vpn}
 
 ---
 # Two L3VPNs, one per customer department, each with two sites on the hub PEs.
@@ -58,14 +78,14 @@ spec:
             ce_device: ce-trading-lon
             ce_interface: ["ce-trading-lon", "Ethernet1"]
             ce_private_interface: ["ce-trading-lon", "Ethernet2"]
-            customer_subnet: ["10.200.10.0/24", "default"]
+            customer_subnet: ["10.200.10.0/24", "vrf-trading-floor-vpn"]
             routing_protocol: ebgp
           - name: trading-zurich
             pe_device: pe-08
             ce_device: ce-trading-zrh
             ce_interface: ["ce-trading-zrh", "Ethernet1"]
             ce_private_interface: ["ce-trading-zrh", "Ethernet2"]
-            customer_subnet: ["10.200.20.0/24", "default"]
+            customer_subnet: ["10.200.20.0/24", "vrf-trading-floor-vpn"]
             routing_protocol: ebgp
 
     - name: ib-advisory-vpn
@@ -88,12 +108,12 @@ spec:
             ce_device: ce-ib-lon
             ce_interface: ["ce-ib-lon", "Ethernet1"]
             ce_private_interface: ["ce-ib-lon", "Ethernet2"]
-            customer_subnet: ["10.200.30.0/24", "default"]
+            customer_subnet: ["10.200.30.0/24", "vrf-ib-advisory-vpn"]
             routing_protocol: ebgp
           - name: ib-zurich
             pe_device: pe-08
             ce_device: ce-ib-zrh
             ce_interface: ["ce-ib-zrh", "Ethernet1"]
             ce_private_interface: ["ce-ib-zrh", "Ethernet2"]
-            customer_subnet: ["10.200.40.0/24", "default"]
+            customer_subnet: ["10.200.40.0/24", "vrf-ib-advisory-vpn"]
             routing_protocol: ebgp

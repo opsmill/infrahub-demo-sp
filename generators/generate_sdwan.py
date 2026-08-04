@@ -14,7 +14,7 @@ from typing import Any
 
 from infrahub_sdk.generator import InfrahubGenerator
 
-from .common import find_or_create_device
+from .common import DEFAULT_IP_NAMESPACE, find_or_create_device
 
 LOG = logging.getLogger(__name__)
 
@@ -48,8 +48,6 @@ class SdwanGenerator(InfrahubGenerator):
             name__value=edge_group_name,
             branch=self.branch,
         )
-        await group.members.fetch()
-        existing_member_ids = {p.id for p in group.members.peers}
 
         edges_to_add: list[str] = []
         for site_edge in svc["sites"]["edges"]:
@@ -59,14 +57,17 @@ class SdwanGenerator(InfrahubGenerator):
                 platform=platform,
                 device_type=device_type,
             )
-            if edge.id not in existing_member_ids:
-                edges_to_add.append(edge.id)
-                existing_member_ids.add(edge.id)
+            edges_to_add.append(edge.id)
 
         if edges_to_add:
-            for edge_id in edges_to_add:
-                group.members.add(edge_id)
-            await group.save(allow_upsert=True)
+            # RelationshipAdd, not a read-modify-write of `members`. Saving the
+            # group would re-send its whole member list as a replacement, and
+            # the list is only ever one fetched page — every member outside that
+            # page would be dropped from the group, which for the SD-WAN edge
+            # groups means silently unbinding other services' edge devices from
+            # their artifact definitions. Adding is idempotent server-side, so
+            # re-running needs no membership diff of our own.
+            await group.add_relationships(relation_to_update="members", related_nodes=edges_to_add)
 
         svc_obj = await self.client.get(kind="ServiceSdwan", id=svc["id"], branch=self.branch)
         svc_obj.status.value = "active"  # type: ignore[union-attr]
@@ -109,8 +110,15 @@ class SdwanGenerator(InfrahubGenerator):
 
         net = ipaddress.IPv4Network(site["lan_subnet"]["node"]["prefix"]["value"])
         lan_addr = f"{net.network_address + 1}/{net.prefixlen}"
+        # Pinned to the provider namespace. SD-WAN LAN addresses are provider
+        # space, while each L3VPN's customer space now has a namespace of its own,
+        # so an unscoped lookup on the address alone could return an L3VPN
+        # customer's LAN gateway and rebind it as this site's lan_address.
         existing_ip = await self.client.filters(
-            kind="IpamIPAddress", address__value=lan_addr, branch=self.branch
+            kind="IpamIPAddress",
+            address__value=lan_addr,
+            ip_namespace__name__value=DEFAULT_IP_NAMESPACE,
+            branch=self.branch,
         )
         if existing_ip:
             lan_ip = existing_ip[0]

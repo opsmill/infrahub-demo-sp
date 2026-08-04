@@ -10,9 +10,45 @@
 {# PE-CE eBGP peer AS for an L3VPN site node. The site's `bgp_peer_asn` is an
    optional per-site override; otherwise the VPN's `customer_asn` applies,
    which the generator allocates from `customer_asn_pool`. Mirrors
-   _resolve_site_peer_as in generators/generate_l3vpn.py. #}
+   _resolve_site_peer_as in generators/generate_l3vpn.py.
+
+   Tested with `is not none`, not truthiness: the generator decides whether to
+   allocate a customer AS with `... is None`, so it treats bgp_peer_asn 0 as an
+   override and links no `customer_asn`. An `or` here would disagree, fall
+   through to the absent customer_asn, and abort the whole artifact render on
+   UndefinedError. #}
 {% macro peer_asn(site) -%}
-{{ site.bgp_peer_asn.value or site.l3vpn.node.customer_asn.node.asn.value }}
+{% if site.bgp_peer_asn.value is not none -%}
+{{ site.bgp_peer_asn.value }}
+{%- else -%}
+{{ site.l3vpn.node.customer_asn.node.asn.value }}
+{%- endif %}
+{%- endmacro %}
+
+{# Shared cEOS lab access block: hostname, the demo admin user, eAPI over plain
+   HTTP, and SSH. Identical on a PE and a CE — `invoke lab.push-arista` pushes to
+   both over the same eAPI, so both need the same credentials and the same
+   management settings. Kept here rather than duplicated per template so the demo
+   secret and the HTTP-vs-HTTPS choice have exactly one home. #}
+{% macro eos_lab_access(device) -%}
+hostname {{ device.name.value }}
+!
+! Demo-only: admin user so the lab cEOS container accepts SSH password
+! auth and `invoke lab.push-arista` can reach it. Replace before any
+! non-local use.
+username admin privilege 15 role network-admin secret 0 admin
+!
+management api http-commands
+   no shutdown
+   ! Demo-only: enable plain HTTP so `invoke lab.push-arista` can POST
+   ! without negotiating cEOS-lab's auto-generated self-signed cert
+   ! against modern Python TLS. Disable for any non-local use.
+   protocol http
+   no protocol https
+!
+management ssh
+   no shutdown
+!
 {%- endmacro %}
 
 {# Filter interfaces by role. #}

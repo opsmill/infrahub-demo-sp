@@ -29,7 +29,16 @@ query L3Vpn($name: String!) {
               ce_device { node { id name { value } } }
               ce_interface { node { id name { value } } }
               ce_private_interface { node { id name { value } } }
-              customer_subnet { node { id prefix { value } } }
+              # `ip_namespace` comes back so the generator can put this site's
+              # LAN gateway in the same namespace as the prefix it belongs to,
+              # and bind the VRF to it, without owning the namespace itself.
+              customer_subnet {
+                node {
+                  id
+                  prefix { value }
+                  ip_namespace { node { id name { value } } }
+                }
+              }
             }
           }
         }

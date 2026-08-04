@@ -98,13 +98,9 @@ if submitted:
         # `l3vpns` is the target group the `generate_l3vpn` generator runs
         # against. Membership is added *after* the sites exist (below) so the
         # group-membership trigger fires the generator with complete data.
-        # Fetch with the `members` relationship included: RelationshipManager
-        # .add() raises UninitializedError unless the relationship has been
-        # loaded, so an un-included get() would make the members.add() below
-        # crash the whole catalog flow.
-        l3vpns_group = run_async(
-            client.get(kind="CoreStandardGroup", name__value="l3vpns", include=["members"])
-        )
+        # Fetched without `include=["members"]` on purpose: the add below is a
+        # RelationshipAdd mutation, which needs only the group's id.
+        l3vpns_group = run_async(client.get(kind="CoreStandardGroup", name__value="l3vpns"))
 
         vpn = run_async(
             client.create(
@@ -119,6 +115,22 @@ if submitted:
         run_async(vpn.save())
         vpn_id = int(vpn.vpn_id.value)
 
+        # One IPAM namespace per VPN holds this customer's address space, so two
+        # services may request the same private prefix without resolving to the
+        # same IpamPrefix row and fighting over its VRF. The generator binds this
+        # same namespace to the VRF it creates and puts each site's LAN gateway
+        # in it. The name mirrors generators.common.ip_namespace_name, spelled
+        # out here because this Streamlit app cannot import from generators/ —
+        # keep the two in step.
+        customer_ns = run_async(
+            client.create(
+                kind="IpamNamespace",
+                name=f"vrf-{name}",
+                description=f"Customer address space for L3VPN {name}.",
+            )
+        )
+        run_async(customer_ns.save(allow_upsert=True))
+
         for s in sites:
             cust = run_async(
                 client.create(
@@ -126,9 +138,14 @@ if submitted:
                     prefix=s["customer_subnet"],
                     status="active",
                     role="public",
+                    ip_namespace=customer_ns,
                 )
             )
-            run_async(cust.save())
+            # allow_upsert: IpamPrefix is unique on [prefix__value, ip_namespace],
+            # so two sites of this VPN naming the same subnet would otherwise
+            # raise here — after the branch and the VPN row were already created,
+            # leaving a half-built branch behind.
+            run_async(cust.save(allow_upsert=True))
             site_obj = run_async(
                 client.create(
                     kind="ServiceL3VpnSite",
@@ -147,8 +164,17 @@ if submitted:
         # membership change fires the `trigger-l3vpn-generator` group trigger
         # (objects/events/00_triggers.yml), which runs generate_l3vpn on this
         # branch against the complete VPN+sites data.
-        l3vpns_group.members.add(vpn.id)
-        run_async(l3vpns_group.save())
+        #
+        # RelationshipAdd rather than `members.add()` + `save()`: saving the
+        # group re-sends its entire member list as a replacement, and the loaded
+        # list is a single page, so every VPN beyond that page would be dropped
+        # from the group on this branch — and merging the proposed change would
+        # carry the removals to main, leaving those services with nothing to
+        # regenerate them. The server emits the same GroupMemberAdded event
+        # either way, so the trigger still fires.
+        run_async(
+            l3vpns_group.add_relationships(relation_to_update="members", related_nodes=[vpn.id])
+        )
 
         # Wait for the L3VPN generator (fired by the group-membership trigger
         # above) to materialize the VRF / interfaces / IPs before triggering
@@ -159,8 +185,24 @@ if submitted:
             return v.status.value == "active"
 
         deadline = time.monotonic() + 120
-        while not _is_active() and time.monotonic() < deadline:
+        generated = _is_active()
+        while not generated and time.monotonic() < deadline:
             time.sleep(2)
+            generated = _is_active()
+        if not generated:
+            # The generator is no longer part of the proposed-change pipeline
+            # (`execute_in_proposed_change: false`), so there is no second
+            # chance: if the group trigger never fired, the branch holds only
+            # the VPN rows and the proposed change will show no config diff.
+            # Say so here rather than reporting success on an empty change.
+            st.warning(
+                "The L3VPN generator did not finish within 120s, so the VRF, "
+                "PE-CE addressing and eBGP sessions may be missing and the "
+                "proposed change may show no config diff. Check that "
+                "`trigger-l3vpn-generator` exists (objects/events/00_triggers.yml "
+                "is loaded by `invoke bootstrap`) and see the task-worker logs: "
+                "`docker compose -p sp-demo logs task-worker --tail 200`."
+            )
 
         # Trigger artifact regeneration on the branch so the proposed change
         # shows real per-PE config diffs. Infrahub doesn't automatically

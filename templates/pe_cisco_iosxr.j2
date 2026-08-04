@@ -80,6 +80,20 @@ router isis 1
  address-family ipv6 unicast
   metric-style wide
  !
+{# IS-IS must run on the loopback, not just the core links, or the /32 is never
+   advertised and the iBGP mesh — which peers loopback-to-loopback via
+   `update-source Loopback0` — never leaves Active. Passive: there is no IS-IS
+   neighbour to find on a loopback, we only want its prefix in the LSDB. Every
+   other vendor template already does this (`interface lo0.0` on Junos,
+   `passive true` on SR Linux, `interface "system" { passive }` on SR OS); IOS-XR
+   was the one that was missed. #}
+{% for iface in device.interfaces.edges if iface.node.name.value == 'Loopback0' %}
+ interface {{ m.iosxr_iface(iface.node.name.value) }}
+  passive
+  address-family ipv4 unicast
+  !
+ !
+{% endfor %}
 {% for iface in device.interfaces.edges if iface.node.role.value == 'core' %}
  interface {{ m.iosxr_iface(iface.node.name.value) }}
   point-to-point

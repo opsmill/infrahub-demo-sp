@@ -17,6 +17,7 @@ queries:
   - {name: clab_topology, file_path: queries/topology/clab.gql}
   - {name: l3vpn_overlap, file_path: queries/validation/l3vpn_overlap.gql}
   - {name: l3vpn_site_subnet, file_path: queries/validation/l3vpn_site_subnet.gql}
+  - {name: l3vpn_peer_asn_range, file_path: queries/validation/l3vpn_peer_asn_range.gql}
   - {name: pe_interface_alloc, file_path: queries/validation/pe_interface_alloc.gql}
   - {name: backbone_session_count, file_path: queries/validation/backbone_session_count.gql}
   - {name: sdwan, file_path: queries/service/sdwan.gql}
@@ -94,10 +95,11 @@ generator_definitions:
   # generate_l3vpn: execute_in_proposed_change: false — do NOT run it inside the
   # proposed-change CI pipeline. In the pipeline it races the artifact
   # validators (they render before the generator materializes the VRF/IPs, so
-  # the PC shows no config diff). Instead it is fired by a group-membership
-  # trigger (objects/events/00_triggers.yml) the moment a ServiceL3Vpn is added
-  # to the l3vpns group on the branch, so the data lands before artifacts
-  # render. Bootstrap still runs it explicitly via scripts/run_generator.py.
+  # the PC shows no config diff). Instead it is fired by two trigger rules in
+  # objects/events/00_triggers.yml — one when a ServiceL3Vpn is added to the
+  # l3vpns group, one when a site is added to an already-grouped service — so
+  # the data lands before artifacts render. Bootstrap still runs it explicitly
+  # via scripts/run_generator.py.
   - name: generate_l3vpn
     file_path: generators/generate_l3vpn.py
     targets: l3vpns
@@ -119,6 +121,7 @@ generator_definitions:
 check_definitions:
   - {name: l3vpn_overlap, class_name: L3VpnOverlapCheck, file_path: checks/l3vpn_overlap.py, targets: l3vpns}
   - {name: l3vpn_site_subnet, class_name: L3VpnSiteSubnetCheck, file_path: checks/l3vpn_site_subnet.py, targets: l3vpns}
+  - {name: l3vpn_peer_asn_range, class_name: L3VpnPeerAsnRangeCheck, file_path: checks/l3vpn_peer_asn_range.py, targets: l3vpns}
   - {name: pe_interface_alloc, class_name: PeInterfaceAllocCheck, file_path: checks/pe_interface_alloc.py, targets: pes}
   - {name: backbone_session_count, class_name: BackboneSessionCountCheck, file_path: checks/backbone_session_count.py, targets: pes}
   - {name: sdwan_id_overlap, class_name: SdwanIdOverlapCheck, file_path: checks/sdwan_id_overlap.py, targets: sdwans}

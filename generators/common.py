@@ -10,6 +10,50 @@ from typing import Any, cast
 
 from infrahub_sdk.client import InfrahubClient
 
+# Provider-owned address space (PE-CE /30s, SD-WAN LAN addresses, every pool in
+# objects/50_pools.yml) lives here.
+#
+# Customer space does not: each L3VPN's customer prefixes are created in a
+# namespace of their own, named `vrf-<vpn name>`, because IpamPrefix and
+# IpamIPAddress are unique on [value, ip_namespace] and two customers may
+# legitimately use the same private prefix — the financial and isp datasets each
+# hand 10.200.10.0/24 to a different customer. That namespace is created by
+# whoever creates the prefix (the datasets declare it, the Service Catalog and
+# scripts/smoke_create_l3vpn.py create it inline); the L3VPN generator only
+# *reads* it, off the site's own customer_subnet.
+#
+# The generator deliberately does not create or re-save it. Generators run under
+# `delete_unused_nodes=True`, so every node they save joins their tracking group
+# and any run that then fails to save it makes the reaper delete it — for a
+# namespace that still holds live customer prefixes the delete fails, and the
+# whole generator run dies on an unreadable IpamNamespaceDelete GraphQL error.
+# Observed on a live server. Reading the namespace keeps it out of that set.
+DEFAULT_IP_NAMESPACE = "default"
+
+
+async def touch(node: Any) -> Any:
+    """Re-save a node the generator owns so the tracking reaper keeps it.
+
+    Generators run inside ``start_tracking(..., delete_unused_nodes=True)``: any
+    node a previous run created that this run does not save is treated as unused
+    and deleted. Adopting an existing node and returning it without a save is
+    therefore not a no-op — it orphans the node, and the next run finds it gone.
+    Every "found it, reuse it" path has to end here.
+
+    Exists so that invariant has one name and one place instead of a
+    hand-written ``save(allow_upsert=True)`` at each adopt site; forgetting one
+    is what made ``invoke bootstrap`` destructive on a populated database. See
+    the module docstring of generators/generate_l3vpn.py.
+
+    Args:
+        node: The Infrahub node to re-save unchanged.
+
+    Returns:
+        The same node, so callers can ``return await touch(existing[0])``.
+    """
+    await node.save(allow_upsert=True)
+    return node
+
 
 async def allocate_prefix_from_pool(
     client: InfrahubClient,
@@ -98,11 +142,7 @@ async def find_or_create_route_target(
     """Return the IpamRouteTarget with this name, creating it if absent."""
     rt = await client.filters(kind="IpamRouteTarget", name__value=name, branch=branch)
     if rt:
-        # Touch it: generators run under `delete_unused_nodes=True`, so an
-        # existing node returned without a save is reaped as orphaned. See the
-        # module docstring of generators/generate_l3vpn.py.
-        await rt[0].save(allow_upsert=True)
-        return rt[0]
+        return await touch(rt[0])
     obj = await client.create(kind="IpamRouteTarget", branch=branch, name=name)
     await obj.save(allow_upsert=True)
     return obj
@@ -164,10 +204,9 @@ async def find_or_create_device(
     """
     existing = await client.filters(kind="DcimDevice", name__value=name, branch=branch)
     if existing:
-        # Touch it — see find_or_create_route_target above. Without this the
-        # SD-WAN edge devices are deleted on the generator's second run.
-        await existing[0].save(allow_upsert=True)
-        return existing[0]
+        # Without the touch the SD-WAN edge devices are deleted on the
+        # generator's second run.
+        return await touch(existing[0])
     device = await client.create(
         kind="DcimDevice",
         branch=branch,

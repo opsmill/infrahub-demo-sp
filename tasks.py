@@ -291,15 +291,21 @@ def _render_repo_file(c: Context, ref: str) -> Path:
             )
     else:
         # The server clones over HTTPS, so an unpushed local branch is invisible
-        # to it and the sync fails with a bare "couldn't find remote ref".
+        # to it and the sync fails with a bare "couldn't find remote ref". Probe
+        # the URL the server will actually clone, not the contributor's `origin`:
+        # on a fork those differ, so probing `origin` reports a branch that is
+        # present on the fork but absent from the repository being registered.
+        location = spec["spec"]["data"][0]["location"]
         probe = c.run(
-            f"git ls-remote --exit-code --heads origin {shlex.quote(ref)}", hide=True, warn=True
+            f"git ls-remote --exit-code --heads {shlex.quote(location)} {shlex.quote(ref)}",
+            hide=True,
+            warn=True,
         )
         if not probe.ok:
             _wait(
-                f"Ref '{ref}' is not on origin — the server clones over HTTPS and will not "
-                f"find it. Push the branch, or set INFRAHUB_GIT_LOCAL=true to mount the "
-                f"working tree instead."
+                f"Ref '{ref}' is not on {location} — the server clones that URL over HTTPS "
+                f"and will not find it. Push the branch there, or set "
+                f"INFRAHUB_GIT_LOCAL=true to mount the working tree instead."
             )
     return RENDERED_REPO_FILE
 
@@ -627,18 +633,37 @@ def lab_push_arista(c: Context) -> None:
     if not ceos_nodes:
         _wait("No cEOS nodes in the topology; nothing to push.")
         return
+    # Keep going past a node that fails. push_arista.py exits non-zero when a
+    # node never becomes ready, and letting invoke raise on the first one left
+    # every remaining node unconfigured — the opposite of what you want when
+    # twelve cEOS containers are still settling. Failures are reported at the
+    # end instead, the same way a missing config is.
+    failed: list[str] = []
+    pushed = 0
     for node_name in ceos_nodes:
         cfg = LAB_DEVICES_DIR / f"{node_name}.cfg"
         if not cfg.exists():
             _wait(f"No config at {cfg.relative_to(REPO_ROOT)}; run `invoke lab.deploy` first.")
+            failed.append(node_name)
             continue
         host = f"clab-{lab_name}-{node_name}"
         _step(f"Pushing {cfg.relative_to(REPO_ROOT)} → {host}")
-        c.run(
+        result = c.run(
             f"uv run python scripts/push_arista.py {shlex.quote(str(cfg))} {shlex.quote(host)}",
             pty=True,
+            warn=True,
         )
-    _success("Config(s) pushed")
+        if result.ok:
+            pushed += 1
+        else:
+            failed.append(node_name)
+    if failed:
+        _wait(
+            f"Pushed {pushed}/{len(ceos_nodes)} node(s); failed: {', '.join(sorted(failed))}. "
+            f"Re-run `invoke lab.push-arista` once they finish booting."
+        )
+        return
+    _success(f"Config pushed to {pushed} node(s)")
 
 
 lab.add_task(lab_deploy)

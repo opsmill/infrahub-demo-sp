@@ -1,4 +1,21 @@
 ---
+# The IPAM namespace holding this customer's address space. Kestrel Bank's
+# branch LANs are the same 10.200.x.0/24 prefixes the financial dataset gives to
+# its own customers, which is exactly why they need a namespace of their own:
+# IpamPrefix is unique on [prefix__value, ip_namespace]. The generator binds this
+# namespace to the VRF and puts each site's LAN gateway in it (see
+# generators/common.py: ip_namespace_name). Provider space — the PE-CE /30s from
+# pe_ce_pool — stays in `default`.
+#
+# Must load before the prefixes below, which reference it by name.
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: IpamNamespace
+  data:
+    - {name: vrf-kestrel-bank-mpls, description: Customer address space for L3VPN kestrel-bank-mpls.}
+
+---
 # Customer-facing prefixes for the Kestrel Bank L3VPN.
 # These represent the LAN behind each branch CE; the generator binds them
 # to the VPN's VRF.
@@ -7,15 +24,24 @@ kind: Object
 spec:
   kind: IpamPrefix
   data:
-    - {prefix: 10.200.10.0/24, description: Kestrel Bank — London branch LAN, status: active, role: public}
-    - {prefix: 10.200.20.0/24, description: Kestrel Bank — Frankfurt branch LAN, status: active, role: public}
-    - {prefix: 10.200.30.0/24, description: Kestrel Bank — Amsterdam branch LAN, status: active, role: public}
-    - {prefix: 10.200.40.0/24, description: Kestrel Bank — Paris branch LAN, status: active, role: public}
+    - {prefix: 10.200.10.0/24, description: Kestrel Bank — London branch LAN, status: active, role: public, ip_namespace: vrf-kestrel-bank-mpls}
+    - {prefix: 10.200.20.0/24, description: Kestrel Bank — Frankfurt branch LAN, status: active, role: public, ip_namespace: vrf-kestrel-bank-mpls}
+    - {prefix: 10.200.30.0/24, description: Kestrel Bank — Amsterdam branch LAN, status: active, role: public, ip_namespace: vrf-kestrel-bank-mpls}
+    - {prefix: 10.200.40.0/24, description: Kestrel Bank — Paris branch LAN, status: active, role: public, ip_namespace: vrf-kestrel-bank-mpls}
 
 ---
 # ServiceL3Vpn + 4 branch sites (one per PE). Joining the l3vpns group
 # fires generate_l3vpn, which materialises the VRF, RTs, PE-CE /30
 # allocations, and PE-CE eBGP sessions.
+#
+# `bgp_peer_asn` is seeded here (this dataset peers with a pre-agreed customer
+# AS rather than one issued from a pool) and sits deliberately OUTSIDE
+# customer_asn_pool's 65100-65199 range — see objects/50_pools.yml. The
+# generator creates this AS with an explicit value, so the pool never records
+# it; a seeded value inside the range would later be handed out to a different
+# customer and rejected on RoutingAutonomousSystem's unique `asn`. The
+# l3vpn_peer_asn_range check enforces that, so moving this number into the range
+# now fails the proposed change instead of a generator run.
 apiVersion: infrahub.app/v1
 kind: Object
 spec:
@@ -37,21 +63,21 @@ spec:
         data:
           - name: london-branch
             pe_device: pe-lon-arista
-            customer_subnet: ["10.200.10.0/24", "default"]
+            customer_subnet: ["10.200.10.0/24", "vrf-kestrel-bank-mpls"]
             routing_protocol: ebgp
-            bgp_peer_asn: 65101
+            bgp_peer_asn: 65001
           - name: frankfurt-branch
             pe_device: pe-fra-cisco
-            customer_subnet: ["10.200.20.0/24", "default"]
+            customer_subnet: ["10.200.20.0/24", "vrf-kestrel-bank-mpls"]
             routing_protocol: ebgp
-            bgp_peer_asn: 65101
+            bgp_peer_asn: 65001
           - name: amsterdam-branch
             pe_device: pe-ams-juniper
-            customer_subnet: ["10.200.30.0/24", "default"]
+            customer_subnet: ["10.200.30.0/24", "vrf-kestrel-bank-mpls"]
             routing_protocol: ebgp
-            bgp_peer_asn: 65101
+            bgp_peer_asn: 65001
           - name: paris-branch
             pe_device: pe-par-nokia
-            customer_subnet: ["10.200.40.0/24", "default"]
+            customer_subnet: ["10.200.40.0/24", "vrf-kestrel-bank-mpls"]
             routing_protocol: ebgp
-            bgp_peer_asn: 65101
+            bgp_peer_asn: 65001

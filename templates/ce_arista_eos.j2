@@ -22,21 +22,7 @@
 !
 ! Arista EOS configuration for {{ device.name.value }} (customer edge)
 !
-hostname {{ device.name.value }}
-!
-! Demo-only: admin user so the lab cEOS container accepts SSH password auth.
-! Replace before any non-local use.
-username admin privilege 15 role network-admin secret 0 admin
-!
-management api http-commands
-   no shutdown
-   ! Demo-only: plain HTTP, see pe_arista_eos.j2.
-   protocol http
-   no protocol https
-!
-management ssh
-   no shutdown
-!
+{{ m.eos_lab_access(device) }}
 ip routing
 !
 {# The CE is not VPN-aware: no MPLS, no VRFs, no LDP. It sees a plain routed
@@ -76,7 +62,16 @@ interface {{ iface.name.value }}
 !
 {% endfor %}
 {% if sessions %}
-router bgp {{ device.asn.node.asn.value }}
+{# EOS runs one BGP instance per device, so one AS has to be the instance's.
+   `device.asn` is it — the first L3VPN site to need it claims it (see
+   _bind_ce_side). A CE that terminates sites of two L3VPNs has a second
+   customer AS, which is carried per neighbour below rather than by a second
+   instance. Falling back to the first session's local AS keeps a CE whose
+   `asn` was never set from rendering `router bgp None`. #}
+{% set base_as = device.asn.node.asn.value
+     if device.asn is defined and device.asn and device.asn.node
+     else sessions[0].node.local_as.node.asn.value %}
+router bgp {{ base_as }}
 {% for iface in device.interfaces.edges if iface.node.name.value == 'Loopback0' %}
 {% for ip in iface.node.ip_addresses.edges %}
    router-id {{ m.ip_only(ip.node.address.value) }}
@@ -86,6 +81,12 @@ router bgp {{ device.asn.node.asn.value }}
 {% set session = session_edge.node %}
    ! {{ session.description.value }}
    neighbor {{ m.ip_only(session.remote_ip.node.address.value) }} remote-as {{ session.remote_as.node.asn.value }}
+{% if session.local_as is defined and session.local_as and session.local_as.node
+      and session.local_as.node.asn.value != base_as %}
+   ! This site's customer AS differs from the instance AS above, so it is
+   ! announced per neighbour. replace-as strips the instance AS from the path.
+   neighbor {{ m.ip_only(session.remote_ip.node.address.value) }} local-as {{ session.local_as.node.asn.value }} no-prepend replace-as
+{% endif %}
    neighbor {{ m.ip_only(session.remote_ip.node.address.value) }} maximum-routes 12000
 {% endfor %}
    !

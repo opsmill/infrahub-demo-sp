@@ -12,7 +12,6 @@ from generators.generate_sdwan import SdwanGenerator
 def _make_gen(
     payload: dict,
     *,
-    existing_members: list | None = None,
     existing_ip: list | None = None,
 ) -> tuple[SdwanGenerator, MagicMock]:
     """Build a SdwanGenerator with a mocked client primed by ``payload``.
@@ -20,14 +19,14 @@ def _make_gen(
     Idempotency is derived from deterministic keys via ``client.filters`` (the
     edge by name inside ``find_or_create_device``; the LAN IP by address) rather
     than the query payload. ``existing_ip`` controls what the IpamIPAddress
-    lookup returns; ``existing_members`` what the edge group already contains.
+    lookup returns.
+
+    The group mock exposes ``add_relationships`` and no usable ``save``: group
+    membership is written with a RelationshipAdd mutation, which needs neither
+    the member list fetched nor the group saved.
     """
     client = MagicMock()
-    group = MagicMock(
-        members=MagicMock(fetch=AsyncMock(), peers=existing_members or [], add=MagicMock()),
-        save=AsyncMock(),
-        id="group-id",
-    )
+    group = MagicMock(add_relationships=AsyncMock(), save=AsyncMock(), id="group-id")
 
     def get_side_effect(**kwargs: object) -> MagicMock:
         kind = kwargs.get("kind")
@@ -175,6 +174,28 @@ async def test_existing_lan_address_reused_and_touched() -> None:
         c for c in client.create.await_args_list if c.kwargs.get("kind") == "IpamIPAddress"
     )
     existing_lan_ip.save.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_group_membership_is_added_not_replaced() -> None:
+    """Edges join the group via RelationshipAdd, never by saving the group.
+
+    Saving the group re-sends its whole member list as a replacement, and the
+    loaded list is a single page — so every edge device beyond that page would
+    be unbound from the group, and with it from the artifact definition that
+    targets the group.
+    """
+    payload = _svc_payload(sites=[_site(name="london"), _site(name="paris")])
+    gen, client = _make_gen(payload)
+    with patch("generators.generate_sdwan.find_or_create_device", new=AsyncMock()) as foc:
+        foc.side_effect = [MagicMock(id="edge-lon"), MagicMock(id="edge-par")]
+        await gen.generate()
+
+    group = await client.get(kind="CoreStandardGroup", name__value="sdwan_viptela_edges")
+    group.add_relationships.assert_awaited_once_with(
+        relation_to_update="members", related_nodes=["edge-lon", "edge-par"]
+    )
+    group.save.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -429,3 +429,67 @@ def test_lan_host_name_cannot_be_confused_with_the_ce() -> None:
     assert _lan_host_name("ce-trading-lon") == "cust-trading-lon"
     # A CE not following the ce- convention still gets an unambiguous name.
     assert _lan_host_name("branch-router-7") == "cust-branch-router-7"
+
+
+@pytest.mark.asyncio
+async def test_one_host_per_ce_lan_port_even_when_two_sites_share_it() -> None:
+    """A CE LAN port carries one cable, so it gets exactly one host.
+
+    Two sites naming the same `ce_private_interface` used to emit two hosts, both
+    wired to the same `<ce>:<port>` endpoint. containerlab rejects an endpoint
+    that appears in two links, so the whole lab failed to deploy — and the two
+    hosts were handed the same IP as well.
+    """
+    fixture = _fixture_with_sites()
+    duplicate = copy.deepcopy(fixture["ServiceL3VpnSite"]["edges"][0])
+    duplicate["node"]["name"]["value"] = "london-second-vpn"
+    fixture["ServiceL3VpnSite"]["edges"].append(duplicate)
+
+    parsed = yaml.safe_load(await ClabTopology.__new__(ClabTopology).transform(fixture))
+
+    hosts = [n for n in parsed["topology"]["nodes"] if n.startswith("cust-")]
+    assert hosts.count("cust-trading-lon") == 1
+    assert not [n for n in hosts if n.startswith("cust-trading-lon-")], hosts
+    endpoints = [ep for link in parsed["topology"]["links"] for ep in link["endpoints"]]
+    assert len(endpoints) == len(set(endpoints)), f"duplicate clab endpoint: {endpoints}"
+
+
+@pytest.mark.asyncio
+async def test_two_lan_ports_on_one_ce_still_get_a_host_each() -> None:
+    """Distinct LAN ports are distinct cables, so each keeps its own host."""
+    fixture = _fixture_with_sites()
+    second = copy.deepcopy(fixture["ServiceL3VpnSite"]["edges"][0])
+    second["node"]["name"]["value"] = "london-second-lan"
+    second["node"]["ce_private_interface"] = {"node": {"name": {"value": "Ethernet3"}}}
+    fixture["ServiceL3VpnSite"]["edges"].append(second)
+    fixture["InterfaceVirtual"]["edges"].append(
+        _subif("ce-trading-lon", 101, "10.200.11.1/24", parent="Ethernet3")
+    )
+
+    parsed = yaml.safe_load(await ClabTopology.__new__(ClabTopology).transform(fixture))
+
+    hosts = [n for n in parsed["topology"]["nodes"] if n.startswith("cust-trading-lon")]
+    assert len(hosts) == 2, hosts
+    endpoints = [ep for link in parsed["topology"]["links"] for ep in link["endpoints"]]
+    assert len(endpoints) == len(set(endpoints)), f"duplicate clab endpoint: {endpoints}"
+
+
+def test_lan_host_address_stays_inside_small_prefixes() -> None:
+    """The .10 offset only applies when the prefix is big enough to hold it.
+
+    Adding it blindly walked out of any prefix shorter than a /28, so the host
+    landed in a different network and `ip route replace default via <gateway>`
+    failed with "Network is unreachable".
+    """
+    import ipaddress
+
+    from transforms.clab_topology import _lan_host_address
+
+    assert str(_lan_host_address(ipaddress.ip_network("10.0.0.0/24"))) == "10.0.0.10"
+    assert str(_lan_host_address(ipaddress.ip_network("10.0.0.0/28"))) == "10.0.0.10"
+    # Falls back to the last usable address rather than leaving the prefix.
+    assert str(_lan_host_address(ipaddress.ip_network("10.0.0.0/29"))) == "10.0.0.6"
+    assert str(_lan_host_address(ipaddress.ip_network("10.0.0.0/30"))) == "10.0.0.2"
+    # No room beside the .1 gateway at all.
+    assert _lan_host_address(ipaddress.ip_network("10.0.0.0/31")) is None
+    assert _lan_host_address(ipaddress.ip_network("10.0.0.1/32")) is None

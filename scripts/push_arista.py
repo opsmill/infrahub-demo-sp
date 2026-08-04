@@ -92,6 +92,25 @@ def _post(host: str, cmds: list[str], timeout: int = HTTP_TIMEOUT_SECONDS) -> di
     return body
 
 
+def _error_message(error: object) -> str:
+    """Return a human-readable message from a JSON-RPC ``error`` member.
+
+    JSON-RPC mandates an object with ``code``/``message``, and Arista eAPI
+    conforms — but this runs against whatever answers on port 80 of a booting
+    container, so a string or list body must not raise ``AttributeError`` from
+    the caller's ``else:`` clause, which sits outside its ``try``.
+
+    Args:
+        error: The ``error`` member of a decoded JSON-RPC body.
+
+    Returns:
+        The ``message`` field when present, else the error rendered as text.
+    """
+    if isinstance(error, dict):
+        return str(error.get("message", error))
+    return str(error)
+
+
 def _wait_for_eapi_ready(host: str) -> None:
     """Block until the node's routing agent answers a read-only probe.
 
@@ -112,17 +131,17 @@ def _wait_for_eapi_ready(host: str) -> None:
         else:
             if "error" not in body:
                 return
-            last = str(body["error"].get("message", body["error"]))
+            last = _error_message(body["error"])
         time.sleep(READY_POLL_INTERVAL_SECONDS)
     raise TimeoutError(
         f"{host} eAPI never became ready within {READY_TIMEOUT_SECONDS}s "
         f"(last: {last}). The node is probably still booting its agents — "
-        f"check `docker logs clab-…-{host.split('-')[-1]}`."
+        f"check `docker logs {host}`."
     )
 
 
 def _strip_comments_and_blanks(text: str) -> list[str]:
-    """Drop bang/hash comments, empty lines, and CLI session markers.
+    """Drop bang comments, empty lines, and CLI session markers.
 
     cEOS's eAPI ``runCmds`` rejects ``!`` comments and blank lines because
     they aren't real commands. The CLI accepts them as no-ops; eAPI is
@@ -165,9 +184,9 @@ def main(config_path: str, host: str) -> int:
     body = _post(host, ["enable", "configure", *commands, "write memory"])
     if "error" in body:
         err = body["error"]
-        message = err.get("message", "unknown")
+        message = _error_message(err)
         # data carries per-command results; surface the failing one.
-        bad_index = err.get("data", [{}])[-1] if err.get("data") else {}
+        bad_index = err.get("data", [{}])[-1] if isinstance(err, dict) and err.get("data") else {}
         print(
             f"eAPI error: {message}\nlast result: {bad_index}",
             file=sys.stderr,

@@ -170,7 +170,15 @@ def pe_fixture_with_site(name: str, loopback: str, net_id: str) -> dict:
         "name": {"value": "lon"},
         "l3vpn": {"node": l3vpn_node},
         "pe_interface": {"node": {"name": {"value": "Ethernet4"}}},
-        "customer_subnet": {"value": "192.168.1.0/24"},
+        # Relationship, not a flat attribute — queries/config/pe.gql returns
+        # `customer_subnet { node { prefix { value } vrf { node { name { value } } } } }`,
+        # so a `{"value": ...}` shape here would be one the server cannot produce.
+        "customer_subnet": {
+            "node": {
+                "prefix": {"value": "192.168.1.0/24"},
+                "vrf": {"node": {"name": {"value": "acme-prod"}}},
+            }
+        },
         "pe_address": {"node": {"address": {"value": "10.100.0.1/30"}}},
         "ce_address": {"node": {"address": {"value": "10.100.0.2/30"}}},
         "routing_protocol": {"value": "ebgp"},

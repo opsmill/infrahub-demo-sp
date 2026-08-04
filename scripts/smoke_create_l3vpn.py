@@ -15,13 +15,26 @@ async def main() -> None:
     )
     vpn_id_pool = await client.get(kind="CoreNumberPool", name__value="vpn_id_pool")
 
+    # Customer prefixes live in a namespace per VPN, the same way the catalog
+    # creates them (service_catalog/pages/1_Create_L3VPN.py) and the generator
+    # expects them (generators/common.py: ip_namespace_name). Creating this
+    # prefix in `default` instead would leave it outside the namespace the
+    # generator puts the LAN gateway in.
+    customer_ns = await client.create(
+        kind="IpamNamespace",
+        name="vrf-smoketest-vpn",
+        description="Customer address space for L3VPN smoketest-vpn.",
+    )
+    await customer_ns.save(allow_upsert=True)
+
     cust = await client.create(
         kind="IpamPrefix",
         prefix="192.168.1.0/24",
         status="active",
         role="public",
+        ip_namespace=customer_ns,
     )
-    await cust.save()
+    await cust.save(allow_upsert=True)
 
     vpn = await client.create(
         kind="ServiceL3Vpn",

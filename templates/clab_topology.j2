@@ -60,7 +60,13 @@ topology:
    CE, CE port, and generator-allocated PE port are all present and
    lab-deployable. They boot the same way the PEs do — from a rendered config
    artifact — so the PE-CE eBGP session actually comes up in the lab. #}
-{% for attachment in ce_attachments %}
+{# Declared once per CE, not once per attachment: a CE terminating two sites
+   appears in `ce_attachments` twice, and a repeated mapping key is a duplicate
+   YAML key that containerlab will not accept. Links below still need one entry
+   per attachment, so only the node declaration is deduplicated. #}
+{% set declared_ces = [] %}
+{% for attachment in ce_attachments if attachment.ce.device not in declared_ces %}
+{% set _ = declared_ces.append(attachment.ce.device) %}
     {{ attachment.ce.device }}:
       kind: {{ attachment.ce.kind }}
       startup-config: devices/{{ attachment.ce.device }}.cfg

@@ -300,6 +300,7 @@ class ServiceL3Vpn(CoreNode):
     sites: RelationshipManager
     subscriber_of_groups: RelationshipManager
     tenant: RelatedNode
+    vlan_pool: RelatedNode
     vrf: RelatedNode
 
 
@@ -312,6 +313,7 @@ class ServiceL3VpnSite(CoreNode):
     ce_address: RelatedNode
     ce_device: RelatedNode
     ce_interface: RelatedNode
+    ce_private_interface: RelatedNode
     customer_subnet: RelatedNode
     l3vpn: RelatedNode
     member_of_groups: RelationshipManager
@@ -975,7 +977,6 @@ class ProfileRoutingBGPPeerGroup(LineageSource, CoreProfile, CoreNode):
 
 
 class ProfileRoutingBGPSession(LineageSource, CoreProfile, CoreNode):
-    description: StringOptional
     export_policies: StringOptional
     import_policies: StringOptional
     local_pref: IntegerOptional
@@ -984,7 +985,6 @@ class ProfileRoutingBGPSession(LineageSource, CoreProfile, CoreNode):
     role: DropdownOptional
     session_type: DropdownOptional
     status: DropdownOptional
-    device: RelatedNode
     local_as: RelatedNode
     local_ip: RelatedNode
     member_of_groups: RelationshipManager
@@ -1019,6 +1019,7 @@ class ProfileServiceL3Vpn(LineageSource, CoreProfile, CoreNode):
     related_nodes: RelationshipManager
     subscriber_of_groups: RelationshipManager
     tenant: RelatedNode
+    vlan_pool: RelatedNode
     vrf: RelatedNode
 
 
@@ -1032,6 +1033,7 @@ class ProfileServiceL3VpnSite(LineageSource, CoreProfile, CoreNode):
     ce_address: RelatedNode
     ce_device: RelatedNode
     ce_interface: RelatedNode
+    ce_private_interface: RelatedNode
     customer_subnet: RelatedNode
     member_of_groups: RelationshipManager
     pe_address: RelatedNode

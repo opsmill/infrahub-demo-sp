@@ -1,0 +1,28 @@
+# Data for the l3vpn_peer_asn_range check: the customer ASN pool's bounds, and
+# every per-site bgp_peer_asn override to compare against them.
+query L3VpnPeerAsnRange {
+  CoreNumberPool(name__value: "customer_asn_pool") {
+    edges {
+      node {
+        name { value }
+        start_range { value }
+        end_range { value }
+      }
+    }
+  }
+  ServiceL3Vpn {
+    edges {
+      node {
+        name { value }
+        sites {
+          edges {
+            node {
+              name { value }
+              bgp_peer_asn { value }
+            }
+          }
+        }
+      }
+    }
+  }
+}
