@@ -127,3 +127,8 @@ omit = ["tests/*", "scripts/*"]
 
 [tool.coverage.report]
 fail_under = 70
+
+[dependency-groups]
+dev = [
+    "infrahub-testcontainers==1.11.0b1",
+]
