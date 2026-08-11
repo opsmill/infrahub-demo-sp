@@ -10,7 +10,36 @@ from typing import Any
 
 import streamlit as st
 from utils import client_for, run_async
-from utils.validators import validate_create_l3vpn_form
+from utils.validators import l3vpn_is_materialised, validate_create_l3vpn_form
+
+# Fields the generator writes per site, read back to tell "finished" from
+# "started". Requested by name so it works on the service branch, where the VPN
+# has just been created.
+GENERATOR_PROGRESS_QUERY = """
+query L3VpnProgress($name: String!) {
+  ServiceL3Vpn(name__value: $name) {
+    edges {
+      node {
+        status { value }
+        customer_asn { node { id } }
+        sites {
+          edges {
+            node {
+              routing_protocol { value }
+              bgp_peer_asn { value }
+              pe_interface { node { id } }
+              pe_address { node { id } }
+              ce_address { node { id } }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+# How many consecutive materialised readings end the wait. See the poll loop.
+REQUIRED_STABLE_PASSES = 2
 
 st.title("Create L3VPN")
 
@@ -180,16 +209,38 @@ if submitted:
         # above) to materialize the VRF / interfaces / IPs before triggering
         # artifact rendering, otherwise downstream artifacts render against
         # stale data and the proposed change shows no diff against main.
-        def _is_active() -> bool:
-            v = run_async(client.get(kind="ServiceL3Vpn", name__value=name))
-            return v.status.value == "active"
+        #
+        # The gate is the generator's per-site OUTPUT, not ServiceL3Vpn.status:
+        # status flips to `active` while the VRF is being built, before any site
+        # is touched, so waiting on it returned immediately and let everything
+        # below run against a service with no PE ports, no /30s and no eBGP
+        # sessions. See utils.validators.l3vpn_is_materialised.
+        def _materialised() -> bool:
+            result = run_async(
+                client.execute_graphql(
+                    query=GENERATOR_PROGRESS_QUERY,
+                    variables={"name": name},
+                    branch_name=branch_name,
+                )
+            )
+            edges = (result.get("ServiceL3Vpn") or {}).get("edges") or []
+            node = edges[0]["node"] if edges else None
+            return l3vpn_is_materialised(node, expected_sites=len(sites))
 
+        # Two consecutive passes, not one. Adding the VPN to the group is not the
+        # only event that dispatches this generator — creating each site fires it
+        # too (objects/events/00_triggers.yml) — so several runs are in flight at
+        # once and a single observation can catch a complete state that a
+        # still-running sibling is about to rewrite. Requiring the check to hold
+        # across a poll interval means the last run has settled before the
+        # artifacts below are rendered from it.
         deadline = time.monotonic() + 120
-        generated = _is_active()
-        while not generated and time.monotonic() < deadline:
-            time.sleep(2)
-            generated = _is_active()
-        if not generated:
+        stable = 0
+        while stable < REQUIRED_STABLE_PASSES and time.monotonic() < deadline:
+            stable = stable + 1 if _materialised() else 0
+            if stable < REQUIRED_STABLE_PASSES:
+                time.sleep(3)
+        if stable < REQUIRED_STABLE_PASSES:
             # The generator is no longer part of the proposed-change pipeline
             # (`execute_in_proposed_change: false`), so there is no second
             # chance: if the group trigger never fired, the branch holds only
@@ -197,7 +248,7 @@ if submitted:
             # Say so here rather than reporting success on an empty change.
             st.warning(
                 "The L3VPN generator did not finish within 120s, so the VRF, "
-                "PE-CE addressing and eBGP sessions may be missing and the "
+                "PE-CE addressing and eBGP sessions may be incomplete and the "
                 "proposed change may show no config diff. Check that "
                 "`trigger-l3vpn-generator` exists (objects/events/00_triggers.yml "
                 "is loaded by `invoke bootstrap`) and see the task-worker logs: "

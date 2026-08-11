@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from service_catalog.utils.validators import (
+    l3vpn_is_materialised,
     validate_create_l3vpn_form,
     validate_create_sdwan_form,
 )
@@ -226,3 +227,111 @@ def test_sdwan_happy_path() -> None:
         sites=_ok_sdwan_sites(),
     )
     assert errors == []
+
+
+def _materialised_site(
+    *,
+    proto: str = "ebgp",
+    asn: int | None = None,
+    pe_interface: bool = True,
+    pe_address: bool = True,
+    ce_address: bool = True,
+) -> dict:
+    """Build a site node shaped like the generator-progress query result.
+
+    Args:
+        proto: ``routing_protocol`` value.
+        asn: Per-site ``bgp_peer_asn`` override, or ``None`` to use the pool.
+        pe_interface: Whether the generator has bound the PE port yet.
+        pe_address: Whether the PE-side address exists yet.
+        ce_address: Whether the CE-side address exists yet.
+
+    Returns:
+        A single site edge node.
+    """
+    return {
+        "routing_protocol": {"value": proto},
+        "bgp_peer_asn": {"value": asn},
+        "pe_interface": {"node": {"id": "iface-1"} if pe_interface else None},
+        "pe_address": {"node": {"id": "ip-1"} if pe_address else None},
+        "ce_address": {"node": {"id": "ip-2"} if ce_address else None},
+    }
+
+
+def _materialised_vpn(
+    sites: list[dict] | None = None,
+    *,
+    status: str = "active",
+    customer_asn: bool = True,
+) -> dict:
+    """Build a ServiceL3Vpn node shaped like the generator-progress query result.
+
+    Args:
+        sites: Site nodes from :func:`_materialised_site`.
+        status: ``ServiceL3Vpn.status`` value.
+        customer_asn: Whether a pool-allocated customer AS is linked.
+
+    Returns:
+        A ServiceL3Vpn node dict.
+    """
+    return {
+        "status": {"value": status},
+        "customer_asn": {"node": {"id": "as-1"} if customer_asn else None},
+        "sites": {"edges": [{"node": s} for s in (sites or [_materialised_site()])]},
+    }
+
+
+def test_materialised_when_every_site_is_complete() -> None:
+    vpn = _materialised_vpn([_materialised_site(), _materialised_site()])
+    assert l3vpn_is_materialised(vpn, expected_sites=2)
+
+
+def test_active_status_alone_is_not_materialised() -> None:
+    """The regression this predicate exists for.
+
+    The generator sets status to `active` while building the VRF, before it
+    touches a site. A gate on status alone returned True here and let the caller
+    render artifacts and open a proposed change against a service with no PE
+    port, no PE-CE addressing and no eBGP session.
+    """
+    incomplete = _materialised_site(pe_interface=False, pe_address=False, ce_address=False)
+    vpn = _materialised_vpn([incomplete, incomplete])
+    assert not l3vpn_is_materialised(vpn, expected_sites=2)
+
+
+def test_missing_pe_address_is_not_materialised() -> None:
+    vpn = _materialised_vpn([_materialised_site(), _materialised_site(pe_address=False)])
+    assert not l3vpn_is_materialised(vpn, expected_sites=2)
+
+
+def test_partial_site_set_is_not_materialised() -> None:
+    """An early run sees only the sites that existed when it started.
+
+    Creating each site emits its own event, so a run can complete against one
+    site of a two-site request and populate everything for it. Counting the
+    sites is what stops that from reading as finished.
+    """
+    vpn = _materialised_vpn([_materialised_site()])
+    assert not l3vpn_is_materialised(vpn, expected_sites=2)
+
+
+def test_pool_asn_still_pending_is_not_materialised() -> None:
+    vpn = _materialised_vpn([_materialised_site(), _materialised_site()], customer_asn=False)
+    assert not l3vpn_is_materialised(vpn, expected_sites=2)
+
+
+def test_site_asn_override_needs_no_customer_asn() -> None:
+    """Every eBGP site naming its own peer AS means the pool is never consulted."""
+    sites = [_materialised_site(asn=65501), _materialised_site(asn=65501)]
+    assert l3vpn_is_materialised(_materialised_vpn(sites, customer_asn=False), expected_sites=2)
+
+
+def test_non_ebgp_site_needs_no_ce_address() -> None:
+    """A static or connected site has no PE-CE peering, so no CE-side address."""
+    sites = [_materialised_site(proto="connected", ce_address=False)] * 2
+    assert l3vpn_is_materialised(_materialised_vpn(sites, customer_asn=False), expected_sites=2)
+
+
+def test_missing_vpn_is_not_materialised() -> None:
+    """The query can return no match while the branch is still settling."""
+    assert not l3vpn_is_materialised(None, expected_sites=2)

@@ -1,4 +1,4 @@
-"""Pure-Python validators for catalog form submissions."""
+"""Pure-Python validators for catalog form submissions and generator results."""
 
 from __future__ import annotations
 
@@ -147,3 +147,57 @@ def validate_create_sdwan_form(
                 errors.append(f"{name_a} subnet {net_a} overlaps {name_b} subnet {net_b}.")
 
     return errors
+
+
+def l3vpn_is_materialised(vpn_node: dict[str, Any] | None, *, expected_sites: int) -> bool:
+    """Return whether the L3VPN generator has finished with a service.
+
+    ``ServiceL3Vpn.status`` is not the answer. The generator sets it to
+    ``active`` while materialising the VRF — before it has touched a single
+    site — so a gate on status alone passes with the PE-CE addressing and the
+    eBGP sessions still missing. Everything downstream of the wait then runs on
+    a half-built branch: the artifacts render without the new VRF, and the
+    proposed change opens showing no config diff, which is the exact failure the
+    wait exists to prevent.
+
+    What this looks at instead is the per-site output, which the generator writes
+    last: every site must carry the PE port and the PE-side address, an eBGP site
+    must also carry the CE-side address, and a VPN with any eBGP site that
+    declined to name its own ``bgp_peer_asn`` must have had a ``customer_asn``
+    allocated from the pool.
+
+    ``expected_sites`` is checked too, because the generator can legitimately run
+    against an incomplete service: creating each site emits its own event, so an
+    early run sees only the sites that existed when it started, completes, and
+    leaves every field this function inspects populated for those sites alone.
+
+    Args:
+        vpn_node: The ServiceL3Vpn node from a GraphQL query, or ``None`` when
+            the query matched nothing.
+        expected_sites: Number of sites the request asked for.
+
+    Returns:
+        True when the generator has produced everything the artifacts need.
+    """
+    if not vpn_node or (vpn_node.get("status") or {}).get("value") != "active":
+        return False
+
+    site_edges = (vpn_node.get("sites") or {}).get("edges") or []
+    if len(site_edges) != expected_sites:
+        return False
+
+    needs_pool_asn = False
+    for edge in site_edges:
+        site = edge["node"]
+        if not (site.get("pe_interface") or {}).get("node"):
+            return False
+        if not (site.get("pe_address") or {}).get("node"):
+            return False
+        if (site.get("routing_protocol") or {}).get("value") != "ebgp":
+            continue
+        if not (site.get("ce_address") or {}).get("node"):
+            return False
+        if (site.get("bgp_peer_asn") or {}).get("value") is None:
+            needs_pool_asn = True
+
+    return not needs_pool_asn or bool((vpn_node.get("customer_asn") or {}).get("node"))
