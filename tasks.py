@@ -11,6 +11,7 @@ from pathlib import Path
 import yaml
 from invoke.collection import Collection
 from invoke.context import Context
+from invoke.exceptions import Exit
 from invoke.tasks import task
 from rich import box
 from rich.console import Console
@@ -61,6 +62,11 @@ def _wait(msg: str) -> None:
 def _success(msg: str) -> None:
     """Print a success marker."""
     console.print(f"[green]✓[/green] {msg}")
+
+
+def _error(msg: str) -> None:
+    """Print a failure marker for a step that stops the run."""
+    console.print(f"[red]✗[/red] {msg}")
 
 
 def _sleep_with_progress(seconds: int, description: str) -> None:
@@ -271,6 +277,12 @@ def _render_repo_file(c: Context, ref: str) -> Path:
 
     Returns:
         Path to the rendered object file.
+
+    Raises:
+        Exit: If the ref is not present on the repository the server will clone.
+            A local mount is only warned about, because a stale working tree
+            still produces a usable (if outdated) clone; a missing remote ref
+            produces nothing at all.
     """
     template = GIT_REPO_DIR / ("local-dev.yml" if INFRAHUB_GIT_LOCAL else "github.yml")
     spec = yaml.safe_load(template.read_text())
@@ -302,11 +314,23 @@ def _render_repo_file(c: Context, ref: str) -> Path:
             warn=True,
         )
         if not probe.ok:
-            _wait(
+            # Abort rather than warn. Continuing is guaranteed to fail, but not
+            # for another two minutes and not with this message: the sync finds
+            # no ref, so no CoreGeneratorDefinition is ever created and bootstrap
+            # dies in scripts/run_generator.py on a timeout that says nothing
+            # about the ref. A warning here was read as advisory and scrolled
+            # past — by the time the run failed, the reason was 100 lines up.
+            # Printed through the console, not passed to Exit: invoke writes an
+            # Exit message out verbatim, so Rich markup would reach the terminal
+            # as literal "[red]" text.
+            _error(
                 f"Ref '{ref}' is not on {location} — the server clones that URL over HTTPS "
-                f"and will not find it. Push the branch there, or set "
+                f"and will not find it, so no transforms, generators or checks would be "
+                f"registered.\n"
+                f"Push the branch there, set INFRAHUB_REPO_REF to a ref that exists, or set "
                 f"INFRAHUB_GIT_LOCAL=true to mount the working tree instead."
             )
+            raise Exit(code=1)
     return RENDERED_REPO_FILE
 
 
