@@ -82,6 +82,22 @@ spec:
 # (Its re-save of unchanged nodes is safe either way — Infrahub gates node
 # events on a real diff, so a no-op save emits nothing.)
 #
+# CONCURRENT DISPATCH: this rule overlaps the group rule above during a create.
+# The Service Catalog creates the sites and then adds the VPN to the group, so a
+# two-site request emits three qualifying events and all three generator runs
+# start within milliseconds of each other. That is by design — the rules answer
+# different questions and neither can be narrowed to exclude the create — but it
+# puts two requirements on everything downstream:
+#
+#   * The generator must tolerate losing a race to a sibling run instead of
+#     failing the flow. Two runs both seeing no customer AS and both creating one
+#     used to abort two of the three flows on a uniqueness violation, leaving the
+#     service with a VRF but no PE-CE addressing (generators/generate_l3vpn.py:
+#     _allocate_customer_as).
+#   * Anything that waits for the generator must require its result to hold
+#     across two polls, because one run can still be rewriting what another just
+#     finished (service_catalog/utils/validators.py: l3vpn_is_materialised).
+#
 # KNOWN GAP: editing an existing site's own fields — customer_subnet,
 # bgp_peer_asn, ce_device — cannot fire the generator. An attribute edit on the
 # child produces no event for the parent, and a site-scoped rule cannot

@@ -12,6 +12,15 @@ is what made `invoke bootstrap` destructive on a populated database: VRFs,
 customer ASNs, PE addresses and PE-CE sessions were all reaped, while the CE
 address and PE interface survived precisely because their code paths re-saved
 them.
+
+CONCURRENT RUNS: several runs of this generator are routinely in flight for the
+same service. Creating each site and adding the VPN to the `l3vpns` group each
+emit an event, and every one of them dispatches this generator — a two-site
+Service Catalog request produces three runs within milliseconds of each other
+(objects/events/00_triggers.yml explains why both rules exist). Every
+find-or-create here therefore has to tolerate losing the race to a sibling run
+rather than aborting the flow; see `_allocate_customer_as` for the one case
+`allow_upsert` cannot cover.
 """
 
 from __future__ import annotations
@@ -20,6 +29,7 @@ import ipaddress
 import logging
 from typing import Any
 
+from infrahub_sdk.exceptions import GraphQLError
 from infrahub_sdk.generator import InfrahubGenerator
 
 from .common import (
@@ -192,15 +202,57 @@ class L3VpnGenerator(InfrahubGenerator):
         ):
             return None
 
-        vpn_name = vpn["name"]["value"]
-        as_name = f"customer-as-{vpn_name}"
+        as_name = f"customer-as-{vpn['name']['value']}"
         existing = await self.client.filters(
             kind="RoutingAutonomousSystem", name__value=as_name, branch=self.branch
         )
-        if existing:
-            customer_as = await touch(existing[0])
-        else:
-            customer_as = await allocate_asn_from_pool(
+        customer_as = (
+            await touch(existing[0]) if existing else await self._allocate_customer_as(vpn, as_name)
+        )
+
+        vpn_obj = await self.client.get(kind="ServiceL3Vpn", id=vpn["id"], branch=self.branch)
+        vpn_obj.customer_asn = customer_as
+        await vpn_obj.save(allow_upsert=True)
+        return customer_as
+
+    async def _allocate_customer_as(self, vpn: dict[str, Any], as_name: str) -> Any:
+        """Allocate the VPN's customer AS, adopting one a concurrent run just made.
+
+        The lookup-then-create in :meth:`_ensure_customer_as` is not atomic, and
+        more than one generator run is routinely in flight for the same service:
+        creating each site and adding the VPN to the ``l3vpns`` group each emit
+        an event, and every one of them dispatches this generator (see
+        objects/events/00_triggers.yml). Two runs can therefore both see no AS
+        and both try to create one.
+
+        ``allow_upsert`` cannot resolve that — ``RoutingAutonomousSystem``'s HFID
+        is ``[asn__value, name__value]`` and the pool issues a fresh ``asn`` on
+        every attempt, so the HFID never matches and the server rejects the
+        combination outright (see generators/common.py:allocate_asn_from_pool).
+        The loser of the race has to adopt the winner's row instead.
+
+        Re-reading after the failure is what distinguishes the two cases: an AS
+        that now exists under this name proves a sibling run created it, so
+        adopting it is correct and the run continues. Nothing under that name
+        means the create failed for some other reason, and that must not be
+        swallowed — losing it here is what turned a real error into an
+        L3VPN with a VRF but no PE-CE addressing and no eBGP sessions.
+
+        Args:
+            vpn: The ServiceL3Vpn node from the GraphQL query result.
+            as_name: Name to create the AS under — its natural key.
+
+        Returns:
+            The RoutingAutonomousSystem node, whether this run made it or adopted
+            it from a concurrent run.
+
+        Raises:
+            GraphQLError: If the create failed for any reason other than a
+                concurrent run having already created this AS.
+        """
+        vpn_name = vpn["name"]["value"]
+        try:
+            return await allocate_asn_from_pool(
                 self.client,
                 CUSTOMER_ASN_POOL,
                 self.branch,
@@ -208,11 +260,14 @@ class L3VpnGenerator(InfrahubGenerator):
                 organization_id=vpn["tenant"]["node"]["id"],
                 description=f"Customer AS for L3VPN {vpn_name} (PE-CE eBGP).",
             )
-
-        vpn_obj = await self.client.get(kind="ServiceL3Vpn", id=vpn["id"], branch=self.branch)
-        vpn_obj.customer_asn = customer_as
-        await vpn_obj.save(allow_upsert=True)
-        return customer_as
+        except GraphQLError:
+            raced = await self.client.filters(
+                kind="RoutingAutonomousSystem", name__value=as_name, branch=self.branch
+            )
+            if not raced:
+                raise
+            LOG.info("Adopted customer AS %s created by a concurrent run", as_name)
+            return await touch(raced[0])
 
     async def _materialise_site(
         self,

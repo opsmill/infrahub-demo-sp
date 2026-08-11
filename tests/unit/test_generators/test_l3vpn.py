@@ -6,6 +6,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from infrahub_sdk.exceptions import GraphQLError
 
 from generators.generate_l3vpn import L3VpnGenerator
 
@@ -168,6 +169,43 @@ def _creates(client: MagicMock, kind: str) -> list[Any]:
     return [c for c in client.create.await_args_list if c.kwargs.get("kind") == kind]
 
 
+def _lose_customer_as_race(client: MagicMock, *, winner: MagicMock | None) -> None:
+    """Make this run lose the customer-AS race to a concurrent generator run.
+
+    Models what the server does when two runs allocate the same named AS: the
+    second ``RoutingAutonomousSystemCreate`` is rejected, and a re-read then finds
+    the row the winner created.
+
+    Args:
+        client: The mock client from :func:`_generator`.
+        winner: The AS the concurrent run created, which the re-read should find.
+            ``None`` models a create that failed for some other reason, so the
+            re-read finds nothing and the error must propagate.
+    """
+    create_passthrough = client.create.side_effect
+    filters_passthrough = client.filters.side_effect
+
+    async def _create(**kwargs: Any) -> Any:
+        """Reject the customer-AS create the way a uniqueness violation does."""
+        if kwargs.get("kind") == "RoutingAutonomousSystem":
+            raise GraphQLError(errors=[{"message": "Violates uniqueness constraint 'name'"}])
+        return create_passthrough(**kwargs)
+
+    async def _filters(**kwargs: Any) -> list[Any]:
+        """Report the winner's AS only after this run's create has failed."""
+        if kwargs.get("kind") == "RoutingAutonomousSystem" and client.create.await_args_list:
+            failed = any(
+                c.kwargs.get("kind") == "RoutingAutonomousSystem"
+                for c in client.create.await_args_list
+            )
+            if failed and winner is not None:
+                return [winner]
+        return await filters_passthrough(**kwargs)
+
+    client.create = AsyncMock(side_effect=_create)
+    client.filters = AsyncMock(side_effect=_filters)
+
+
 def _with_ce_device(client: MagicMock, *, existing_as_id: str | None) -> MagicMock:
     """Make ``client.get`` return a CE whose ``asn`` peer is already known.
 
@@ -265,6 +303,44 @@ async def test_non_ebgp_vpn_allocates_no_customer_as() -> None:
     await gen.generate()
 
     assert not _creates(client, "RoutingAutonomousSystem")
+
+
+@pytest.mark.asyncio
+async def test_customer_as_lost_race_adopts_the_winners_as() -> None:
+    """A concurrent run's AS is adopted, and the rest of the service still builds.
+
+    Several generator runs are in flight per service create (one per site event
+    plus the group event), so two can both find no customer AS and both try to
+    create one. `allow_upsert` cannot save the loser — the pool-allocated `asn`
+    is part of the HFID — so it has to re-read and adopt. Without that, the
+    uniqueness violation aborted the whole flow and the site was left with no PE
+    port, no /30 and no eBGP session.
+    """
+    gen, client = _generator(_payload([_site()]))
+    winner_as = MagicMock(save=AsyncMock(), id="as-winner")
+    _lose_customer_as_race(client, winner=winner_as)
+
+    await gen.generate()
+
+    vpn_obj = await client.get(kind="ServiceL3Vpn", id="vpn-1")
+    assert vpn_obj.customer_asn is winner_as, "Expected the concurrent run's AS to be adopted"
+    assert winner_as.save.await_count, "Adopted AS must be touched or the reaper deletes it"
+    assert _creates(client, "IpamIPAddress"), "The site must still be materialised"
+
+
+@pytest.mark.asyncio
+async def test_customer_as_create_failure_is_not_swallowed() -> None:
+    """A create that fails for any other reason must still raise.
+
+    The adopt path keys on an AS existing afterwards, not on the error text. When
+    none does, the create failed for a real reason and hiding it would produce
+    the same silently half-built service the adopt path exists to prevent.
+    """
+    gen, client = _generator(_payload([_site()]))
+    _lose_customer_as_race(client, winner=None)
+
+    with pytest.raises(GraphQLError):
+        await gen.generate()
 
 
 @pytest.mark.asyncio
