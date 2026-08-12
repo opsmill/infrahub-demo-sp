@@ -22,7 +22,7 @@ Which PEs are deployable depends on the dataset:
 - **isp** — only the Arista and Nokia PEs have a lab-runnable image, so 2 PE
   nodes boot with the single backbone link between them.
 
-The topology is written to `lab/mpls-topology.clab.yml` by
+The topology is written to `lab/mpls-backbone.clab.yml` by
 `invoke lab.deploy` before containerlab brings it up.
 
 ---
@@ -109,7 +109,7 @@ Configuration push to the Nokia PE is therefore not available in v1 (see
 ## Deploy
 
 ```bash
-# Fetch the clab artifact from Infrahub and write lab/mpls-topology.clab.yml,
+# Fetch the clab artifact from Infrahub and write lab/mpls-backbone.clab.yml,
 # then call containerlab deploy.
 uv run invoke lab.deploy
 ```
@@ -119,8 +119,8 @@ pre-provisioned Arista cEOS CE routers, and one customer host behind each CE):
 
 ```
 [INFO] Fetching clab-mpls-topology artifact from Infrahub...
-[INFO] Writing lab/mpls-topology.clab.yml
-[INFO] Running: containerlab deploy -t lab/mpls-topology.clab.yml
+[INFO] Writing lab/mpls-backbone.clab.yml
+[INFO] Running: containerlab deploy -t lab/mpls-backbone.clab.yml
 ...
 +----+---------------------------------+-----------+---------------------------------+
 | #  | Name                            | Kind      | Image                           |
@@ -172,9 +172,22 @@ The command shows a diff of what changed. Verify with (financial default —
 substitute `pe-lon-arista` on the isp dataset):
 
 ```bash
-containerlab exec -t lab/mpls-topology.clab.yml --label clab-node-name=pe-01 \
-  --cmd "show bgp vpn-ipv4 summary"
+containerlab exec -t lab/mpls-backbone.clab.yml --label clab-node-name=pe-01 \
+  --cmd "Cli -p 15 -c 'show ip bgp summary vrf all'"
 ```
+
+`containerlab exec` runs its `--cmd` in the container, not in the EOS CLI, so
+the `Cli -p 15 -c '…'` wrapper is what gets an EOS command executed; without it
+the node answers `executable file not found in $PATH`. `show ip bgp summary vrf
+all` covers both the iBGP mesh in the default VRF and each PE-CE session in its
+customer VRF. Expect seven `Estab` neighbours in `VRF default` on every PE, plus
+one per L3VPN site on `pe-01` and `pe-08`.
+
+Note that the VPNv4 address family has no `show` command on the pinned cEOS
+4.29 image — `show bgp vpn-ipv4 summary` returns `% Not supported`. That is a
+CLI gap, not a signalling failure: the sessions carry the address family, and
+`show ip route vrf <name>` on a hub PE lists the customer prefix learned from
+its CE.
 
 ---
 
@@ -184,7 +197,10 @@ containerlab exec -t lab/mpls-topology.clab.yml --label clab-node-name=pe-01 \
 uv run invoke lab.destroy
 ```
 
-This calls `containerlab destroy` and removes the generated topology file.
+This calls `containerlab destroy` on the generated topology. The topology file
+itself is left in place — `invoke lab.status` and `invoke lab.destroy` both read
+it, so removing it would strand the lab. `invoke lab.deploy` overwrites it from
+Infrahub on the next run.
 
 ---
 
