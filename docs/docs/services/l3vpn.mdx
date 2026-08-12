@@ -86,6 +86,12 @@ sequenceDiagram
    On the target platform the artifact is pushed via the relevant `invoke`
    task (for example, `invoke lab.push-arista`).
 
+   If the merge is refused because a `Schema Integrity` validator failed while
+   every check listed below passed, see
+   [Troubleshooting](../troubleshooting.mdx#proposed-change-schema-integrity-failure-blocks-the-merge)
+   — it is an intermittent false positive, and recreating the service on a fresh
+   branch clears it.
+
 ---
 
 ## Checks

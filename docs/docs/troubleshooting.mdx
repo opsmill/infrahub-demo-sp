@@ -278,6 +278,52 @@ existing `cust`-status interface back to `free` if it was decommissioned.
 
 ---
 
+## Proposed Change: schema integrity failure blocks the merge
+
+**Symptom:** Every check the demo owns passes, every artifact validator passes,
+and the diff is correct — but the proposed change carries a failed
+`Schema Integrity` validator and merging is refused:
+
+```text
+Unable to merge proposed change containing failing checks
+```
+
+Its checks report conflicts on schema paths nothing in the change touched, most
+often:
+
+```text
+schema/IpamIPAddress/uniqueness_constraints
+schema/RoutingBGPSession/local_ip/cardinality
+schema/RoutingBGPSession/remote_ip/min_count
+```
+
+**Cause:** Not a data or schema problem in this repository. Compare the schema
+on the two branches and they are identical:
+
+```bash
+curl -s -H "X-INFRAHUB-KEY: $INFRAHUB_API_TOKEN" \
+  "$INFRAHUB_ADDRESS/api/schema?branch=main" > /tmp/main.json
+curl -s -H "X-INFRAHUB-KEY: $INFRAHUB_API_TOKEN" \
+  "$INFRAHUB_ADDRESS/api/schema?branch=<your-branch>" > /tmp/branch.json
+diff <(jq -S '.nodes[] | select(.name=="BGPSession")' /tmp/main.json) \
+     <(jq -S '.nodes[] | select(.name=="BGPSession")' /tmp/branch.json)
+```
+
+The conflicts also carry `"branch": "placeholder"` and `"id": "unknown"` rather
+than real references. Seen on Infrahub 1.10.6.
+
+**Behaviour:** intermittent, and sticky to the branch once it happens. Closing
+the proposed change and opening a new one against the *same* branch reproduces
+it exactly; a service created on a fresh branch is unaffected. Most branches
+never see it — an empty branch does not raise the validator at all.
+
+**Fix:** Recreate the service on a new branch. The catalog does that for you:
+submit the wizard again and delete the stuck branch afterwards. There is no way
+to clear the failed validator on the branch that has it, and no configuration in
+this repository influences whether it appears.
+
+---
+
 ## yamllint: line too long
 
 **Symptom:**
