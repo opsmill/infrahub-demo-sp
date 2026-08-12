@@ -11,7 +11,28 @@ from typing import Any
 import streamlit as st
 from infrahub_sdk.exceptions import GraphQLError
 from utils import client_for, run_async
-from utils.validators import validate_create_sdwan_form
+from utils.validators import sdwan_edges_awaiting_artifacts, validate_create_sdwan_form
+
+# This service's edges and the artifacts the vendor definition has rendered, in
+# one round trip. Both halves are needed together: an artifact only counts when
+# its target is one of THIS service's edges.
+SDWAN_PROGRESS_QUERY = """
+query SdwanProgress($service: String!, $definition: [ID]) {
+  ServiceSdwan(name__value: $service) {
+    edges {
+      node {
+        status { value }
+        sites {
+          edges { node { sdwan_edge { node { id name { value } } } } }
+        }
+      }
+    }
+  }
+  CoreArtifact(definition__ids: $definition) {
+    edges { node { object { node { id } } } }
+  }
+}
+"""
 
 st.title("Create SD-WAN service")
 
@@ -184,7 +205,6 @@ if submitted:
             for d in run_async(client.all(kind="CoreArtifactDefinition"))
             if d.name.value == sdwan_def_name
         )
-        expected_edge_count = len(sites)
 
         def _post_definition(def_id: str) -> None:
             url = f"{client.address}/api/artifact/generate/{def_id}?branch={branch_name}"
@@ -195,42 +215,50 @@ if submitted:
             )
             urllib.request.urlopen(request).read()
 
-        def _service_active() -> bool:
-            svc_now = run_async(client.get(kind="ServiceSdwan", name__value=name))
-            return svc_now.status.value == "active"
+        def _pending_edges() -> list[str] | None:
+            """This service's edges still missing a config, or None if not ready.
 
-        def _sdwan_artifact_count() -> int:
-            arts = run_async(client.filters(kind="CoreArtifact", definition__ids=[sdwan_def.id]))
-            return len(arts)
+            Scoped to THIS service's edges. Counting every artifact the vendor
+            definition owns compared a total against a per-service expectation:
+            the financial dataset already ships three viptela edges, so a
+            two-site request saw 3 >= 2 on its first look, broke out of the loop
+            before POSTing anything, and opened a proposed change whose new edges
+            had no rendered configuration at all.
+            """
+            result = run_async(
+                client.execute_graphql(
+                    query=SDWAN_PROGRESS_QUERY,
+                    variables={"service": name, "definition": [sdwan_def.id]},
+                    branch_name=branch_name,
+                )
+            )
+            return sdwan_edges_awaiting_artifacts(result, expected_sites=len(sites))
 
         # The PC pipeline takes a couple of minutes to start and run the
         # generator; a generous deadline keeps the wizard from giving up before
         # the configs land, with a UI-retrigger fallback on timeout.
         deadline = time.monotonic() + 420
-        generator_done = False
         last_post = 0.0
+        pending: list[str] | None = None
         while time.monotonic() < deadline:
-            if not generator_done:
-                if not _service_active():
-                    time.sleep(5)
-                    continue
-                generator_done = True
-            if _sdwan_artifact_count() >= expected_edge_count:
+            pending = _pending_edges()
+            if pending is not None and not pending:
                 break
             # Re-POST on a short cadence once the generator is done; each attempt
             # is a no-op until the vendor group's new members are committed and
             # resolvable as definition targets, after which it renders one
-            # artifact per edge.
-            if time.monotonic() - last_post > 8:
+            # artifact per edge. `None` means the generator has not finished, so
+            # there is nothing to render yet.
+            if pending is not None and time.monotonic() - last_post > 8:
                 _post_definition(sdwan_def.id)
                 last_post = time.monotonic()
             time.sleep(3)
-        else:
+        if pending is None or pending:
+            missing = ", ".join(pending) if pending else "the generator did not finish"
             st.warning(
-                f"Only {_sdwan_artifact_count()} of {expected_edge_count} "
-                f"`{sdwan_def_name}` artifacts had rendered when polling stopped. "
+                f"`{sdwan_def_name}` artifacts are missing for: {missing}. "
                 "The proposed change is open anyway — re-trigger artifact "
-                "generation from its Artifacts tab if any are missing."
+                "generation from its Artifacts tab."
             )
 
     ui_url = os.environ.get("INFRAHUB_UI_URL", "http://localhost:8000")

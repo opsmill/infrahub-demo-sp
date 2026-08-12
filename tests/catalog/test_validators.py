@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from service_catalog.utils.validators import (
     l3vpn_is_materialised,
+    sdwan_edges_awaiting_artifacts,
     validate_create_l3vpn_form,
     validate_create_sdwan_form,
 )
@@ -335,3 +336,79 @@ def test_non_ebgp_site_needs_no_ce_address() -> None:
 def test_missing_vpn_is_not_materialised() -> None:
     """The query can return no match while the branch is still settling."""
     assert not l3vpn_is_materialised(None, expected_sites=2)
+
+
+def _sdwan_progress(
+    *,
+    status: str = "active",
+    edges: list[tuple[str, str]] | None = None,
+    rendered_ids: list[str] | None = None,
+) -> dict:
+    """Build a payload shaped like the catalog's SD-WAN progress query.
+
+    Args:
+        status: ``ServiceSdwan.status`` value.
+        edges: ``(device_id, device_name)`` per site; ``None`` for a site whose
+            edge the generator has not linked yet is expressed by passing an
+            empty id.
+        rendered_ids: Device ids that already have a rendered artifact. Ids not
+            belonging to this service model the other services' artifacts that
+            the vendor definition also owns.
+
+    Returns:
+        A query-result dict.
+    """
+    edges = edges if edges is not None else [("d1", "svc-a-edge"), ("d2", "svc-b-edge")]
+    site_edges = [
+        {"node": {"sdwan_edge": {"node": ({"id": i, "name": {"value": n}} if i else None)}}}
+        for i, n in edges
+    ]
+    return {
+        "ServiceSdwan": {
+            "edges": [{"node": {"status": {"value": status}, "sites": {"edges": site_edges}}}]
+        },
+        "CoreArtifact": {
+            "edges": [{"node": {"object": {"node": {"id": i}}}} for i in (rendered_ids or [])]
+        },
+    }
+
+
+def test_sdwan_all_edges_rendered_returns_empty() -> None:
+    data = _sdwan_progress(rendered_ids=["d1", "d2"])
+    assert sdwan_edges_awaiting_artifacts(data, expected_sites=2) == []
+
+
+def test_sdwan_other_services_artifacts_do_not_count() -> None:
+    """The regression this scoping exists for.
+
+    The financial dataset ships three Viptela edges of its own. Counting every
+    artifact the definition owns made a two-site request see 3 >= 2 and stop
+    before rendering anything, so its own edges got no configuration.
+    """
+    data = _sdwan_progress(rendered_ids=["other-1", "other-2", "other-3"])
+    assert sdwan_edges_awaiting_artifacts(data, expected_sites=2) == ["svc-a-edge", "svc-b-edge"]
+
+
+def test_sdwan_partially_rendered_names_the_missing_edge() -> None:
+    data = _sdwan_progress(rendered_ids=["d1", "other-1", "other-2", "other-3"])
+    assert sdwan_edges_awaiting_artifacts(data, expected_sites=2) == ["svc-b-edge"]
+
+
+def test_sdwan_inactive_service_is_not_ready() -> None:
+    data = _sdwan_progress(status="provisioning", rendered_ids=[])
+    assert sdwan_edges_awaiting_artifacts(data, expected_sites=2) is None
+
+
+def test_sdwan_unlinked_edge_is_not_ready() -> None:
+    """Service flipped active but the generator has not attached every edge."""
+    data = _sdwan_progress(edges=[("d1", "svc-a-edge"), ("", "")], rendered_ids=["d1"])
+    assert sdwan_edges_awaiting_artifacts(data, expected_sites=2) is None
+
+
+def test_sdwan_partial_site_set_is_not_ready() -> None:
+    data = _sdwan_progress(edges=[("d1", "svc-a-edge")], rendered_ids=["d1"])
+    assert sdwan_edges_awaiting_artifacts(data, expected_sites=2) is None
+
+
+def test_sdwan_missing_service_is_not_ready() -> None:
+    assert sdwan_edges_awaiting_artifacts({"ServiceSdwan": {"edges": []}}, expected_sites=2) is None

@@ -201,3 +201,54 @@ def l3vpn_is_materialised(vpn_node: dict[str, Any] | None, *, expected_sites: in
             needs_pool_asn = True
 
     return not needs_pool_asn or bool((vpn_node.get("customer_asn") or {}).get("node"))
+
+
+def sdwan_edges_awaiting_artifacts(
+    data: dict[str, Any], *, expected_sites: int
+) -> list[str] | None:
+    """Return this service's edge names that still have no rendered artifact.
+
+    Scoped to the service's own edges on purpose. The obvious check — count the
+    artifacts belonging to the vendor's artifact definition and compare against
+    the number of sites requested — compares a global total against a per-service
+    expectation. The financial dataset ships three Viptela edges of its own, so a
+    two-site request satisfied ``3 >= 2`` on its first look, stopped before
+    triggering any rendering, and opened a proposed change whose new edges had no
+    configuration at all. Only artifacts pointing at *these* edges count.
+
+    Args:
+        data: Result of the catalog's SD-WAN progress query — the service with
+            its sites' ``sdwan_edge``, plus every artifact of the vendor
+            definition with its target object.
+        expected_sites: Number of sites the request asked for.
+
+    Returns:
+        A sorted list of edge names still awaiting an artifact (empty when every
+        edge has one), or ``None`` while the generator has yet to finish
+        materialising the service — nothing can have rendered yet, so there is
+        nothing to wait on and no point re-triggering.
+    """
+    service_edges = (data.get("ServiceSdwan") or {}).get("edges") or []
+    if not service_edges:
+        return None
+    service = service_edges[0]["node"]
+    if (service.get("status") or {}).get("value") != "active":
+        return None
+
+    site_edges = (service.get("sites") or {}).get("edges") or []
+    if len(site_edges) != expected_sites:
+        return None
+
+    expected: dict[str, str] = {}
+    for edge in site_edges:
+        device = (edge["node"].get("sdwan_edge") or {}).get("node")
+        if not device:
+            # Service is active but this site's edge has not been linked yet.
+            return None
+        expected[device["id"]] = (device.get("name") or {}).get("value") or device["id"]
+
+    rendered = {
+        ((artifact["node"].get("object") or {}).get("node") or {}).get("id")
+        for artifact in (data.get("CoreArtifact") or {}).get("edges", [])
+    }
+    return sorted(name for device_id, name in expected.items() if device_id not in rendered)
