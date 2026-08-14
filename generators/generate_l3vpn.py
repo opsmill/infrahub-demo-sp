@@ -700,6 +700,38 @@ class L3VpnGenerator(InfrahubGenerator):
             remote_ip=pe_ip,
         )
 
+    async def _is_own_subinterface(self, interface_id: str | None, description: str) -> bool:
+        """Return whether an interface is a previous sub-interface of this site.
+
+        The sub-interface lookup is scoped to the current parent port, so
+        repointing a site's ``ce_private_interface`` (Ethernet2 to Ethernet3)
+        does not find the old sub — a new one is allocated while the LAN gateway
+        is still attached to the old. The ownership guard then saw a foreign
+        interface and raised "two sites share the customer subnet" on a
+        single-site VPN. Worse, the run aborted before the reaper could remove
+        the stale sub, so every later run failed the same way: a permanent wedge
+        that only a manual detach could clear.
+
+        The site's own description identifies its previous sub, so the gateway
+        can simply be re-pointed — the migration the surrounding code intends.
+
+        Args:
+            interface_id: Infrahub id the gateway is currently attached to.
+            description: This site's sub-interface description.
+
+        Returns:
+            True when the interface is this site's, under any parent port.
+        """
+        if not interface_id:
+            return False
+        owned = await self.client.filters(
+            kind="InterfaceVirtual",
+            ids=[interface_id],
+            description__value=description,
+            branch=self.branch,
+        )
+        return bool(owned)
+
     async def _ensure_private_vlan(
         self, site: dict[str, Any], vpn: dict[str, Any], vrf: Any
     ) -> None:
@@ -817,7 +849,9 @@ class L3VpnGenerator(InfrahubGenerator):
         )
         if existing_ip:
             attached_to = getattr(existing_ip[0].interface, "id", None)
-            if attached_to not in (None, sub.id):
+            if attached_to not in (None, sub.id) and not await self._is_own_subinterface(
+                attached_to, description
+            ):
                 claimed_by = str(getattr(existing_ip[0].description, "value", "") or "?")
                 raise RuntimeError(
                     f"LAN gateway {gateway} in namespace {namespace_name} is already "

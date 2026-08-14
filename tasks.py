@@ -682,11 +682,15 @@ def lab_push_arista(c: Context) -> None:
         else:
             failed.append(node_name)
     if failed:
-        _wait(
+        # Non-zero, not just a printed warning. Keeping going past a failed node
+        # is right — the remaining eleven are still worth configuring — but
+        # exiting 0 afterwards told `invoke lab.deploy && invoke lab.push-arista
+        # && <checks>` that every router was configured when none might be.
+        _error(
             f"Pushed {pushed}/{len(ceos_nodes)} node(s); failed: {', '.join(sorted(failed))}. "
             f"Re-run `invoke lab.push-arista` once they finish booting."
         )
-        return
+        raise Exit(code=1)
     _success(f"Config pushed to {pushed} node(s)")
 
 

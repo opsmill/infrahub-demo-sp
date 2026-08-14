@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from infrahub_sdk.transforms import InfrahubTransform
-from jinja2 import Environment, FileSystemLoader, select_autoescape
+from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
 
 TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 
@@ -36,6 +36,7 @@ class PeNokiaSrLinux(InfrahubTransform):
             keep_trailing_newline=True,
             trim_blocks=True,
             lstrip_blocks=True,
+            undefined=StrictUndefined,
         )
         template = env.get_template("pe_nokia_srlinux.j2")
         return template.render(data=data)

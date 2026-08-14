@@ -141,9 +141,17 @@ configure {
                 admin-state enable
                 group "ce" {
                     admin-state enable
-                    peer-as {{ m.peer_asn(s.node) }}
+                    /* peer-as must be per-neighbour, not on the group. SR OS
+                       merges repeated paths, so two sites of this VPN on this PE
+                       land in one group whose single peer-as leaf takes the last
+                       value rendered — the other CE is then configured with the
+                       wrong AS and its OPEN is rejected. Two sites at different
+                       peer ASNs (one override, one pool-allocated) is a
+                       first-class flow here. pe_juniper_junos.j2 carries the
+                       same note for the same reason. */
                     neighbor "{{ m.ip_only(s.node.ce_address.node.address.value) }}" {
                         admin-state enable
+                        peer-as {{ m.peer_asn(s.node) }}
                     }
                 }
             }

@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import ipaddress
+import logging
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
 from infrahub_sdk.transforms import InfrahubTransform
-from jinja2 import Environment, FileSystemLoader
+from jinja2 import Environment, FileSystemLoader, StrictUndefined
+
+LOG = logging.getLogger(__name__)
 
 TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 
@@ -61,6 +64,25 @@ def _lan_host_address(network: ipaddress.IPv4Network | ipaddress.IPv6Network) ->
         return None
     offset = LAN_HOST_OFFSET if LAN_HOST_OFFSET <= usable + 1 else usable + 1
     return network.network_address + offset
+
+
+def _first_ipv4(addr_edges: list[dict[str, Any]]) -> str | None:
+    """Return the first IPv4 address among a port's addresses, or ``None``.
+
+    Args:
+        addr_edges: The ``ip_addresses`` edges of one interface.
+
+    Returns:
+        The address in CIDR form, or ``None`` when the port carries no IPv4.
+    """
+    for edge in addr_edges:
+        value = edge["node"]["address"]["value"]
+        try:
+            if ipaddress.ip_interface(value).version == 4:
+                return str(value)
+        except ValueError:
+            continue
+    return None
 
 
 def _pe_kind(pe: dict[str, Any]) -> str | None:
@@ -133,7 +155,29 @@ def _backbone_links(backbone: dict[str, Any]) -> list[dict[str, Any]]:
             addr_edges = iface.get("ip_addresses", {}).get("edges", [])
             if not addr_edges:
                 continue
-            address = addr_edges[0]["node"]["address"]["value"]
+            # Pick the IPv4 address explicitly rather than trusting edge order.
+            # `clab.gql` does not filter by family, and GraphQL edge order is not
+            # contractual: on a dual-stack core port whose v6 edge happened to
+            # come first, this port would group under its /127 while its peer
+            # grouped under the /31, both networks would hold a single endpoint,
+            # and the `len(endpoints) != 2` filter below would drop the link —
+            # partitioning the lab with nothing logged.
+            address = _first_ipv4(addr_edges)
+            if address is None:
+                LOG.warning(
+                    "Core port %s:%s carries no IPv4 address; excluded from the backbone",
+                    pe_name,
+                    iface["name"]["value"],
+                )
+                continue
+            if len(addr_edges) > 1:
+                LOG.warning(
+                    "Core port %s:%s carries %d addresses; pairing on %s",
+                    pe_name,
+                    iface["name"]["value"],
+                    len(addr_edges),
+                    address,
+                )
             network = str(ipaddress.ip_interface(address).network)
             by_network[network].append(
                 {"device": pe_name, "iface": iface["name"]["value"], "kind": kind}
@@ -177,6 +221,14 @@ def _ce_attachments(data: dict[str, Any], backbone: dict[str, Any]) -> list[dict
     # Two sites naming the same pair of ports describe one cable, and clab rejects
     # the same endpoint appearing in two links.
     seen_links: set[tuple[str, str, str, str]] = set()
+    # Each physical port is one end of one cable, so an endpoint may be claimed
+    # once even when the full four-tuple differs. It does differ: the shipped CEs
+    # have a single upstream port, so a second VPN's site on the same CE reuses
+    # it, while `_ensure_pe_interface` keys per VPN and hands that site a
+    # different PE port. Both links were emitted, `ce-…:eth1` appeared twice, and
+    # containerlab rejected the entire topology rather than the one link. Same
+    # guard as `wired_ports` in _lan_hosts.
+    claimed_ports: set[tuple[str, str]] = set()
     for edge in data.get("ServiceL3VpnSite", {}).get("edges", []):
         site = edge["node"]
         ce_device = (site.get("ce_device") or {}).get("node")
@@ -198,7 +250,17 @@ def _ce_attachments(data: dict[str, Any], backbone: dict[str, Any]) -> list[dict
         )
         if link_key in seen_links:
             continue
+        ce_port = (ce_device["name"]["value"], ce_iface["name"]["value"])
+        pe_port = (pe_device["name"]["value"], pe_iface["name"]["value"])
+        if ce_port in claimed_ports or pe_port in claimed_ports:
+            LOG.warning(
+                "Skipping PE-CE link %s:%s <-> %s:%s: an endpoint is already cabled",
+                *pe_port,
+                *ce_port,
+            )
+            continue
         seen_links.add(link_key)
+        claimed_ports.update((ce_port, pe_port))
         attachments.append(
             {
                 "ce": {
@@ -262,7 +324,12 @@ def _lan_hosts(data: dict[str, Any], attachments: list[dict[str, Any]]) -> list[
             a["node"]["address"]["value"] for a in (node.get("ip_addresses") or {}).get("edges", [])
         ]
         parent = (node.get("parent_interface") or {}).get("node")
-        if not vlan or not addresses or not parent:
+        # `is None`, not truthiness: `dot1q_id` has no schema minimum, so VLAN 0
+        # is representable, and treating it as absent would silently drop the
+        # customer host — leaving the CE LAN port with no carrier and no
+        # diagnostic. The repo's convention for exactly this is the `peer_asn`
+        # macro's `is not none`.
+        if vlan is None or not addresses or not parent:
             continue
         key = (node["device"]["node"]["name"]["value"], parent["name"]["value"])
         tagged[key] = {"vlan": vlan, "gateway": addresses[0]}
@@ -342,6 +409,7 @@ class ClabTopology(InfrahubTransform):
             keep_trailing_newline=True,
             trim_blocks=True,
             lstrip_blocks=True,
+            undefined=StrictUndefined,
         )
         template = env.get_template("clab_topology.j2")
         return template.render(

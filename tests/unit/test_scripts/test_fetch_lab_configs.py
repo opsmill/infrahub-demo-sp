@@ -11,11 +11,22 @@ import pytest
 from scripts import fetch_lab_configs
 
 
-def _device(name: str, containerlab_os: str | None) -> MagicMock:
-    """Mock a DcimDevice with the .platform.peer.containerlab_os.value shape."""
+def _device(name: str, containerlab_os: str | None, role: str | None = "pe") -> MagicMock:
+    """Mock a DcimDevice with the .platform.peer.containerlab_os.value shape.
+
+    Args:
+        name: Device name.
+        containerlab_os: The platform's lab image kind, or ``None`` for a device
+            with no platform at all.
+        role: The device role, or ``None`` to model the optional field unset.
+    """
     device = MagicMock()
     device.id = f"{name}-id"
     device.name.value = name
+    if role is None:
+        device.role = None
+    else:
+        device.role.value = role
     if containerlab_os is None:
         device.platform = None
     else:
@@ -33,21 +44,23 @@ def _client(
     devices_by_role: dict[str, list[MagicMock]],
     artifacts_by_device_id: dict[str, list[MagicMock]] | None = None,
 ) -> MagicMock:
-    """Return a client mock whose `filters` dispatches on the requested kind.
+    """Return a client mock serving devices from `all` and artifacts from `filters`.
 
-    The script queries devices once per role in ``LAB_ROLES`` and artifacts once
-    per device, so a positional `side_effect` list would break whenever the role
-    set changes. Dispatching on the call's kwargs keeps the tests stable.
+    The script enumerates every device once — selection is by platform, not by
+    role, so that it cannot disagree with the topology transform — and then
+    queries artifacts per device. `devices_by_role` still keys the fixture by
+    role because that is how the tests read, but every device is returned from
+    the single `all` call.
     """
     artifacts_by_device_id = artifacts_by_device_id or {}
     client = MagicMock()
     client.address = "http://localhost:8000"
+    every_device = [d for devices in devices_by_role.values() for d in devices]
 
     def _filters(**kwargs: Any) -> list[MagicMock]:
-        if kwargs.get("kind") == "DcimDevice":
-            return devices_by_role.get(kwargs["role__value"], [])
         return artifacts_by_device_id.get(kwargs["object__ids"][0], [])
 
+    client.all = MagicMock(return_value=every_device)
     client.filters = MagicMock(side_effect=_filters)
     client.get = MagicMock(side_effect=lambda **kw: MagicMock(id=f"defn-{kw['name__value']}"))
     return client
@@ -69,7 +82,7 @@ def test_writes_one_file_per_labbed_device(tmp_path: Path) -> None:
     """
     pe_arista = _device("pe-lon-arista", "ceos")
     pe_nokia = _device("pe-par-nokia", "srl")
-    ce = _device("ce-trading-lon", "ceos")
+    ce = _device("ce-trading-lon", "ceos", role="cpe")
     client = _client(
         devices_by_role={"pe": [pe_arista, pe_nokia], "cpe": [ce]},
         artifacts_by_device_id={
@@ -109,7 +122,7 @@ def test_ce_uses_the_ce_artifact_definition(tmp_path: Path) -> None:
     Role and clab kind together pick the definition — a CE and a PE are both
     `ceos`, so keying on the kind alone would render PE config onto the CE.
     """
-    ce = _device("ce-ib-zrh", "ceos")
+    ce = _device("ce-ib-zrh", "ceos", role="cpe")
     client = _client(
         devices_by_role={"pe": [], "cpe": [ce]},
         artifacts_by_device_id={ce.id: [_artifact("store-ce")]},
@@ -215,3 +228,31 @@ def test_missing_artifact_logs_warning(tmp_path: Path, capsys: pytest.CaptureFix
 
     assert rc == 1
     assert "no pe-nokia-srlinux-config artifact" in capsys.readouterr().err
+
+
+def test_labbed_device_with_no_role_is_still_visible(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Selection is by platform, matching the topology transform.
+
+    `role` is optional in the schema and the transform's CE gate is role-blind,
+    so a wired CE on a labbed platform with its role unset used to get a
+    startup-config entry in the topology and no fetched file — and containerlab
+    aborted on the missing mount. It must now be visible here: either fetched,
+    or reported as unmapped. Never silently skipped.
+    """
+    orphan = _device("ce-unset-role", "ceos", role=None)
+    client = _client(devices_by_role={"pe": [orphan]})
+
+    with (
+        patch.object(fetch_lab_configs, "InfrahubClientSync", return_value=client),
+        patch.dict("os.environ", {"INFRAHUB_API_TOKEN": "tok"}, clear=False),
+        patch(
+            "scripts.fetch_lab_configs.sys.argv",
+            ["fetch_lab_configs.py", "--out-dir", str(tmp_path)],
+        ),
+    ):
+        rc = fetch_lab_configs.main()
+
+    assert rc == 1
+    assert "no artifact definition for role=None" in capsys.readouterr().err

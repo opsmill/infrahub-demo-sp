@@ -185,8 +185,15 @@ def main(config_path: str, host: str) -> int:
     if "error" in body:
         err = body["error"]
         message = _error_message(err)
-        # data carries per-command results; surface the failing one.
-        bad_index = err.get("data", [{}])[-1] if isinstance(err, dict) and err.get("data") else {}
+        # data carries per-command results; surface the failing one. The guard is
+        # on `data` rather than `err`, because whatever answers on port 80 need
+        # not be a well-formed eAPI: a dict `{"reason": ...}` made `[-1]` raise
+        # KeyError and a string returned its last character, so the failure
+        # report became a traceback and the per-node summary in tasks.py lost the
+        # command that actually failed. _error_message below was hardened for the
+        # same reason.
+        data = err.get("data") if isinstance(err, dict) else None
+        bad_index = data[-1] if isinstance(data, list) and data else data or {}
         print(
             f"eAPI error: {message}\nlast result: {bad_index}",
             file=sys.stderr,

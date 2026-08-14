@@ -940,3 +940,44 @@ async def test_override_adopting_its_own_as_still_touches_it() -> None:
     await gen.generate()
 
     assert owned.save.await_count, "The generator's own AS must be touched every run"
+
+
+@pytest.mark.asyncio
+async def test_repointing_the_private_port_migrates_the_gateway() -> None:
+    """Moving a site's LAN port must not wedge the generator permanently.
+
+    The sub-interface lookup is scoped to the current parent, so after a repoint
+    the old sub is missed and a new one allocated — with the gateway still on the
+    old one. The ownership guard then raised "two sites share the customer
+    subnet" on a single-site VPN, and because the run aborted the reaper never
+    cleared the stale sub, so every later run failed identically.
+    """
+    gen, client = _generator(
+        _payload(
+            [_site(ce_device="ce-trading-lon", ce_private_interface="Ethernet3")], vlan_pool="p"
+        )
+    )
+    description = "L3VPN acme-prod trading-london customer VLAN"
+    gateway = "10.200.10.1/24"
+    old_sub = MagicMock(save=AsyncMock(), id="old-sub")
+    gateway_ip = MagicMock(save=AsyncMock())
+    gateway_ip.interface = MagicMock(id="old-sub")
+    passthrough = client.filters.side_effect
+
+    async def _filters(**kwargs: Any) -> list[Any]:
+        """The gateway sits on this site's PREVIOUS sub, under the old parent."""
+        # Only the LAN gateway — the PE-CE /30 addresses must stay distinct, or
+        # binding them re-points this very mock and the test proves nothing.
+        if kwargs.get("kind") == "IpamIPAddress" and kwargs.get("address__value") == gateway:
+            return [gateway_ip]
+        # The old sub is only findable by id, not under the new parent.
+        if kwargs.get("kind") == "InterfaceVirtual" and kwargs.get("ids") == ["old-sub"]:
+            return [old_sub] if kwargs.get("description__value") == description else []
+        if kwargs.get("kind") == "InterfaceVirtual" and "parent_interface__ids" in kwargs:
+            return []
+        return await passthrough(**kwargs)
+
+    client.filters = AsyncMock(side_effect=_filters)
+
+    # Must not raise: the gateway belongs to this very site.
+    await gen.generate()

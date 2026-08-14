@@ -38,8 +38,27 @@ DEFINITION_BY_ROLE_AND_KIND: dict[tuple[str, str], str] = {
     ("cpe", "ceos"): "ce-arista-eos-config",
 }
 
-# Device roles containerlab boots, in the order their configs are fetched.
-LAB_ROLES = ("pe", "cpe")
+# NOTE: there is deliberately no role list here. Enumerating devices by role was
+# a second, independent answer to "what does the lab boot", and the transform's
+# is role-blind — `_ce_attachments` gates on site wiring plus platform, and
+# `role` is optional in the schema. A wired CE on a labbed platform with its role
+# unset therefore got a startup-config entry in the topology and no fetched file,
+# and `containerlab deploy` aborted on the missing mount. Devices are selected
+# here by the same thing the topology selects on: whether their platform carries
+# a containerlab image.
+
+
+def _fetch_order(device: Any) -> tuple[str, str]:
+    """Sort key giving a stable fetch order: PEs first, then by name.
+
+    Args:
+        device: A DcimDevice node.
+
+    Returns:
+        A ``(role-rank, name)`` tuple.
+    """
+    role = device.role.value if device.role else None
+    return ("0" if role == "pe" else "1", str(device.name.value))
 
 
 def _artifact_content(
@@ -108,37 +127,37 @@ def main() -> int:
 
     written = 0
     missing: list[str] = []
-    for role in LAB_ROLES:
-        devices = client.filters(kind="DcimDevice", role__value=role, prefetch_relationships=True)
-        for device in devices:
-            platform = device.platform.peer if device.platform and device.platform.peer else None
-            kind = platform.containerlab_os.value if platform else None
-            if kind not in LABBED_KINDS:
-                # Not lab-deployable at all: the topology transform skips it too,
-                # so no startup-config is expected for it.
-                continue
-            definition_name = DEFINITION_BY_ROLE_AND_KIND.get((role, kind))
-            if not definition_name:
-                # Lab-deployable but unmapped: if the topology declares this
-                # node it also declares a startup-config for it, so silence
-                # here becomes a containerlab failure later. Say so and fail.
-                print(
-                    f"error: no artifact definition for role={role} kind={kind} "
-                    f"({device.name.value}); add it to DEFINITION_BY_ROLE_AND_KIND",
-                    file=sys.stderr,
-                )
-                missing.append(device.name.value)
-                continue
+    all_devices = client.all(kind="DcimDevice", prefetch_relationships=True)
+    for device in sorted(all_devices, key=_fetch_order):
+        platform = device.platform.peer if device.platform and device.platform.peer else None
+        kind = platform.containerlab_os.value if platform else None
+        if kind not in LABBED_KINDS:
+            # Not lab-deployable at all: the topology transform skips it too,
+            # so no startup-config is expected for it.
+            continue
+        role = device.role.value if device.role else None
+        definition_name = DEFINITION_BY_ROLE_AND_KIND.get((role, kind))
+        if not definition_name:
+            # Lab-deployable but unmapped: if the topology declares this
+            # node it also declares a startup-config for it, so silence
+            # here becomes a containerlab failure later. Say so and fail.
+            print(
+                f"error: no artifact definition for role={role} kind={kind} "
+                f"({device.name.value}); add it to DEFINITION_BY_ROLE_AND_KIND",
+                file=sys.stderr,
+            )
+            missing.append(device.name.value)
+            continue
 
-            content = _artifact_content(client, definition_name, device)
-            if content is None:
-                missing.append(device.name.value)
-                continue
+        content = _artifact_content(client, definition_name, device)
+        if content is None:
+            missing.append(device.name.value)
+            continue
 
-            out_path = out_dir / f"{device.name.value}.cfg"
-            out_path.write_bytes(content)
-            print(f"wrote {out_path}")
-            written += 1
+        out_path = out_dir / f"{device.name.value}.cfg"
+        out_path.write_bytes(content)
+        print(f"wrote {out_path}")
+        written += 1
 
     if missing:
         # Non-zero even when some configs were written: the rendered topology

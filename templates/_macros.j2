@@ -14,9 +14,21 @@
 
    Tested with `is not none`, not truthiness: the generator decides whether to
    allocate a customer AS with `... is None`, so it treats bgp_peer_asn 0 as an
-   override and links no `customer_asn`. An `or` here would disagree, fall
-   through to the absent customer_asn, and abort the whole artifact render on
-   UndefinedError. #}
+   override and links no `customer_asn`. An `or` here would disagree and fall
+   through to the absent customer_asn.
+
+   That fall-through aborts the render, and it does so for every shape the
+   server produces for an unset relationship — `{"node": null}`, `null`, or the
+   key absent — because attribute access on Jinja's Undefined raises whether or
+   not the Environment is strict. Only *printing* an Undefined is silent, and
+   this expression never stops at one.
+
+   The transforms do set `undefined=StrictUndefined` as well, which closes the
+   one remaining shape: a mapping that reaches `.asn` but has no `value` key
+   renders empty under the default Undefined. The server does not produce that,
+   so this is depth rather than a fix — but it also turns any mistyped path in
+   any template into a loud failure instead of a blank line in a device
+   configuration. #}
 {% macro peer_asn(site) -%}
 {% if site.bgp_peer_asn.value is not none -%}
 {{ site.bgp_peer_asn.value }}

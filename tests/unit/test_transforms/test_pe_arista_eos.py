@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import copy
+
 import pytest
+from jinja2 import UndefinedError
 
 from transforms.pe_arista_eos import PeAristaEos
 
@@ -330,3 +333,44 @@ async def test_isis_is_enabled_on_the_loopback() -> None:
     rendered = await PeAristaEos.__new__(PeAristaEos).transform(FIXTURE)
     loopback_block = rendered.split("interface Loopback0", 1)[1].split("\n!", 1)[0]
     assert "isis enable 1" in loopback_block
+
+
+@pytest.mark.asyncio
+async def test_missing_customer_asn_aborts_the_render() -> None:
+    """A site with no override and no pool AS fails loudly rather than blank.
+
+    This is the shape the server produces for an unset relationship, and it
+    raises regardless of the Environment's undefined mode — attribute access on
+    a Jinja Undefined always raises; only printing one is silent. Pinned because
+    the `peer_asn` macro's fall-through documents exactly this behaviour.
+    """
+    data = copy.deepcopy(
+        pe_fixture_with_site("pe-lon-arista", "10.0.0.1/32", "49.0001.0100.0000.0001.00")
+    )
+    site = data["ServiceL3VpnSite"]["edges"][0]["node"]
+    site["bgp_peer_asn"] = {"value": None}
+    site["l3vpn"]["node"]["customer_asn"] = {"node": None}
+
+    with pytest.raises(UndefinedError):
+        await PeAristaEos.__new__(PeAristaEos).transform(data)
+
+
+@pytest.mark.asyncio
+async def test_a_value_less_mapping_also_aborts() -> None:
+    """The one shape that would otherwise render blank is caught by StrictUndefined.
+
+    A mapping that reaches `.asn` but carries no `value` key prints as an empty
+    string under Jinja's default Undefined, which would ship `remote-as ` — a
+    line that is valid text and invalid configuration. The server does not
+    produce this shape, so `undefined=StrictUndefined` in every transform is
+    depth rather than a fix; it also makes any mistyped template path loud.
+    """
+    data = copy.deepcopy(
+        pe_fixture_with_site("pe-lon-arista", "10.0.0.1/32", "49.0001.0100.0000.0001.00")
+    )
+    site = data["ServiceL3VpnSite"]["edges"][0]["node"]
+    site["bgp_peer_asn"] = {"value": None}
+    site["l3vpn"]["node"]["customer_asn"] = {"node": {"asn": {}}}
+
+    with pytest.raises(UndefinedError):
+        await PeAristaEos.__new__(PeAristaEos).transform(data)
