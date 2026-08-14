@@ -1004,3 +1004,22 @@ async def test_two_sites_of_one_vpn_on_one_pe_are_refused() -> None:
 
     with pytest.raises(RuntimeError, match="both resolve to"):
         await gen.generate()
+
+
+@pytest.mark.asyncio
+async def test_the_service_row_is_written_once() -> None:
+    """vrf, status and customer_asn are one save on one node, not two.
+
+    Each concern used to fetch and save the ServiceL3Vpn separately, so an
+    idempotent re-run spent two round trips rewriting one row.
+    """
+    gen, client = _generator(_payload([_site()]))
+    await gen.generate()
+
+    vpn_gets = [c for c in client.get.await_args_list if c.kwargs.get("kind") == "ServiceL3Vpn"]
+    assert len(vpn_gets) == 1, "The service row should be fetched once"
+
+    vpn_obj = await client.get(kind="ServiceL3Vpn", id="vpn-1")
+    assert vpn_obj.save.await_count == 1, "and saved once"
+    assert vpn_obj.customer_asn is not None
+    assert vpn_obj.status.value == "active"

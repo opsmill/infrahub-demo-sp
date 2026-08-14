@@ -54,8 +54,10 @@ def pe_fixture(name: str, loopback: str, net_id: str) -> dict:
                                         "__typename": "InterfacePhysical",
                                         "id": "e1",
                                         # Schema convention: abstract Ethernet<N> (1-indexed).
-                                        # Per-vendor templates translate via _macros.j2
-                                        # (`iosxr_iface`, `junos_iface`, `srl_iface`).
+                                        # Per-vendor templates translate it:
+                                        # `iosxr_iface` and `junos_iface` in
+                                        # _macros.j2, `srl_iface` in
+                                        # pe_nokia_srlinux.j2.
                                         "name": {"value": "Ethernet1"},
                                         "description": {"value": "To backbone peer"},
                                         "status": {"value": "active"},
@@ -155,6 +157,9 @@ def pe_fixture_with_site(name: str, loopback: str, net_id: str) -> dict:
     l3vpn_node = {
         "name": {"value": "acme-prod"},
         "vpn_id": {"value": 100},
+        # queries/config/pe.gql selects this, so the fixture must carry it or a
+        # template that reads it would pass here and fail against the server.
+        "address_family": {"value": "ipv4"},
         "customer_asn": {"node": {"asn": {"value": 65100}}},
         "vrf": {
             "node": {

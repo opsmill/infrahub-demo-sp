@@ -72,6 +72,27 @@ def _customer_namespace(site: dict[str, Any]) -> tuple[str | None, str]:
     return namespace.get("id"), name
 
 
+def _namespace_filter(namespace_id: str | None) -> dict[str, Any]:
+    """Return the IPAM filter scoping a lookup to one customer's namespace.
+
+    Every address lookup here has to be namespace-scoped: the same address
+    string exists in as many namespaces as there are customers using that
+    private range, and IpamIPAddress is unique on [address__value,
+    ip_namespace]. An unscoped lookup returns whichever row it finds first,
+    which may be another customer's.
+
+    Args:
+        namespace_id: Infrahub id of the customer namespace, or ``None`` for the
+            provider-owned ``default`` namespace.
+
+    Returns:
+        Keyword arguments to pass to ``client.filters``.
+    """
+    if namespace_id:
+        return {"ip_namespace__ids": [namespace_id]}
+    return {"ip_namespace__name__value": DEFAULT_IP_NAMESPACE}
+
+
 class L3VpnGenerator(InfrahubGenerator):
     """Generator that materialises everything downstream of a ServiceL3Vpn row."""
 
@@ -104,22 +125,34 @@ class L3VpnGenerator(InfrahubGenerator):
         # landing on one PE would otherwise share a port. See _ensure_pe_interface.
         self._claimed_pe_ports: set[tuple[str, str]] = set()
 
-        vrf = await self._ensure_vrf(vpn, backbone_asn, vrf_ns_id)
+        # Customer AS first, so the single ServiceL3Vpn write below carries it
+        # along with the VRF and status. Fetching and saving the VPN node once
+        # per concern meant two round trips for one row.
         customer_as = await self._ensure_customer_as(vpn)
+        vrf = await self._ensure_vrf(vpn, backbone_asn, vrf_ns_id, customer_as)
 
         for site in sites:
             await self._materialise_site(site, vrf, vpn, backbone_as_id, customer_as)
 
     async def _ensure_vrf(
-        self, vpn: dict[str, Any], backbone_asn: int, namespace_id: str | None
+        self,
+        vpn: dict[str, Any],
+        backbone_asn: int,
+        namespace_id: str | None,
+        customer_as: Any | None,
     ) -> Any:
         """Create the VRF (and its RT) if absent. Returns the VRF node.
+
+        Also writes the ServiceL3Vpn row — vrf, status and customer_asn together,
+        because they are one save on one node.
 
         Args:
             vpn: The ServiceL3Vpn node from the GraphQL query result.
             backbone_asn: The backbone AS number, the left half of the RD/RT.
             namespace_id: Infrahub id of the namespace holding this customer's
                 address space, or ``None`` to bind the VRF to ``default``.
+            customer_as: The pool-allocated customer AS, or ``None`` when this
+                VPN needs none.
         """
         vpn_id = int(vpn["vpn_id"]["value"])
         rd = f"{backbone_asn}:{vpn_id}"
@@ -173,6 +206,8 @@ class L3VpnGenerator(InfrahubGenerator):
         vpn_obj = await self.client.get(kind="ServiceL3Vpn", id=vpn["id"], branch=self.branch)
         vpn_obj.vrf = vrf
         vpn_obj.status.value = "active"  # type: ignore[union-attr]
+        if customer_as is not None:
+            vpn_obj.customer_asn = customer_as
         await vpn_obj.save(allow_upsert=True)
         return vrf
 
@@ -210,14 +245,11 @@ class L3VpnGenerator(InfrahubGenerator):
         existing = await self.client.filters(
             kind="RoutingAutonomousSystem", name__value=as_name, branch=self.branch
         )
-        customer_as = (
+        # The link onto ServiceL3Vpn.customer_asn is written by _ensure_vrf,
+        # which already has that row open.
+        return (
             await touch(existing[0]) if existing else await self._allocate_customer_as(vpn, as_name)
         )
-
-        vpn_obj = await self.client.get(kind="ServiceL3Vpn", id=vpn["id"], branch=self.branch)
-        vpn_obj.customer_asn = customer_as
-        await vpn_obj.save(allow_upsert=True)
-        return customer_as
 
     async def _allocate_customer_as(self, vpn: dict[str, Any], as_name: str) -> Any:
         """Allocate the VPN's customer AS, adopting one a concurrent run just made.
@@ -440,11 +472,7 @@ class L3VpnGenerator(InfrahubGenerator):
         # unique on [address__value, ip_namespace]. An unscoped lookup returns
         # whichever row it finds first, so it could hand back another customer's
         # address and re-point it at this interface.
-        ns_filter: dict[str, Any] = (
-            {"ip_namespace__ids": [namespace_id]}
-            if namespace_id
-            else {"ip_namespace__name__value": DEFAULT_IP_NAMESPACE}
-        )
+        ns_filter = _namespace_filter(namespace_id)
         existing = await self.client.filters(
             kind="IpamIPAddress", address__value=address, branch=self.branch, **ns_filter
         )
@@ -792,9 +820,6 @@ class L3VpnGenerator(InfrahubGenerator):
         if not parent_node or not pool_node or not ce_device_node:
             return
 
-        parent: Any = await self.client.get(
-            kind="InterfacePhysical", id=parent_node["id"], branch=self.branch
-        )
         device_name = ce_device_node["name"]["value"]
         parent_name = parent_node["name"]["value"]
 
@@ -835,6 +860,12 @@ class L3VpnGenerator(InfrahubGenerator):
                 sub.name.value = f"{parent_name}.{int(vlan_id)}"
             await sub.save(allow_upsert=True)  # touch: see module docstring
         else:
+            # Fetched only here: the adopt path above needs nothing from the
+            # parent node itself, so fetching it unconditionally was a round trip
+            # spent on every idempotent re-run.
+            parent: Any = await self.client.get(
+                kind="InterfacePhysical", id=parent_node["id"], branch=self.branch
+            )
             sub = await allocate_vlan_subinterface(
                 self.client,
                 self.branch,
@@ -863,11 +894,7 @@ class L3VpnGenerator(InfrahubGenerator):
         # empty or foreign description used to slip through the description test
         # and get silently re-pointed, taking the other site's gateway with it.
         namespace_id, namespace_name = _customer_namespace(site)
-        ns_filter: dict[str, Any] = (
-            {"ip_namespace__ids": [namespace_id]}
-            if namespace_id
-            else {"ip_namespace__name__value": DEFAULT_IP_NAMESPACE}
-        )
+        ns_filter = _namespace_filter(namespace_id)
         existing_ip = await self.client.filters(
             kind="IpamIPAddress", address__value=gateway, branch=self.branch, **ns_filter
         )

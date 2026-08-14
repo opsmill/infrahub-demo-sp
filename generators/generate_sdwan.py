@@ -14,7 +14,7 @@ from typing import Any
 
 from infrahub_sdk.generator import InfrahubGenerator
 
-from .common import DEFAULT_IP_NAMESPACE, find_or_create_device
+from .common import DEFAULT_IP_NAMESPACE, find_or_create_device, touch
 
 LOG = logging.getLogger(__name__)
 
@@ -121,12 +121,8 @@ class SdwanGenerator(InfrahubGenerator):
             branch=self.branch,
         )
         if existing_ip:
-            lan_ip = existing_ip[0]
-            # Touch it. Generators run under `delete_unused_nodes=True`, so an
-            # existing node reused without a save is reaped as orphaned — the
-            # address then oscillates: deleted on one bootstrap, recreated on the
-            # next. See the module docstring of generators/generate_l3vpn.py.
-            await lan_ip.save(allow_upsert=True)
+            # See generators/common.py: touch() carries the reaper rationale.
+            lan_ip = await touch(existing_ip[0])
         else:
             lan_ip = await self.client.create(
                 kind="IpamIPAddress", branch=self.branch, address=lan_addr

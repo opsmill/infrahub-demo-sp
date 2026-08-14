@@ -4,7 +4,7 @@
 # its own customers, which is exactly why they need a namespace of their own:
 # IpamPrefix is unique on [prefix__value, ip_namespace]. The generator binds this
 # namespace to the VRF and puts each site's LAN gateway in it (see
-# generators/common.py: ip_namespace_name). Provider space — the PE-CE /30s from
+# generators/generate_l3vpn.py: _customer_namespace). Provider space — the PE-CE /30s from
 # pe_ce_pool — stays in `default`.
 #
 # Must load before the prefixes below, which reference it by name.

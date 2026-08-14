@@ -15,7 +15,12 @@ LOG = logging.getLogger(__name__)
 
 TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 
-# containerlab_os values that map to a lab-deployable container image.
+# The containerlab kinds this repo knows how to boot. A platform's
+# `containerlab_os` decides whether a device is lab-deployable *at all*, but the
+# value has to be one this lab supports: the topology template pins an image per
+# kind and scripts/fetch_lab_configs.py maps each (role, kind) to an artifact
+# definition, so a platform naming some other kind has neither. Adding a kind
+# means touching both.
 LABBED_KINDS = frozenset({"ceos", "srl"})
 
 # Host offset within the customer LAN for the simulated customer machine. The

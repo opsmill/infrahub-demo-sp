@@ -6,7 +6,7 @@
 # without a namespace each the second one would resolve to the first one's row
 # and the two VPNs would fight over its `vrf`. The generator binds the same
 # namespace to the VRF it creates, and puts each site's LAN gateway address in
-# it (see generators/common.py: ip_namespace_name). Provider space — the PE-CE
+# it (see generators/generate_l3vpn.py: _customer_namespace). Provider space — the PE-CE
 # /30s from pe_ce_pool — stays in `default`.
 #
 # These must load before the prefixes below, which reference them by name.

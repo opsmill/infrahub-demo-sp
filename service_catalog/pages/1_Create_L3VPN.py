@@ -148,9 +148,10 @@ if submitted:
         # services may request the same private prefix without resolving to the
         # same IpamPrefix row and fighting over its VRF. The generator binds this
         # same namespace to the VRF it creates and puts each site's LAN gateway
-        # in it. The name mirrors generators.common.ip_namespace_name, spelled
-        # out here because this Streamlit app cannot import from generators/ —
-        # keep the two in step.
+        # in it. The name is spelled out here because this Streamlit app cannot
+        # import from generators/; the generator does not derive it, it reads
+        # whatever namespace the prefix was made in (generate_l3vpn.py:
+        # _customer_namespace), so this is the only place the convention lives.
         customer_ns = run_async(
             client.create(
                 kind="IpamNamespace",
@@ -227,6 +228,14 @@ if submitted:
             node = edges[0]["node"] if edges else None
             return l3vpn_is_materialised(node, expected_sites=len(sites))
 
+        # Polling the data rather than the task that produced it is deliberate.
+        # infrahub_sdk 1.21 ships a Task model and a TaskFilter (branch,
+        # workflow, related_node__ids) but no client accessor for them, and this
+        # wizard never dispatches the generator anyway — a trigger rule does,
+        # server-side, so there is no task id to hold. Waiting on the output is
+        # also the stronger assertion: it is what the artifacts below actually
+        # need, whichever run produced it.
+        #
         # Two consecutive passes, not one. Adding the VPN to the group is not the
         # only event that dispatches this generator — creating each site fires it
         # too (objects/events/00_triggers.yml) — so several runs are in flight at

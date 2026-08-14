@@ -17,7 +17,7 @@ async def main() -> None:
 
     # Customer prefixes live in a namespace per VPN, the same way the catalog
     # creates them (service_catalog/pages/1_Create_L3VPN.py) and the generator
-    # expects them (generators/common.py: ip_namespace_name). Creating this
+    # expects them (generate_l3vpn.py: _customer_namespace). Creating this
     # prefix in `default` instead would leave it outside the namespace the
     # generator puts the LAN gateway in.
     customer_ns = await client.create(
