@@ -30,7 +30,7 @@ def validate_create_l3vpn_form(
     if len(sites) < 2:
         errors.append("L3VPN must have at least 2 sites.")
 
-    pes = [s["pe"] for s in sites]
+    pes = [s.get("pe") for s in sites]
     if len(pes) != len(set(pes)):
         errors.append("PE reused across multiple sites in this VPN.")
 
@@ -47,14 +47,17 @@ def validate_create_l3vpn_form(
             try:
                 asn_value = int(asn)
             except (TypeError, ValueError):
-                errors.append(f"Site {site['name']}: bgp_peer_asn must be a number (got {asn!r}).")
+                errors.append(
+                    f"Site {site.get('name', '?')}: bgp_peer_asn must be a number (got {asn!r})."
+                )
             else:
                 if not 1 <= asn_value <= 4294967295:
                     errors.append(
-                        f"Site {site['name']}: bgp_peer_asn must be between 1 and 4294967295."
+                        f"Site {site.get('name', '?')}: bgp_peer_asn must be between 1 and "
+                        f"4294967295."
                     )
         if proto == "static" and not site.get("static_routes"):
-            errors.append(f"Site {site['name']}: static_routes required for static.")
+            errors.append(f"Site {site.get('name', '?')}: static_routes required for static.")
 
     nets: list[tuple[str, ipaddress.IPv4Network]] = []
     for site in sites:
@@ -75,7 +78,7 @@ def validate_create_l3vpn_form(
                 f"use the network address (e.g. {net.with_prefixlen}).",
             )
             continue
-        nets.append((site["name"], net))
+        nets.append((site.get("name", "?"), net))
 
     for i, (n1, net1) in enumerate(nets):
         for n2, net2 in nets[i + 1 :]:

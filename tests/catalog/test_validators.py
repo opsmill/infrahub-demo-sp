@@ -412,3 +412,25 @@ def test_sdwan_partial_site_set_is_not_ready() -> None:
 
 def test_sdwan_missing_service_is_not_ready() -> None:
     assert sdwan_edges_awaiting_artifacts({"ServiceSdwan": {"edges": []}}, expected_sites=2) is None
+
+
+def test_malformed_site_is_reported_not_raised() -> None:
+    """The no-raise contract holds for callers outside Streamlit.
+
+    A site dict missing `name` with a bad `bgp_peer_asn` raised KeyError instead
+    of returning the error list the function promises.
+    """
+    errors = validate_create_l3vpn_form(
+        name="a",
+        tenant="t",
+        sites=[
+            {
+                "pe": "pe-01",
+                "customer_subnet": "10.1.0.0/24",
+                "routing_protocol": "ebgp",
+                "bgp_peer_asn": "not-a-number",
+            },
+            _site(name="s2", pe="pe-02"),
+        ],
+    )
+    assert any("must be a number" in e for e in errors)

@@ -14,6 +14,7 @@ from generators.generate_l3vpn import L3VpnGenerator
 def _site(
     *,
     name: str = "trading-london",
+    pe: str = "pe-01",
     routing_protocol: str = "ebgp",
     bgp_peer_asn: int | None = None,
     ce_device: str | None = None,
@@ -25,6 +26,8 @@ def _site(
 
     Args:
         name: Site name.
+        pe: Name of the PE this site terminates on. Two sites of one VPN may not
+            share a PE — a PE-CE port carries one site.
         routing_protocol: ``ebgp``, ``static``, or ``connected``.
         bgp_peer_asn: Per-site peer-AS override, or ``None`` to use the pool.
         ce_device: CE device name, or ``None`` for an unmanaged CE.
@@ -45,7 +48,7 @@ def _site(
         "bgp_peer_asn": {"value": bgp_peer_asn},
         "static_routes": {"value": []},
         "status": {"value": "provisioning"},
-        "pe_device": {"node": {"id": "pe-1", "name": {"value": "pe-01"}}},
+        "pe_device": {"node": {"id": f"{pe}-id", "name": {"value": pe}}},
         "ce_device": {"node": None},
         "ce_interface": {"node": None},
         "ce_private_interface": {"node": None},
@@ -279,7 +282,9 @@ async def test_customer_asn_is_allocated_from_the_pool() -> None:
 @pytest.mark.asyncio
 async def test_all_sites_of_a_vpn_share_one_customer_as() -> None:
     """Two sites, one customer AS — a customer is a single routing domain."""
-    gen, client = _generator(_payload([_site(name="trading-london"), _site(name="trading-zurich")]))
+    gen, client = _generator(
+        _payload([_site(name="trading-london"), _site(name="trading-zurich", pe="pe-08")])
+    )
     await gen.generate()
 
     assert len(_creates(client, "RoutingAutonomousSystem")) == 1
@@ -358,7 +363,7 @@ async def test_managed_ce_gets_its_own_ebgp_session_mirroring_the_pe() -> None:
     pe_side = sessions["L3VPN PE-CE acme-prod trading-london"]
     ce_side = sessions["L3VPN CE-PE acme-prod trading-london"]
 
-    assert pe_side["device"] == {"id": "pe-1"}
+    assert pe_side["device"] == {"id": "pe-01-id"}
     assert ce_side["device"] == {"id": "ce-trading-lon-id"}
     assert pe_side["local_ip"] is ce_side["remote_ip"]
     assert pe_side["remote_ip"] is ce_side["local_ip"]
@@ -981,3 +986,21 @@ async def test_repointing_the_private_port_migrates_the_gateway() -> None:
 
     # Must not raise: the gateway belongs to this very site.
     await gen.generate()
+
+
+@pytest.mark.asyncio
+async def test_two_sites_of_one_vpn_on_one_pe_are_refused() -> None:
+    """A PE-CE port carries one site, so a second claim must fail loudly.
+
+    The port key is per-VPN so hand-drawn wiring survives generation, which
+    means both sites match it. Site two adopted site one's port and the /30 was
+    re-pointed, leaving site one's session sourced from an address no longer on
+    any interface. The wizard validator and pe_interface_alloc both catch this,
+    but neither runs when run_generator.py is pointed at API-created data.
+    """
+    gen, client = _generator(
+        _payload([_site(name="site-a"), _site(name="site-b")])  # both default to pe-01
+    )
+
+    with pytest.raises(RuntimeError, match="both resolve to"):
+        await gen.generate()

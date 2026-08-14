@@ -100,6 +100,9 @@ class L3VpnGenerator(InfrahubGenerator):
         # addressing.
         sites = [edge["node"] for edge in vpn["sites"]["edges"]]
         vrf_ns_id = _customer_namespace(sites[0])[0] if sites else None
+        # Reset per run: the PE port key is per-VPN, so two sites of this VPN
+        # landing on one PE would otherwise share a port. See _ensure_pe_interface.
+        self._claimed_pe_ports: set[tuple[str, str]] = set()
 
         vrf = await self._ensure_vrf(vpn, backbone_asn, vrf_ns_id)
         customer_as = await self._ensure_customer_as(vpn)
@@ -355,6 +358,27 @@ class L3VpnGenerator(InfrahubGenerator):
         else:
             iface = await next_free_physical_interface(self.client, pe_name, self.branch)
             iface.description.value = iface_desc
+
+        # This key is per-VPN, deliberately: the datasets seed a hand-drawn PE-CE
+        # port with exactly this description so the generator binds to the drawn
+        # cable instead of allocating the next free one. The cost is that two
+        # sites of the SAME VPN on the SAME PE both match it — site two would
+        # adopt site one's port and `_ensure_ip_address` would re-point the /30,
+        # leaving site one's eBGP session sourced from an address that no longer
+        # exists on any interface. The wizard's duplicate-PE validator and the
+        # pe_interface_alloc check both catch that, but neither runs when
+        # scripts/run_generator.py is pointed at API-created data, so refuse it
+        # here too rather than shipping a broken config silently.
+        claim = (pe_name, str(iface.name.value))
+        if claim in self._claimed_pe_ports:
+            raise RuntimeError(
+                f"Two sites of L3VPN {vpn['name']['value']} both resolve to "
+                f"{pe_name}:{iface.name.value}. A PE-CE port carries one site, so give the "
+                f"second site a different PE, or seed a second port described "
+                f"{iface_desc!r} on {pe_name}."
+            )
+        self._claimed_pe_ports.add(claim)
+
         iface.role.value = "cust"
         iface.status.value = "active"  # remove from the free-interface candidate set
         await iface.save(allow_upsert=True)
