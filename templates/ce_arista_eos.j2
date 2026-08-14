@@ -13,11 +13,20 @@
 {% for edge in device.interfaces.edges %}
 {% set n = edge.node %}
 {% if n.__typename == 'InterfaceVirtual'
-      and n.dot1q_id is defined and n.dot1q_id and n.dot1q_id.value
+      and n.dot1q_id is defined and n.dot1q_id and n.dot1q_id.value is not none
       and n.parent_interface is defined and n.parent_interface and n.parent_interface.node %}
 {% set _ = subinterfaces.append(n) %}
 {% set _ = subinterface_parents.append(n.parent_interface.node.name.value) %}
 {% endif %}
+{% endfor %}
+{# Loopback0's addresses, collected once. Three separate scans used to walk the
+   interface list for this — router-id, the advertised prefixes, and the network
+   statements — and each new use added another. #}
+{% set loopback_prefixes = [] %}
+{% for edge in device.interfaces.edges if edge.node.name.value == 'Loopback0' %}
+{% for ip in edge.node.ip_addresses.edges %}
+{% set _ = loopback_prefixes.append(ip.node.address.value) %}
+{% endfor %}
 {% endfor %}
 !
 ! Arista EOS configuration for {{ device.name.value }} (customer edge)
@@ -71,12 +80,44 @@ interface {{ iface.name.value }}
 {% set base_as = device.asn.node.asn.value
      if device.asn is defined and device.asn and device.asn.node
      else sessions[0].node.local_as.node.asn.value %}
+{# Advertisement filtering, one policy per neighbour. The single unfiltered
+   address-family that used to sit below sent EVERY site's LAN to EVERY PE: on a
+   CE terminating sites of two L3VPNs, VPN A's PE received and installed VPN B's
+   customer prefix and vice versa, so the two customers got mutual reachability
+   and the VRF boundary meant nothing. A CE like that is a supported shape — the
+   per-neighbour `local-as` below and `_bind_ce_side`'s second-AS branch exist
+   for it.
+
+   A session is joined to its sites through the PE-CE /30: the session's local_ip
+   is that site's `ce_address`. Loopback0 goes to every neighbour — it is the
+   CE's own address and the ping source the lab uses from either VPN. #}
+{% for session_edge in sessions %}
+{% set session = session_edge.node %}
+{% set tag = m.ip_only(session.remote_ip.node.address.value) | replace('.', '_') %}
+{% set advertised = [] %}
+{% for site_edge in sites %}
+{% if site_edge.node.ce_address is defined and site_edge.node.ce_address
+      and site_edge.node.ce_address.node
+      and site_edge.node.ce_address.node.address.value == session.local_ip.node.address.value %}
+{% set _ = advertised.append(site_edge.node.customer_subnet.node.prefix.value) %}
+{% endif %}
+{% endfor %}
+{% for prefix in loopback_prefixes %}
+{% set _ = advertised.append(prefix) %}
+{% endfor %}
+ip prefix-list PL-{{ tag }}-OUT
+{% for prefix in advertised %}
+   seq {{ loop.index * 10 }} permit {{ prefix }}
+{% endfor %}
+!
+route-map RM-{{ tag }}-OUT permit 10
+   match ip address prefix-list PL-{{ tag }}-OUT
+!
+{% endfor %}
 router bgp {{ base_as }}
-{% for iface in device.interfaces.edges if iface.node.name.value == 'Loopback0' %}
-{% for ip in iface.node.ip_addresses.edges %}
-   router-id {{ m.ip_only(ip.node.address.value) }}
-{% endfor %}
-{% endfor %}
+{% if loopback_prefixes %}
+   router-id {{ m.ip_only(loopback_prefixes[0]) }}
+{% endif %}
 {% for session_edge in sessions %}
 {% set session = session_edge.node %}
    ! {{ session.description.value }}
@@ -92,18 +133,20 @@ router bgp {{ base_as }}
    !
    address-family ipv4
 {% for session_edge in sessions %}
-      neighbor {{ m.ip_only(session_edge.node.remote_ip.node.address.value) }} activate
+{% set peer = m.ip_only(session_edge.node.remote_ip.node.address.value) %}
+      neighbor {{ peer }} activate
+      neighbor {{ peer }} route-map RM-{{ peer | replace('.', '_') }}-OUT out
 {% endfor %}
 {# Advertise the customer LAN into the VPN. `network` rather than
    `redistribute connected` so the CE only ever originates the subnets the
-   service actually covers. #}
+   service actually covers. Every site's prefix is originated here; which
+   neighbour is allowed to hear each one is decided by the outbound route-maps
+   above. #}
 {% for site_edge in sites %}
       network {{ site_edge.node.customer_subnet.node.prefix.value }}
 {% endfor %}
-{% for iface in device.interfaces.edges if iface.node.name.value == 'Loopback0' %}
-{% for ip in iface.node.ip_addresses.edges %}
-      network {{ ip.node.address.value }}
-{% endfor %}
+{% for prefix in loopback_prefixes %}
+      network {{ prefix }}
 {% endfor %}
 !
 {% endif %}

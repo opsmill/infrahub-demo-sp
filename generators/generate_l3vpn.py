@@ -38,6 +38,7 @@ from .common import (
     allocate_prefix_from_pool,
     allocate_vlan_subinterface,
     find_or_create_route_target,
+    find_vlan_subinterface,
     next_free_physical_interface,
     touch,
 )
@@ -476,15 +477,38 @@ class L3VpnGenerator(InfrahubGenerator):
             return customer_as
 
         remote_asn = int(override)
+        owned_name = f"customer-as-{remote_asn}"
         existing = await self.client.filters(
             kind="RoutingAutonomousSystem", asn__value=remote_asn, branch=self.branch
         )
         if existing:
-            return await touch(existing[0])
+            adopted = existing[0]
+            # Touch ONLY an AS this generator created. Saving a node enrolls it in
+            # the run's tracking group, and `delete_unused_nodes=True` makes the
+            # reaper delete any previous member a later run does not save again —
+            # so touching a row we merely referenced hands the reaper something
+            # that was never ours.
+            #
+            # Nothing stops an override naming an AS that already exists for other
+            # reasons: `bgp_peer_asn: 65000` is the obvious provider-AS guess and
+            # would adopt Backbone-AS, which every PE's `device.asn` and the whole
+            # iBGP mesh point at. Enrolled and then dropped, its delete either
+            # strips the backbone or fails and takes the run down with it — the
+            # same shape as the IpamNamespace hazard in generators/common.py.
+            # `l3vpn_peer_asn_range` now rejects that override outright; this is
+            # the belt to its braces.
+            if str(getattr(adopted.name, "value", "")) == owned_name:
+                return await touch(adopted)
+            LOG.info(
+                "Site peer AS %s resolves to pre-existing %r; adopting read-only",
+                remote_asn,
+                getattr(adopted.name, "value", "?"),
+            )
+            return adopted
         remote_as = await self.client.create(
             kind="RoutingAutonomousSystem",
             branch=self.branch,
-            name=f"customer-as-{remote_asn}",
+            name=owned_name,
             asn=remote_asn,
             organization={"id": vpn["tenant"]["node"]["id"]},
         )
@@ -513,40 +537,87 @@ class L3VpnGenerator(InfrahubGenerator):
             pe_ip: The PE-side IpamIPAddress of the PE-CE /30.
             ce_ip: The CE-side IpamIPAddress of the PE-CE /30.
         """
-        desc = f"L3VPN PE-CE {vpn_name} {site['name']['value']}"
+        await self._ensure_bgp_session(
+            description=f"L3VPN PE-CE {vpn_name} {site['name']['value']}",
+            device_id=site["pe_device"]["node"]["id"],
+            local_as={"id": backbone_as_id},
+            remote_as=remote_as,
+            local_ip=pe_ip,
+            remote_ip=ce_ip,
+            vrf=vrf,
+        )
+
+    async def _ensure_bgp_session(
+        self,
+        *,
+        description: str,
+        device_id: str,
+        local_as: Any,
+        remote_as: Any,
+        local_ip: Any,
+        remote_ip: Any,
+        vrf: Any | None = None,
+    ) -> None:
+        """Create one end of a PE-CE eBGP session, or re-assert an existing one.
+
+        The two ends are the same node with its endpoints swapped — the PE side
+        carries the VRF, the CE side does not, because a CE is not VPN-aware —
+        so both go through here. They were separate near-identical copies, which
+        meant a fix to one end silently missed the other.
+
+        Adoption RE-ASSERTS the AS and address relationships rather than merely
+        touching the row. The description is this session's key and embeds no
+        ASN, so a site whose ``bgp_peer_asn`` changed still matches its old
+        session: a touch-only adopt left the modelled session on the previous AS
+        while the PE artifact rendered the new one from the site attribute, and
+        the peering could never establish. The VRF and IP adopt paths in this
+        module already re-assert for the same reason.
+
+        Args:
+            description: The session description, which is its natural key
+                alongside the device.
+            device_id: Infrahub id of the router holding this end.
+            local_as: AS node (or ``{"id": ...}`` reference) for this end.
+            remote_as: AS node (or reference) for the far end.
+            local_ip: This end's IpamIPAddress of the PE-CE /30.
+            remote_ip: The far end's IpamIPAddress.
+            vrf: The IpamVRF to bind, or ``None`` for the CE side.
+        """
         # Scoped by device, because that is what keys the node: RoutingBGPSession
         # is unique on [device, description__value] (schemas/extensions/
         # routing_bgp/bgp.yml), so a description alone no longer identifies one
         # session and an unscoped lookup could adopt another router's.
         existing = await self.client.filters(
             kind="RoutingBGPSession",
-            description__value=desc,
-            device__ids=[site["pe_device"]["node"]["id"]],
+            description__value=description,
+            device__ids=[device_id],
             branch=self.branch,
         )
         if existing:
-            await touch(existing[0])
+            session: Any = existing[0]
+            session.local_as = local_as
+            session.remote_as = remote_as
+            session.local_ip = local_ip
+            session.remote_ip = remote_ip
+            if vrf is not None:
+                session.vrf = vrf
+            await session.save(allow_upsert=True)
             return
 
-        backbone_as = await self.client.get(
-            kind="RoutingAutonomousSystem",
-            id=backbone_as_id,
-            branch=self.branch,
-        )
-        session = await self.client.create(
-            kind="RoutingBGPSession",
-            branch=self.branch,
-            description=desc,
-            session_type="EXTERNAL",
-            role="peering",
-            device={"id": site["pe_device"]["node"]["id"]},
-            local_as=backbone_as,
-            remote_as=remote_as,
-            local_ip=pe_ip,
-            remote_ip=ce_ip,
-            vrf=vrf,
-            status="active",
-        )
+        fields: dict[str, Any] = {
+            "description": description,
+            "session_type": "EXTERNAL",
+            "role": "peering",
+            "device": {"id": device_id},
+            "local_as": local_as,
+            "remote_as": remote_as,
+            "local_ip": local_ip,
+            "remote_ip": remote_ip,
+            "status": "active",
+        }
+        if vrf is not None:
+            fields["vrf"] = vrf
+        session = await self.client.create(kind="RoutingBGPSession", branch=self.branch, **fields)
         await session.save(allow_upsert=True)
 
     async def _bind_ce_side(
@@ -618,35 +689,16 @@ class L3VpnGenerator(InfrahubGenerator):
             )
             await touch(ce_device)
 
-        desc = f"L3VPN CE-PE {vpn_name} {site['name']['value']}"
-        # Scoped by device — see the matching lookup in _ensure_ebgp_session.
-        existing = await self.client.filters(
-            kind="RoutingBGPSession",
-            description__value=desc,
-            device__ids=[ce_device_node["id"]],
-            branch=self.branch,
-        )
-        if existing:
-            await touch(existing[0])
-            return
-
-        backbone_as = await self.client.get(
-            kind="RoutingAutonomousSystem", id=backbone_as_id, branch=self.branch
-        )
-        session = await self.client.create(
-            kind="RoutingBGPSession",
-            branch=self.branch,
-            description=desc,
-            session_type="EXTERNAL",
-            role="peering",
-            device={"id": ce_device_node["id"]},
+        # The mirror image of the PE side: same node, endpoints swapped, and no
+        # VRF because a CE is not VPN-aware.
+        await self._ensure_bgp_session(
+            description=f"L3VPN CE-PE {vpn_name} {site['name']['value']}",
+            device_id=ce_device_node["id"],
             local_as=remote_as,
-            remote_as=backbone_as,
+            remote_as={"id": backbone_as_id},
             local_ip=ce_ip,
             remote_ip=pe_ip,
-            status="active",
         )
-        await session.save(allow_upsert=True)
 
     async def _ensure_private_vlan(
         self, site: dict[str, Any], vpn: dict[str, Any], vrf: Any
@@ -701,16 +753,16 @@ class L3VpnGenerator(InfrahubGenerator):
         # broadcast domain. Each site needs its own VLAN because each has its own
         # customer_subnet and therefore its own gateway.
         description = f"L3VPN {vpn['name']['value']} {site['name']['value']} customer VLAN"
-        existing = await self.client.filters(
-            kind="InterfaceVirtual",
-            device__name__value=device_name,
-            parent_interface__ids=[parent_node["id"]],
-            description__value=description,
-            branch=self.branch,
+        existing_sub = await find_vlan_subinterface(
+            self.client,
+            self.branch,
+            device_name=device_name,
+            parent_id=parent_node["id"],
+            description=description,
         )
         sub: Any
-        if existing:
-            sub = existing[0]
+        if existing_sub is not None:
+            sub = existing_sub
             # Repair a placeholder left behind by an interrupted allocation. The
             # sub-interface is created as `<parent>.pending` and renamed once the
             # pool has assigned a VLAN (see allocate_vlan_subinterface); if that
@@ -718,8 +770,12 @@ class L3VpnGenerator(InfrahubGenerator):
             # template rendered `interface Ethernet2.pending`, which EOS rejects.
             # This lookup matches on the parent, not the name, so it is the only
             # place that can notice and fix it.
+            #
+            # `is not None`, not truthiness: dot1q_id has no schema minimum, so
+            # VLAN 0 is representable and would otherwise read as "unallocated",
+            # leaving the name stuck at `.pending`.
             vlan_id = getattr(sub.dot1q_id, "value", None)
-            if str(sub.name.value).endswith(".pending") and vlan_id:
+            if str(sub.name.value).endswith(".pending") and vlan_id is not None:
                 sub.name.value = f"{parent_name}.{int(vlan_id)}"
             await sub.save(allow_upsert=True)  # touch: see module docstring
         else:

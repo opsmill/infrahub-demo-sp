@@ -1,5 +1,5 @@
-# Data for the l3vpn_peer_asn_range check: the customer ASN pool's bounds, and
-# every per-site bgp_peer_asn override to compare against them.
+# Data for the l3vpn_peer_asn_range check: the customer ASN pool's bounds, the
+# backbone AS, and every per-site bgp_peer_asn override to compare against them.
 query L3VpnPeerAsnRange {
   CoreNumberPool(name__value: "customer_asn_pool") {
     edges {
@@ -7,6 +7,17 @@ query L3VpnPeerAsnRange {
         name { value }
         start_range { value }
         end_range { value }
+      }
+    }
+  }
+  # The provider's own AS. An override naming it makes the generator adopt
+  # Backbone-AS as the customer side of an "EXTERNAL" session — iBGP wearing an
+  # eBGP label — and every PE and iBGP session depends on that row.
+  TopologyMplsBackbone {
+    edges {
+      node {
+        name { value }
+        asn { node { asn { value } } }
       }
     }
   }

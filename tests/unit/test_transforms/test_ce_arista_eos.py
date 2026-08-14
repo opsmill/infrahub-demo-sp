@@ -53,6 +53,23 @@ async def test_peers_with_the_pe_from_the_customer_as() -> None:
     assert "router-id 10.0.1.1" in cfg
 
 
+def _prefix_list_body(cfg: str, name: str) -> str:
+    """Return the `seq ... permit` lines of one prefix-list.
+
+    Args:
+        cfg: The rendered configuration.
+        name: The prefix-list name to extract.
+
+    Returns:
+        The block's body, empty when the list is absent.
+    """
+    marker = f"ip prefix-list {name}\n"
+    if marker not in cfg:
+        return ""
+    body = cfg.split(marker, 1)[1]
+    return body.split("!", 1)[0]
+
+
 def _second_vpn_session(local_asn: int) -> dict:
     """Return a second CE-PE session, for a different L3VPN in ``local_asn``.
 
@@ -72,6 +89,28 @@ def _second_vpn_session(local_asn: int) -> dict:
             "remote_ip": {"node": {"address": {"value": "10.100.0.5/30"}}},
             "local_as": {"node": {"asn": {"value": local_asn}}},
             "remote_as": {"node": {"asn": {"value": 65000}}},
+        }
+    }
+
+
+def _second_vpn_site(subnet: str = "10.201.0.0/24") -> dict:
+    """Return the site the second VPN's session serves.
+
+    Its ``ce_address`` matches that session's ``local_ip``, which is the join the
+    template uses to decide which prefixes each neighbour may hear.
+
+    Args:
+        subnet: The other customer's LAN prefix.
+
+    Returns:
+        A ServiceL3VpnSite edge shaped like the ``ce`` query result.
+    """
+    return {
+        "node": {
+            "name": {"value": "ib-london"},
+            "customer_subnet": {"node": {"prefix": {"value": subnet}}},
+            "ce_address": {"node": {"address": {"value": "10.100.0.6/30"}}},
+            "l3vpn": {"node": {"name": {"value": "ib-advisory-vpn"}, "vpn_id": {"value": 101}}},
         }
     }
 
@@ -206,3 +245,46 @@ async def test_loopback_is_not_treated_as_a_subinterface() -> None:
     loopback = cfg.split("interface Loopback0", 1)[1].split("\n!", 1)[0]
     assert "encapsulation" not in loopback
     assert "ip address 10.0.1.1/32" in loopback
+
+
+@pytest.mark.asyncio
+async def test_dual_vpn_ce_does_not_leak_prefixes_between_customers() -> None:
+    """Each neighbour hears only the LANs of the sites it serves.
+
+    A single unfiltered address-family advertised every site's LAN to every PE,
+    so VPN A's PE installed VPN B's customer prefix and the two customers got
+    mutual reachability with no VRF boundary between them.
+    """
+    data = copy.deepcopy(ce_fixture(asn=65100, customer_subnet="10.200.10.0/24"))
+    data["RoutingBGPSession"]["edges"].append(_second_vpn_session(65101))
+    data["ServiceL3VpnSite"]["edges"].append(_second_vpn_site("10.201.0.0/24"))
+    cfg = await _render(data)
+
+    first = _prefix_list_body(cfg, "PL-10_100_0_1-OUT")
+    second = _prefix_list_body(cfg, "PL-10_100_0_5-OUT")
+
+    assert "10.200.10.0/24" in first and "10.201.0.0/24" not in first
+    assert "10.201.0.0/24" in second and "10.200.10.0/24" not in second
+    # Each neighbour is bound to its own outbound policy.
+    assert "neighbor 10.100.0.1 route-map RM-10_100_0_1-OUT out" in cfg
+    assert "neighbor 10.100.0.5 route-map RM-10_100_0_5-OUT out" in cfg
+
+
+@pytest.mark.asyncio
+async def test_loopback_is_advertised_to_every_neighbour() -> None:
+    """The CE's own loopback belongs to both VPNs — it is the lab's ping source."""
+    data = copy.deepcopy(ce_fixture(asn=65100, loopback="10.0.1.1/32"))
+    data["RoutingBGPSession"]["edges"].append(_second_vpn_session(65101))
+    data["ServiceL3VpnSite"]["edges"].append(_second_vpn_site())
+    cfg = await _render(data)
+
+    assert "10.0.1.1/32" in _prefix_list_body(cfg, "PL-10_100_0_1-OUT")
+    assert "10.0.1.1/32" in _prefix_list_body(cfg, "PL-10_100_0_5-OUT")
+
+
+@pytest.mark.asyncio
+async def test_single_vpn_ce_still_gets_a_policy() -> None:
+    """The filtering is unconditional, so the common case is covered too."""
+    cfg = await _render(copy.deepcopy(ce_fixture()))
+    assert "10.200.10.0/24" in _prefix_list_body(cfg, "PL-10_100_0_1-OUT")
+    assert "neighbor 10.100.0.1 route-map RM-10_100_0_1-OUT out" in cfg

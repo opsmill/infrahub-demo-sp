@@ -303,6 +303,10 @@ def ce_fixture(
                     "node": {
                         "name": {"value": "trading-london"},
                         "customer_subnet": {"node": {"prefix": {"value": customer_subnet}}},
+                        # Joins this site to its BGP session, whose `local_ip` is
+                        # this same address — that is how the template decides
+                        # which prefixes each neighbour may hear.
+                        "ce_address": {"node": {"address": {"value": pe_facing_address}}},
                         "l3vpn": {
                             "node": {
                                 "name": {"value": "trading-floor-vpn"},

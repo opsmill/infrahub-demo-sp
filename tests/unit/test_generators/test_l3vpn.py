@@ -362,7 +362,9 @@ async def test_managed_ce_gets_its_own_ebgp_session_mirroring_the_pe() -> None:
     assert ce_side["device"] == {"id": "ce-trading-lon-id"}
     assert pe_side["local_ip"] is ce_side["remote_ip"]
     assert pe_side["remote_ip"] is ce_side["local_ip"]
-    assert pe_side["local_as"] is ce_side["remote_as"]
+    # The backbone AS is passed as an `{"id": ...}` reference rather than a
+    # fetched node — same AS on both ends, so compare by value.
+    assert pe_side["local_as"] == ce_side["remote_as"] == {"id": "as-65000"}
     assert pe_side["remote_as"] is ce_side["local_as"]
     # The VRF is a PE-side construct; the CE is not VPN-aware.
     assert "vrf" in pe_side
@@ -810,3 +812,131 @@ async def test_subinterface_is_keyed_per_site_not_per_port() -> None:
     assert vlan_lookups, "expected a sub-interface lookup"
     assert vlan_lookups[0]["description__value"] == "L3VPN acme-prod ib-london customer VLAN"
     assert vlan_lookups[0]["parent_interface__ids"] == ["ce-shared-Ethernet2"]
+
+
+class _RecordingNode:
+    """A node stub that records writes and raises on reads of unset attributes.
+
+    A ``MagicMock`` auto-creates any attribute touched, so asserting that an
+    adopted node "has" a relationship proves nothing — the assertion passes
+    whether or not the generator wrote it. This raises ``AttributeError``
+    instead, so a missing write fails the test.
+    """
+
+    def __init__(self) -> None:
+        self.save = AsyncMock()
+
+
+def _existing_session(client: MagicMock, description: str) -> _RecordingNode:
+    """Make the session lookup for `description` return a pre-existing row.
+
+    Args:
+        client: The mock client from :func:`_generator`.
+        description: The session description to report as already present.
+
+    Returns:
+        The stub session, so a test can assert what the generator wrote to it.
+    """
+    session = _RecordingNode()
+    passthrough = client.filters.side_effect
+
+    async def _filters(**kwargs: Any) -> list[Any]:
+        """Return the stale session only for its own description lookup."""
+        if (
+            kwargs.get("kind") == "RoutingBGPSession"
+            and kwargs.get("description__value") == description
+        ):
+            return [session]
+        return await passthrough(**kwargs)
+
+    client.filters = AsyncMock(side_effect=_filters)
+    return session
+
+
+@pytest.mark.asyncio
+async def test_adopted_session_reasserts_the_peer_as() -> None:
+    """An edited bgp_peer_asn must reach the session the generator adopts.
+
+    The description is the session key and embeds no ASN, so a site whose peer
+    AS changed still matches its old session. Touching it without re-asserting
+    left the modelled session on the previous AS while the PE artifact rendered
+    the new one from the site attribute — a peering that can never establish.
+    """
+    gen, client = _generator(_payload([_site(bgp_peer_asn=65002)]))
+    stale = _existing_session(client, "L3VPN PE-CE acme-prod trading-london")
+
+    await gen.generate()
+
+    assert stale.save.await_count, "Adopted session must be saved"
+    # Every endpoint is re-asserted; reading any of these raises if it was not.
+    assert stale.local_as == {"id": "as-65000"}
+    assert stale.remote_as is not None
+    assert stale.local_ip is not None
+    assert stale.remote_ip is not None
+
+
+@pytest.mark.asyncio
+async def test_adopted_ce_session_reasserts_too() -> None:
+    """The CE end goes through the same helper, so it re-asserts as well."""
+    gen, client = _generator(_payload([_site(ce_device="ce-trading-lon", bgp_peer_asn=65002)]))
+    stale = _existing_session(client, "L3VPN CE-PE acme-prod trading-london")
+
+    await gen.generate()
+
+    assert stale.save.await_count
+    assert stale.remote_as == {"id": "as-65000"}
+    assert stale.local_as is not None
+    assert stale.local_ip is not None
+    assert stale.remote_ip is not None
+
+
+def _existing_as(client: MagicMock, *, name: str) -> _RecordingNode:
+    """Make the peer-AS lookup return a pre-existing AS under `name`.
+
+    Args:
+        client: The mock client from :func:`_generator`.
+        name: The name the existing RoutingAutonomousSystem carries.
+
+    Returns:
+        The stub AS, so a test can assert whether it was saved.
+    """
+    node = _RecordingNode()
+    node.name = MagicMock(value=name)
+    node.id = "as-existing"
+    passthrough = client.filters.side_effect
+
+    async def _filters(**kwargs: Any) -> list[Any]:
+        """Return the existing AS only for the override's asn lookup."""
+        if kwargs.get("kind") == "RoutingAutonomousSystem" and "asn__value" in kwargs:
+            return [node]
+        return await passthrough(**kwargs)
+
+    client.filters = AsyncMock(side_effect=_filters)
+    return node
+
+
+@pytest.mark.asyncio
+async def test_override_adopting_a_foreign_as_does_not_touch_it() -> None:
+    """An AS the generator did not create must not join the tracking group.
+
+    Saving a node enrols it, and the reaper deletes any previous member a later
+    run does not save again. `bgp_peer_asn: 65000` resolves to Backbone-AS —
+    the row every PE's device ASN and the whole iBGP mesh point at.
+    """
+    gen, client = _generator(_payload([_site(bgp_peer_asn=65000)]))
+    backbone = _existing_as(client, name="Backbone-AS")
+
+    await gen.generate()
+
+    assert not backbone.save.await_count, "Must not enrol an AS the generator does not own"
+
+
+@pytest.mark.asyncio
+async def test_override_adopting_its_own_as_still_touches_it() -> None:
+    """An AS this generator created must keep being touched, or it is reaped."""
+    gen, client = _generator(_payload([_site(bgp_peer_asn=65002)]))
+    owned = _existing_as(client, name="customer-as-65002")
+
+    await gen.generate()
+
+    assert owned.save.await_count, "The generator's own AS must be touched every run"

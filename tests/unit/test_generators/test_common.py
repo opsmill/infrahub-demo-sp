@@ -5,10 +5,12 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from infrahub_sdk.exceptions import GraphQLError
 
 from generators.common import (
     allocate_asn_from_pool,
     allocate_prefix_from_pool,
+    allocate_vlan_subinterface,
     find_or_create_device,
     find_or_create_route_target,
     next_free_physical_interface,
@@ -249,3 +251,59 @@ async def test_allocate_asn_does_not_upsert() -> None:
 
     created.save.assert_awaited_once_with()
     assert "allow_upsert" not in created.save.await_args.kwargs
+
+
+@pytest.mark.asyncio
+async def test_vlan_subinterface_lost_race_adopts_the_winner() -> None:
+    """A concurrent run's sub-interface is adopted, not re-allocated.
+
+    Retrying would take a SECOND VLAN from the customer pool and leave two subs
+    with identical descriptions — the description-keyed lookup then returns one
+    arbitrarily and the reaper deletes the other, leaking the allocation.
+    """
+    client = MagicMock()
+    winner = MagicMock(save=AsyncMock())
+    pool = MagicMock()
+    client.get = AsyncMock(return_value=pool)
+
+    created = MagicMock()
+    created.save = AsyncMock(side_effect=GraphQLError(errors=[{"message": "uniqueness"}]))
+    client.create = AsyncMock(return_value=created)
+    client.filters = AsyncMock(return_value=[winner])
+
+    parent = MagicMock(id="parent-1")
+    result = await allocate_vlan_subinterface(
+        client,
+        "main",
+        pool_name="vlan_pool_markets_trading",
+        parent=parent,
+        device_name="ce-trading-lon",
+        parent_name="Ethernet2",
+        description="L3VPN acme trading-london customer VLAN",
+    )
+
+    assert result is winner, "Expected the concurrent run's sub-interface to be adopted"
+    assert winner.save.await_count, "Adopted node must be touched or the reaper deletes it"
+    assert client.create.await_count == 1, "Must not retry the allocation"
+
+
+@pytest.mark.asyncio
+async def test_vlan_subinterface_other_failure_propagates() -> None:
+    """A create that fails for any other reason must still raise."""
+    client = MagicMock()
+    client.get = AsyncMock(return_value=MagicMock())
+    created = MagicMock()
+    created.save = AsyncMock(side_effect=GraphQLError(errors=[{"message": "boom"}]))
+    client.create = AsyncMock(return_value=created)
+    client.filters = AsyncMock(return_value=[])
+
+    with pytest.raises(GraphQLError):
+        await allocate_vlan_subinterface(
+            client,
+            "main",
+            pool_name="vlan_pool_markets_trading",
+            parent=MagicMock(id="parent-1"),
+            device_name="ce-trading-lon",
+            parent_name="Ethernet2",
+            description="L3VPN acme trading-london customer VLAN",
+        )

@@ -34,10 +34,20 @@ class L3VpnPeerAsnRangeCheck(InfrahubCheck):
         """
         bounds = self._pool_bounds(data)
         if bounds is None:
-            # No pool, or a pool with open bounds: there is no range to collide
-            # with, so every override is safe by definition.
+            # Say so rather than passing silently. A renamed or missing pool used
+            # to make this check succeed while enforcing nothing, so the day the
+            # pool moved was the day the guarantee quietly disappeared.
+            self.log_error(
+                message=(
+                    f"Cannot evaluate peer-AS overrides: no CoreNumberPool named "
+                    f"{POOL_NAME} with both bounds set was returned. If the pool was "
+                    f"renamed, update POOL_NAME in checks/l3vpn_peer_asn_range.py and "
+                    f"the filter in queries/validation/l3vpn_peer_asn_range.gql."
+                ),
+            )
             return
         start, end = bounds
+        backbone = self._backbone_asns(data)
 
         for vpn_edge in data.get("ServiceL3Vpn", {}).get("edges", []):
             vpn = vpn_edge["node"]
@@ -51,11 +61,22 @@ class L3VpnPeerAsnRangeCheck(InfrahubCheck):
                     asn = int(override)
                 except (TypeError, ValueError):
                     continue
-                if start <= asn <= end:
+                where = f"L3VPN {vpn['name']['value']}: site {site['name']['value']}"
+                if asn in backbone:
                     self.log_error(
                         message=(
-                            f"L3VPN {vpn['name']['value']}: site "
-                            f"{site['name']['value']} sets bgp_peer_asn {asn}, which is "
+                            f"{where} sets bgp_peer_asn {asn}, which is the backbone's "
+                            f"own AS. The generator would adopt the provider AS as the "
+                            f"customer side of an eBGP session — every PE's device ASN "
+                            f"and the whole iBGP mesh reference that row. Use a customer "
+                            f"AS, or leave bgp_peer_asn unset to take one from "
+                            f"{POOL_NAME}."
+                        ),
+                    )
+                elif start <= asn <= end:
+                    self.log_error(
+                        message=(
+                            f"{where} sets bgp_peer_asn {asn}, which is "
                             f"inside {POOL_NAME}'s {start}-{end} range. The pool can "
                             f"issue that same number to another VPN, and "
                             f"RoutingAutonomousSystem.asn is unique. Pick a number "
@@ -63,6 +84,27 @@ class L3VpnPeerAsnRangeCheck(InfrahubCheck):
                             f"take one from the pool."
                         ),
                     )
+
+    @staticmethod
+    def _backbone_asns(data: dict[str, Any]) -> set[int]:
+        """Return every backbone AS number in the query result.
+
+        Args:
+            data: Result of the ``l3vpn_peer_asn_range`` GraphQL query.
+
+        Returns:
+            The provider AS numbers, empty when none could be read.
+        """
+        found: set[int] = set()
+        for edge in data.get("TopologyMplsBackbone", {}).get("edges", []):
+            asn = ((edge["node"].get("asn") or {}).get("node") or {}).get("asn", {}).get("value")
+            if asn is None:
+                continue
+            try:
+                found.add(int(asn))
+            except (TypeError, ValueError):
+                continue
+        return found
 
     @staticmethod
     def _pool_bounds(data: dict[str, Any]) -> tuple[int, int] | None:

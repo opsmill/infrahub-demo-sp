@@ -6,9 +6,13 @@ from pools and look up objects by deterministic keys.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, cast
 
 from infrahub_sdk.client import InfrahubClient
+from infrahub_sdk.exceptions import GraphQLError
+
+LOG = logging.getLogger(__name__)
 
 # Provider-owned address space (PE-CE /30s, SD-WAN LAN addresses, every pool in
 # objects/50_pools.yml) lives here.
@@ -269,8 +273,62 @@ async def allocate_vlan_subinterface(
         device={"hfid": [device_name]},
         parent_interface=parent,
     )
-    await sub.save()
+    try:
+        await sub.save()
+    except GraphQLError:
+        # Lost the race to a concurrent run. Several runs of the L3VPN generator
+        # are routinely in flight for one service (see its module docstring), and
+        # interfaces are unique on [device, name] — so two runs both creating
+        # `<parent>.pending` means one save is rejected.
+        #
+        # Adopting the winner is not optional politeness: retrying would take a
+        # SECOND VLAN from the customer's pool, leaving two sub-interfaces with
+        # identical descriptions. The description-keyed lookup would then return
+        # one arbitrarily and the reaper would delete the other — a pool
+        # allocation leaked permanently.
+        raced = await find_vlan_subinterface(
+            client, branch, device_name=device_name, parent_id=parent.id, description=description
+        )
+        if raced is None:
+            raise
+        LOG.info("Adopted %s created by a concurrent run", description)
+        return await touch(raced)
     vlan = int(sub.dot1q_id.value)
     sub.name.value = f"{parent_name}.{vlan}"
     await sub.save(allow_upsert=True)
     return sub
+
+
+async def find_vlan_subinterface(
+    client: InfrahubClient,
+    branch: str,
+    *,
+    device_name: str,
+    parent_id: str,
+    description: str,
+) -> Any | None:
+    """Return the sub-interface a site owns on a parent port, or ``None``.
+
+    The description is the key rather than the name, which cannot be used: the
+    name embeds the VLAN, and the VLAN is not known until the pool has allocated
+    it. Keying on the parent alone was wrong once a CE port carries two services
+    — the second site adopted the first's sub-interface and inherited its VLAN.
+
+    Args:
+        client: Active Infrahub SDK client.
+        branch: Branch to search.
+        device_name: Name of the device holding the sub-interface.
+        parent_id: Infrahub id of the parent physical port.
+        description: The site-specific description that identifies it.
+
+    Returns:
+        The InterfaceVirtual node, or ``None`` when the site has none yet.
+    """
+    found = await client.filters(
+        kind="InterfaceVirtual",
+        device__name__value=device_name,
+        parent_interface__ids=[parent_id],
+        description__value=description,
+        branch=branch,
+    )
+    return found[0] if found else None

@@ -52,6 +52,11 @@ query CE($device: String!) {
       node {
         name { value }
         customer_subnet { node { prefix { value } } }
+        # Joins a site to its session: a session's local_ip IS this address, and
+        # that is how the template works out which prefixes each neighbour may
+        # be advertised. Without it a CE serving two VPNs sends every LAN to
+        # every PE.
+        ce_address { node { address { value } } }
         l3vpn { node { name { value } vpn_id { value } } }
       }
     }
