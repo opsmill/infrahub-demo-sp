@@ -6,22 +6,29 @@ name: "Update Infrahub Version"
 # bump opens a pull request and the pull request's own CI is the QA -- this
 # workflow deliberately runs no tests itself.
 #
-# Both conditional steps below are guarded on repository state rather than on a
+# It answers to BOTH upstream release pipelines. They are separate dispatches
+# that both put their number in `client_payload.version`, meaning different
+# things:
+#
+#   trigger-infrahub-update             -> version is the Infrahub version
+#   trigger-infrahub-sdk-python-update  -> version is the infrahub-sdk version
+#
+# Listening for only the first is why merging the two workflows is a trap: the
+# SDK pipeline's dispatch then matches no workflow at all and SDK auto-bumps
+# stop silently, with nothing failing to show it.
+#
+# Both conditional bump steps are guarded on repository state rather than on a
 # hardcoded repository list, so this file is identical across the demo
 # repositories apart from the `files:` list. In this repository both guards
 # evaluate to "skip": there is no infrahub-testcontainers dependency (no
-# integration tier yet) and no Dockerfile (no custom image). That is why the
-# workflow this replaces was harmful -- it ran `uv add infrahub-testcontainers`
-# unconditionally and so *introduced* an unused dependency pinned to an Infrahub
-# version number, and advertised a `run` input for integration tests that was
-# never referenced anywhere in the body.
+# integration tier yet) and no Dockerfile (no custom image).
 
 on:
   workflow_dispatch:
     inputs:
       infrahub_version:
-        description: "Infrahub version to bump to"
-        required: true
+        description: "Infrahub version to bump to (leave empty to bump only the SDK)"
+        required: false
         default: "1.10.8"
       infrahub_sdk_version:
         description: "infrahub-sdk version to bump to (optional; leave empty to leave the SDK alone)"
@@ -33,7 +40,9 @@ on:
         default: ""
 
   repository_dispatch:
-    types: [trigger-infrahub-update]
+    types:
+      - trigger-infrahub-update
+      - trigger-infrahub-sdk-python-update
 
 permissions:
   contents: read
@@ -47,14 +56,10 @@ jobs:
 
     runs-on: ubuntu-22.04
     concurrency:
-      group: update-infrahub-${{ github.event.client_payload.version || github.event.inputs.infrahub_version }}-${{ matrix.branch-name }}
+      # Keyed on the dispatch type as well as the version, so an Infrahub bump
+      # and an SDK bump to the same number do not serialize against each other.
+      group: update-infrahub-${{ github.event.action || 'manual' }}-${{ github.event.client_payload.version || github.event.inputs.infrahub_version || github.event.inputs.infrahub_sdk_version }}-${{ matrix.branch-name }}
       cancel-in-progress: false
-
-    env:
-      INFRAHUB_VERSION: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.version || github.event.inputs.infrahub_version }}
-      SDK_VERSION: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.sdk_version || github.event.inputs.infrahub_sdk_version }}
-      TC_VERSION: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.testcontainers_version || github.event.inputs.infrahub_testcontainers_version }}
-      BRANCH_NAME: ${{ matrix.branch-name }}-${{ github.event_name == 'repository_dispatch' && github.event.client_payload.version || github.event.inputs.infrahub_version }}
 
     steps:
       - name: Check out code
@@ -65,10 +70,70 @@ jobs:
         with:
           version: "0.9.18"
 
+      # Resolved in a step rather than in job-level `env:` because the meaning
+      # of client_payload.version depends on which pipeline dispatched, and
+      # nesting that into an expression makes it unreadable.
+      - name: Resolve the requested versions
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_TYPE: ${{ github.event.action }}
+          PAYLOAD_VERSION: ${{ github.event.client_payload.version }}
+          INPUT_INFRAHUB: ${{ github.event.inputs.infrahub_version }}
+          INPUT_SDK: ${{ github.event.inputs.infrahub_sdk_version }}
+          INPUT_TC: ${{ github.event.inputs.infrahub_testcontainers_version }}
+          BRANCH: ${{ matrix.branch-name }}
+        run: |
+          set -euo pipefail
+          INFRAHUB_VERSION=""
+          SDK_VERSION=""
+          TC_VERSION=""
+
+          if [ "${EVENT_NAME}" = "repository_dispatch" ]; then
+            case "${DISPATCH_TYPE}" in
+              trigger-infrahub-update)
+                INFRAHUB_VERSION="${PAYLOAD_VERSION}"
+                ;;
+              trigger-infrahub-sdk-python-update)
+                SDK_VERSION="${PAYLOAD_VERSION}"
+                ;;
+              *)
+                echo "::error::Unhandled repository_dispatch type '${DISPATCH_TYPE}'."
+                exit 1
+                ;;
+            esac
+          else
+            INFRAHUB_VERSION="${INPUT_INFRAHUB}"
+            SDK_VERSION="${INPUT_SDK}"
+            TC_VERSION="${INPUT_TC}"
+          fi
+
+          if [ -z "${INFRAHUB_VERSION}" ] && [ -z "${SDK_VERSION}" ]; then
+            echo "::error::Neither an Infrahub version nor an infrahub-sdk version was given; nothing to bump."
+            exit 1
+          fi
+
+          # The branch and the pull-request subject name whatever actually moved.
+          if [ -n "${INFRAHUB_VERSION}" ]; then
+            SUBJECT="Infrahub ${INFRAHUB_VERSION}"
+            BRANCH_NAME="${BRANCH}-${INFRAHUB_VERSION}"
+          else
+            SUBJECT="infrahub-sdk ${SDK_VERSION}"
+            BRANCH_NAME="${BRANCH}-infrahub-sdk-${SDK_VERSION}"
+          fi
+
+          {
+            echo "INFRAHUB_VERSION=${INFRAHUB_VERSION}"
+            echo "SDK_VERSION=${SDK_VERSION}"
+            echo "TC_VERSION=${TC_VERSION}"
+            echo "SUBJECT=${SUBJECT}"
+            echo "BRANCH_NAME=${BRANCH_NAME}"
+          } >> "$GITHUB_ENV"
+
       # Guarded on the dependency actually being declared. Without this guard
       # the step would add infrahub-testcontainers to a repository that has no
       # integration tier and therefore never imports it.
       - name: Update infrahub-testcontainers
+        if: env.INFRAHUB_VERSION != ''
         run: |
           set -euo pipefail
           if ! grep -q 'infrahub-testcontainers' pyproject.toml; then
@@ -79,18 +144,16 @@ jobs:
           uv add --group dev "infrahub-testcontainers==${VERSION}"
 
       - name: Update infrahub-sdk
+        if: env.SDK_VERSION != ''
         run: |
           set -euo pipefail
-          if [ -z "${SDK_VERSION}" ]; then
-            echo "No infrahub-sdk version requested; leaving it alone."
-            exit 0
-          fi
           uv add "infrahub-sdk[all]==${SDK_VERSION}"
 
       # Guarded on the repository actually building a custom image, not on a
       # hardcoded list. This repository has no Dockerfile: `tasks.py` streams
       # the compose file from infrahub.opsmill.io instead of vendoring one.
       - name: Update the custom image base version
+        if: env.INFRAHUB_VERSION != ''
         run: |
           set -euo pipefail
           if [ ! -f Dockerfile ]; then
@@ -124,7 +187,7 @@ jobs:
         with:
           github-token: ${{ secrets.GH_UPDATE_PACKAGE_OTTO }}
           push-branch: ${{ env.BRANCH_NAME }}
-          commit-message: "chore: bump Infrahub to ${{ env.INFRAHUB_VERSION }}"
+          commit-message: "chore: bump ${{ env.SUBJECT }}"
           files: |
             pyproject.toml
             uv.lock
@@ -135,10 +198,17 @@ jobs:
       - name: Create a pull request
         env:
           GH_TOKEN: ${{ secrets.GH_UPDATE_PACKAGE_OTTO }}
+          BASE_BRANCH: ${{ matrix.branch-name }}
         run: |
           set -euo pipefail
+          # Re-runs against the same version reuse the branch, so a pull
+          # request may already be open for it.
+          if [ -n "$(gh pr list --head "${BRANCH_NAME}" --state open --json number --jq '.[0].number')" ]; then
+            echo "A pull request for ${BRANCH_NAME} is already open; skipping create."
+            exit 0
+          fi
           gh pr create \
-            --title "chore: bump Infrahub to ${INFRAHUB_VERSION} against ${{ matrix.branch-name }}" \
-            --body "Bumps this demo to Infrahub ${INFRAHUB_VERSION}. The checks on this pull request are the validation for the bump." \
-            --base "${{ matrix.branch-name }}" \
+            --title "chore: bump ${SUBJECT} against ${BASE_BRANCH}" \
+            --body "Bumps this demo to ${SUBJECT}. The checks on this pull request are the validation for the bump." \
+            --base "${BASE_BRANCH}" \
             --head "${BRANCH_NAME}"
