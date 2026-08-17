@@ -1,0 +1,42 @@
+tasks.py
+  s_eadbafaa1ad164::t_e89c5fc1fd47ad 696
+  s_eadbafaa1ad164::t_23d001839bb603 14
+  s_eadbafaa1ad164::t_0e6ecfd00a39bd 462-486,489
+AGENTS.md
+  s_eadbafaa1ad164::t_5f325e10f69d82 36,39,42-46,58-59
+  s_eadbafaa1ad164::t_45619c4bbeb3c9 110-115,123-129
+  s_eadbafaa1ad164::t_d4a613095ba321 116-122
+.github/workflows/ci.yml
+  s_eadbafaa1ad164::t_8372c171d691e3 40-46
+  s_eadbafaa1ad164::t_6c5c9db49af7f3 142,155
+  s_eadbafaa1ad164::t_c0e8bebe858ae8 28
+  s_eadbafaa1ad164::t_d4a613095ba321 120-141,143-154,156
+pyproject.toml
+  s_eadbafaa1ad164::t_26446398a7df03 141-143,145-149
+  s_eadbafaa1ad164::t_de17b675a4ff35 29-34,39-40
+tests/integration/conftest.py
+  s_eadbafaa1ad164::t_d4a613095ba321 1-162
+tests/integration/data/l3vpn_branch_request.yml
+  s_eadbafaa1ad164::t_d4a613095ba321 1-52
+tests/integration/test_workflow.py
+  s_eadbafaa1ad164::t_d4a613095ba321 1-748
+tests/conftest.py
+  s_eadbafaa1ad164::t_a313bdf9947f37 17-24,26-33,37,49,55-61
+  s_eadbafaa1ad164::t_b94d5d6c2b2e1f 1-16,25,34-36,38-48,50-54,62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "2b764adc3600149d3161457e47c5768a1d24050a",
+  "prompts": {},
+  "sessions": {
+    "s_eadbafaa1ad164": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b7ed5902-85f6-473d-b2ee-262f5ade9b2c",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Benoit Kohler <Kohler.benoit@bearchitek.com>"
+    }
+  }
+}
