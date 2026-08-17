@@ -112,6 +112,16 @@ jobs:
             exit 1
           fi
 
+          # The integration suite derives its stack image tag from the installed
+          # testcontainers version, so a testcontainers version that differs from
+          # the Infrahub version would test one release and report success for
+          # another. Refuse rather than produce a green run that means nothing.
+          if [ -n "${TC_VERSION}" ] && [ -n "${INFRAHUB_VERSION}" ] \
+             && [ "${TC_VERSION}" != "${INFRAHUB_VERSION}" ]; then
+            echo "::error::infrahub_testcontainers_version (${TC_VERSION}) differs from infrahub_version (${INFRAHUB_VERSION}). The suite would test ${TC_VERSION} and report it as ${INFRAHUB_VERSION}."
+            exit 1
+          fi
+
           # The branch and the pull-request subject name whatever actually moved.
           if [ -n "${INFRAHUB_VERSION}" ]; then
             SUBJECT="Infrahub ${INFRAHUB_VERSION}"
@@ -129,25 +139,46 @@ jobs:
             echo "BRANCH_NAME=${BRANCH_NAME}"
           } >> "$GITHUB_ENV"
 
-      # Guarded on the dependency actually being declared. Without this guard
-      # the step would add infrahub-testcontainers to a repository that has no
-      # integration tier and therefore never imports it.
+      # Guarded on the dependency actually being *declared with a specifier*,
+      # not merely mentioned. Without this guard the step would add
+      # infrahub-testcontainers to a repository that has no integration tier and
+      # therefore never imports it -- which is what closed PR #106 did here.
       - name: Update infrahub-testcontainers
         if: env.INFRAHUB_VERSION != ''
         run: |
           set -euo pipefail
-          if ! grep -q 'infrahub-testcontainers' pyproject.toml; then
-            echo "infrahub-testcontainers is not declared here; skipping."
+          if ! grep -q '"infrahub-testcontainers[=<>~]' pyproject.toml; then
+            echo "::notice::infrahub-testcontainers is not declared here; skipping."
             exit 0
           fi
           VERSION="${TC_VERSION:-$INFRAHUB_VERSION}"
-          uv add --group dev "infrahub-testcontainers==${VERSION}"
+          perl -pi -e "s/(\"infrahub-testcontainers==)[^\"]+/\${1}${VERSION}/" pyproject.toml
+          grep -q "\"infrahub-testcontainers==${VERSION}\"" pyproject.toml || {
+            echo "::error::Failed to rewrite the infrahub-testcontainers pin."
+            exit 1
+          }
 
+      # Edited in place rather than via `uv add`, on two independent grounds:
+      # `uv add` rewrites the whole specifier, so it drops extras that are not
+      # restated, and it collapses a range like `>=1.22.2,<2.0.0` to an equality
+      # even when the extras *are* restated. Raising the floor in place keeps
+      # both the extras and the upper bound.
       - name: Update infrahub-sdk
         if: env.SDK_VERSION != ''
         run: |
           set -euo pipefail
-          uv add "infrahub-sdk[all]==${SDK_VERSION}"
+          perl -pi -e "s/(\"infrahub-sdk(?:\[[^\]]*\])?>=)[^,\"]+/\${1}${SDK_VERSION}/" pyproject.toml
+          grep -q "\"infrahub-sdk\(\[[^]]*\]\)\?>=${SDK_VERSION}" pyproject.toml || {
+            echo "::error::Failed to rewrite the infrahub-sdk specifier."
+            exit 1
+          }
+
+      # The in-place edits above change pyproject.toml only; the lock has to be
+      # refreshed separately, and it is what pins what CI actually installs.
+      - name: Refresh the lock file
+        run: |
+          set -euo pipefail
+          uv lock
 
       # Guarded on the repository actually building a custom image, not on a
       # hardcoded list. This repository has no Dockerfile: `tasks.py` streams
