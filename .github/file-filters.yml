@@ -17,6 +17,10 @@ yaml_all: &yaml_all
 markdown_all: &markdown_all
   - "**/*.{md,mdx}"
 
+dependencies_all: &dependencies_all
+  - "pyproject.toml"
+  - "uv.lock"
+
 documentation_all:
   - *doc_files
   - *markdown_all

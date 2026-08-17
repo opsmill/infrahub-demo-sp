@@ -47,14 +47,14 @@ jobs:
         with:
           version: "0.9.18"
       - run: uv sync
-      - name: Check code formatting
-        run: |
-          uv run ruff format --check --diff
-          uv run ruff check --select I .
-      - name: Run linters
-        run: uv run ruff check
+      # The invoke tasks are the gate; CI calls the same code a developer runs
+      # locally, so the two cannot drift. `ruff check --select I .` used to run
+      # here and is deliberately gone: `I` is already in the select list, and
+      # --select sets rather than extends it, so it could never fail on its own.
+      - name: Run ruff
+        run: uv run invoke lint-ruff
       - name: Run type checks
-        run: uv run mypy .
+        run: uv run invoke lint-mypy
 
   yaml-lint:
     if: needs.files-changed.outputs.yaml == 'true'
@@ -69,7 +69,7 @@ jobs:
           version: "0.9.18"
       - run: uv sync
       - name: Run yamllint
-        run: uv run yamllint -s .
+        run: uv run invoke lint-yaml
 
   markdown-lint:
     if: needs.files-changed.outputs.markdown == 'true'
@@ -78,9 +78,13 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
+      # This job keeps the action rather than calling `invoke lint-markdown`,
+      # because inline pull-request annotations are worth the inconsistency.
+      # The task runs the same `--fail-on error`, so the two gates agree.
       - name: Run rumdl
         uses: rvben/rumdl@v0
         with:
+          config: pyproject.toml
           report-type: annotations
           # Only fail CI on errors (broken relative links, missing required
           # frontmatter, etc.). Pre-existing warnings (line length, bare
@@ -104,7 +108,7 @@ jobs:
           version: "0.9.18"
       - run: uv sync
       - name: Run unit tests
-        run: uv run pytest tests/unit/ tests/catalog/
+        run: uv run invoke test-unit
 
   # Runs the whole demo against a throwaway Infrahub stack booted by
   # infrahub-testcontainers. The Infrahub release under test is whatever
