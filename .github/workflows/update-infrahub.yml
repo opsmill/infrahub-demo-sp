@@ -1,28 +1,42 @@
 ---
-# yamllint disable rule:truthy rule:truthy rule:line-length
-name: "Update Infrahub Test Containers Version"
+# yamllint disable rule:truthy rule:line-length
+name: "Update Infrahub Version"
+
+# Replaces the former update-infrahub.yml / update-infrahub-sdk.yml pair. The
+# bump opens a pull request and the pull request's own CI is the QA -- this
+# workflow deliberately runs no tests itself.
+#
+# Both conditional steps below are guarded on repository state rather than on a
+# hardcoded repository list, so this file is identical across the demo
+# repositories apart from the `files:` list. In this repository both guards
+# evaluate to "skip": there is no infrahub-testcontainers dependency (no
+# integration tier yet) and no Dockerfile (no custom image). That is why the
+# workflow this replaces was harmful -- it ran `uv add infrahub-testcontainers`
+# unconditionally and so *introduced* an unused dependency pinned to an Infrahub
+# version number, and advertised a `run` input for integration tests that was
+# never referenced anywhere in the body.
 
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: "Infrahub version to test"
+      infrahub_version:
+        description: "Infrahub version to bump to"
         required: true
-        default: "1.8.1"
-      run:
-        description: "Whether to run integration tests"
+        default: "1.10.8"
+      infrahub_sdk_version:
+        description: "infrahub-sdk version to bump to (optional; leave empty to leave the SDK alone)"
         required: false
-        type: boolean
-        default: true
+        default: ""
+      infrahub_testcontainers_version:
+        description: "infrahub-testcontainers version (optional; defaults to the Infrahub version)"
+        required: false
+        default: ""
 
   repository_dispatch:
     types: [trigger-infrahub-update]
 
-env:
-  # always needed
-  # INFRAHUB_API_TOKEN: ${{ secrets.INFRAHUB_API_TOKEN }}
-  INFRAHUB_TIMEOUT: 600
-  INFRAHUB_TESTING_LOG_LEVEL: INFO
+permissions:
+  contents: read
 
 jobs:
   update-dependencies:
@@ -33,43 +47,84 @@ jobs:
 
     runs-on: ubuntu-22.04
     concurrency:
-      group: update-infrahub-${{ github.event.client_payload.version }}-${{ matrix.branch-name }}
+      group: update-infrahub-${{ github.event.client_payload.version || github.event.inputs.infrahub_version }}-${{ matrix.branch-name }}
       cancel-in-progress: false
 
     env:
-      INFRAHUB_VERSION: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.version || github.event.inputs.version }}
-      BRANCH_NAME: ${{ matrix.branch-name }}-${{ github.event_name == 'repository_dispatch' && github.event.client_payload.version || github.event.inputs.version }}
+      INFRAHUB_VERSION: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.version || github.event.inputs.infrahub_version }}
+      SDK_VERSION: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.sdk_version || github.event.inputs.infrahub_sdk_version }}
+      TC_VERSION: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.testcontainers_version || github.event.inputs.infrahub_testcontainers_version }}
+      BRANCH_NAME: ${{ matrix.branch-name }}-${{ github.event_name == 'repository_dispatch' && github.event.client_payload.version || github.event.inputs.infrahub_version }}
+
     steps:
       - name: Check out code
         uses: actions/checkout@v7
 
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
-
       - name: Install uv
-        run: |
-          pip install uv
-          uv sync
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.9.18"
 
-      - name: Update testcontainers to workflow version ${{ env.INFRAHUB_VERSION }}
+      # Guarded on the dependency actually being declared. Without this guard
+      # the step would add infrahub-testcontainers to a repository that has no
+      # integration tier and therefore never imports it.
+      - name: Update infrahub-testcontainers
         run: |
-          uv add --group dev infrahub-testcontainers==${INFRAHUB_VERSION}
+          set -euo pipefail
+          if ! grep -q 'infrahub-testcontainers' pyproject.toml; then
+            echo "infrahub-testcontainers is not declared here; skipping."
+            exit 0
+          fi
+          VERSION="${TC_VERSION:-$INFRAHUB_VERSION}"
+          uv add --group dev "infrahub-testcontainers==${VERSION}"
+
+      - name: Update infrahub-sdk
+        run: |
+          set -euo pipefail
+          if [ -z "${SDK_VERSION}" ]; then
+            echo "No infrahub-sdk version requested; leaving it alone."
+            exit 0
+          fi
+          uv add "infrahub-sdk[all]==${SDK_VERSION}"
+
+      # Guarded on the repository actually building a custom image, not on a
+      # hardcoded list. This repository has no Dockerfile: `tasks.py` streams
+      # the compose file from infrahub.opsmill.io instead of vendoring one.
+      - name: Update the custom image base version
+        run: |
+          set -euo pipefail
+          if [ ! -f Dockerfile ]; then
+            echo "No Dockerfile here; skipping the custom-image bump."
+            exit 0
+          fi
+          COMPOSE_URL="https://infrahub.opsmill.io/${INFRAHUB_VERSION}"
+          BODY=$(curl -fsSL "${COMPOSE_URL}")
+          # Superseded patch versions return 200 with an empty body, so a
+          # missing `services:` key means the version does not exist.
+          if ! printf '%s' "${BODY}" | grep -q 'services:'; then
+            echo "::error::${COMPOSE_URL} returned no compose content; is ${INFRAHUB_VERSION} a real release?"
+            exit 1
+          fi
+          perl -pi -e "s/^ARG INFRAHUB_BASE_VERSION=.*/ARG INFRAHUB_BASE_VERSION=${INFRAHUB_VERSION}/" Dockerfile
+          if [ -f docker-compose.override.yml ]; then
+            perl -pi -e "s/INFRAHUB_BASE_VERSION:-[^}]*/INFRAHUB_BASE_VERSION:-${INFRAHUB_VERSION}/" docker-compose.override.yml
+          fi
 
       - name: Prepare the branch for the update
-        id: prepare-branch
         run: |
-          echo "Checking if branch ${{ env.BRANCH_NAME }} exists..."
-          BRANCH_EXISTS=$(git ls-remote --heads origin ${{ env.BRANCH_NAME }} | wc -l)
-          echo "BRANCH_EXISTS=$BRANCH_EXISTS" >> $GITHUB_ENV
+          set -euo pipefail
+          BRANCH_EXISTS=$(git ls-remote --heads origin "${BRANCH_NAME}" | wc -l)
+          echo "BRANCH_EXISTS=${BRANCH_EXISTS}" >> "$GITHUB_ENV"
 
-      - name: Commit and push changes with github-actions-x/commit
+      # A PAT, not GITHUB_TOKEN: pushes made with GITHUB_TOKEN do not trigger
+      # workflow runs, so the pull request would open with no checks -- and the
+      # pull request's CI is the entire point of this workflow.
+      - name: Commit and push the update
         uses: github-actions-x/commit@v2.9
         with:
-          github-token: ${{ secrets.PAT_TOKEN }}
+          github-token: ${{ secrets.GH_UPDATE_PACKAGE_OTTO }}
           push-branch: ${{ env.BRANCH_NAME }}
-          commit-message: "chore: update test-containers to version ${{ env.INFRAHUB_VERSION }} and bump version in pyproject"
+          commit-message: "chore: bump Infrahub to ${{ env.INFRAHUB_VERSION }}"
           files: |
             pyproject.toml
             uv.lock
@@ -78,10 +133,12 @@ jobs:
           rebase: ${{ env.BRANCH_EXISTS == 1 }}
 
       - name: Create a pull request
+        env:
+          GH_TOKEN: ${{ secrets.GH_UPDATE_PACKAGE_OTTO }}
         run: |
-          echo ${{ secrets.PAT_TOKEN }} | gh auth login --with-token
+          set -euo pipefail
           gh pr create \
-            --title "update test-containers to version ${{ env.INFRAHUB_VERSION }} against ${{ matrix.branch-name}}" \
-            --body "This PR updates test-containers to version ${{ env.INFRAHUB_VERSION }}." \
-            --base ${{ matrix.branch-name}} \
-            --head ${{ env.BRANCH_NAME }}
+            --title "chore: bump Infrahub to ${INFRAHUB_VERSION} against ${{ matrix.branch-name }}" \
+            --body "Bumps this demo to Infrahub ${INFRAHUB_VERSION}. The checks on this pull request are the validation for the bump." \
+            --base "${{ matrix.branch-name }}" \
+            --head "${BRANCH_NAME}"
