@@ -152,9 +152,14 @@ jobs:
             exit 0
           fi
           VERSION="${TC_VERSION:-$INFRAHUB_VERSION}"
-          perl -pi -e "s/(\"infrahub-testcontainers==)[^\"]+/\${1}${VERSION}/" pyproject.toml
-          grep -q "\"infrahub-testcontainers==${VERSION}\"" pyproject.toml || {
-            echo "::error::Failed to rewrite the infrahub-testcontainers pin."
+          # Operator-agnostic, and `[^,"]+` rather than `[^"]+` so a bounded
+          # specifier keeps its upper bound. The four demo repositories declare
+          # this three different ways -- `==1.10.6`, `>=1.11.0b0`, and
+          # `>=1.10.0,<2.0.0` -- and a pattern that assumed `==` would silently
+          # no-op on two of them, while a greedy one would eat the `<2.0.0`.
+          perl -pi -e "s/(\"infrahub-testcontainers[=<>~]+)[^,\"]+/\${1}${VERSION}/" pyproject.toml
+          grep -q "\"infrahub-testcontainers[=<>~]*${VERSION}" pyproject.toml || {
+            echo "::error::Failed to rewrite the infrahub-testcontainers specifier."
             exit 1
           }
 
