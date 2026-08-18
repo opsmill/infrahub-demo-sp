@@ -114,6 +114,18 @@ ignore_missing_imports = true
 module = "pandas"
 ignore_missing_imports = true
 
+# numpy is never imported directly here — it arrives transitively through the
+# pandas import in checks/batfish_helpers.py. On Python >=3.12 the lock resolves
+# numpy >=2.5, whose stubs use PEP 695 `type` statements that mypy rejects while
+# checking against python_version = "3.10" (the floor this project supports).
+# ignore_missing_imports does not apply: the stub is found, so mypy follows it.
+# Nothing here is annotated against numpy, so stop following it entirely.
+# follow_imports alone is ignored for .pyi files, hence follow_imports_for_stubs.
+[[tool.mypy.overrides]]
+module = ["numpy", "numpy.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true
+
 [tool.pytest.ini_options]
 # Only the fast suites run on a bare `uv run pytest`. tests/integration/ boots
 # a real Infrahub stack via testcontainers and needs Docker, so it is opt-in:
