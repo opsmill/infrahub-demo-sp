@@ -128,7 +128,7 @@ jobs:
       # seeded admin token from infrahub_testcontainers, so CI and a local run
       # authenticate identically.
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Install tini
         run: "apt-get update && apt-get install -y tini"
       - name: Install uv
