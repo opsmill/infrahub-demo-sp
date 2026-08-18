@@ -1,0 +1,21 @@
+pyproject.toml
+  s_eadbafaa1ad164::t_353ac23052fc2c 6,22-28,34-37,40,61,82,147,151,157-161,170
+uv.lock
+  s_eadbafaa1ad164::t_daec575c1a89f3 3,5-7,14-16,71,185-212,292-347,1094,1100-1103,1105-1108,1111-1112,1130-1133,1135-1138,1142,1409-1452,1466,1475-1508,1804-1805,2134-2161,2171,2247-2291,2369-2380,2426,2564-2591,2601,2938-2952,3013-3045,3073,3094,3189-3215,3561-3616
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "2fe30e1e0ce299161a9912cf4fa04e5ff0dc3e20",
+  "prompts": {},
+  "sessions": {
+    "s_eadbafaa1ad164": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b7ed5902-85f6-473d-b2ee-262f5ade9b2c",
+        "model": "unknown"
+      },
+      "human_author": "Benoit Kohler <Kohler.benoit@bearchitek.com>"
+    }
+  }
+}
