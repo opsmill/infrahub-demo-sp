@@ -1,0 +1,21 @@
+pyproject.toml
+  s_eadbafaa1ad164::t_fc737d2aa148c4 81-87
+.github/workflows/ci.yml
+  s_eadbafaa1ad164::t_fc737d2aa148c4 50-58,65
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "dc33bbf88d46ba09209d4025845cd84e46003a8a",
+  "prompts": {},
+  "sessions": {
+    "s_eadbafaa1ad164": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b7ed5902-85f6-473d-b2ee-262f5ade9b2c",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Benoit Kohler <Kohler.benoit@bearchitek.com>"
+    }
+  }
+}
