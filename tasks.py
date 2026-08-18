@@ -469,28 +469,158 @@ def init_demo(c: Context) -> None:
     )
 
 
-@task
-def lint(c: Context) -> None:
-    """Run the full lint suite: ruff, mypy, yamllint."""
-    _banner("invoke lint", border="cyan")
+@task(name="lint-ruff")
+def lint_ruff(c: Context) -> None:
+    """Lint and check the formatting of all Python files with ruff.
+
+    Args:
+        c: Invoke Context.
+    """
     _step("ruff check")
+    # Two commands, not one: `ruff check` does not check formatting, and the
+    # `format` task cannot stand in for it because `format` rewrites files and
+    # would pass in CI regardless of what it rewrote. `ruff check --select I .`
+    # is deliberately absent -- `I` is already in select, and --select sets
+    # rather than extends the rule list, so it could never fail on its own.
     c.run("uv run ruff check .", pty=True)
     _step("ruff format --check")
-    c.run("uv run ruff format --check .", pty=True)
+    c.run("uv run ruff format --check --diff .", pty=True)
+
+
+@task(name="lint-mypy")
+def lint_mypy(c: Context) -> None:
+    """Type-check all Python files with mypy.
+
+    Args:
+        c: Invoke Context.
+    """
     _step("mypy")
-    c.run("uv run mypy .", pty=True)
+    c.run("uv run mypy --show-error-codes .", pty=True)
+
+
+@task(name="lint-yaml")
+def lint_yaml(c: Context) -> None:
+    """Lint all YAML files with yamllint.
+
+    Args:
+        c: Invoke Context.
+    """
     _step("yamllint")
-    c.run("uv run yamllint .", pty=True)
+    # -s promotes warnings to errors. CI has always passed it and this task
+    # never did; without it, routing CI through this task would silently end
+    # warning-level YAML enforcement.
+    c.run("uv run yamllint -s .", pty=True)
+
+
+@task(name="lint-markdown")
+def lint_markdown(c: Context) -> None:
+    """Lint all Markdown files with rumdl.
+
+    Args:
+        c: Invoke Context.
+    """
+    _step("rumdl")
+    # --fail-on error matches the `args:` given to the rvben/rumdl action in
+    # ci.yml, so the local gate and the CI gate agree: broken links and missing
+    # frontmatter block, pre-existing warnings (line length, bare URLs) do not.
+    c.run("uv run rumdl check . --fail-on error", pty=True)
+
+
+@task
+def lint(c: Context) -> None:
+    """Run the full lint suite: markdown, YAML, ruff, mypy.
+
+    Args:
+        c: Invoke Context.
+    """
+    _banner("invoke lint", border="cyan")
+    lint_markdown(c)
+    lint_yaml(c)
+    lint_ruff(c)
+    lint_mypy(c)
     _success("Lint suite passed")
 
 
-@task
-def test(c: Context, kind: str = "unit") -> None:
-    """Run pytest; kind in {unit, integration, catalog, all}."""
-    _banner(f"invoke test --kind {kind}", border="cyan")
-    target = "tests/" if kind == "all" else f"tests/{kind}/"
-    c.run(f"uv run pytest {target}", pty=True)
-    _success(f"{kind} tests passed")
+@task(name="format")
+def format_code(c: Context) -> None:
+    """Format all Python files with ruff, applying safe lint fixes.
+
+    Args:
+        c: Invoke Context.
+    """
+    _banner("invoke format", border="green")
+    _step("ruff format")
+    c.run("uv run ruff format .", pty=True)
+    _step("ruff check --fix")
+    c.run("uv run ruff check . --fix", pty=True)
+    _success("Formatting completed")
+
+
+@task(name="test-unit")
+def test_unit(c: Context) -> None:
+    """Run every test that needs no Infrahub deployment.
+
+    Args:
+        c: Invoke Context.
+    """
+    _banner("invoke test-unit", border="cyan")
+    # Two invocations because the deployment-free tests live in two places: the
+    # unit directory, and the integration tests marked `offline`, which read
+    # only repository files and resolution logic. A single `-m offline` run over
+    # tests/ would not cover tests/unit, and a marker selection matching nothing
+    # exits 5 rather than 0, so the two are kept separate and explicit.
+    c.run("uv run pytest tests/unit", pty=True)
+    # `pytest.mark.offline` lives in exactly one place
+    # (tests/integration/test_01_stack_config.py). If that marker is ever
+    # dropped -- the shared contract invites doing so once the guard it exists
+    # for is no longer needed -- this invocation would collect nothing and
+    # exit 5, which would otherwise fail this task for a reason unrelated to
+    # any test failing. Tolerate only that code here; any other non-zero exit
+    # still fails the task.
+    result = c.run("uv run pytest tests/integration -m offline", pty=True, warn=True)
+    if result.exited not in (0, 5):
+        raise Exit(
+            f"uv run pytest tests/integration -m offline failed (exit {result.exited})",
+            code=result.exited,
+        )
+    _success("Unit tests passed")
+
+
+@task(
+    name="test-integration",
+    help={"tier": "core (default) runs everything but the extended tier; full runs all of it."},
+)
+def test_integration(c: Context, tier: str = "core") -> None:
+    """Run the integration suite against a throwaway Infrahub deployment.
+
+    Needs Docker. The Infrahub release under test is whatever
+    `[dependency-groups] dev` pins ``infrahub-testcontainers`` to.
+
+    Args:
+        c: Invoke Context.
+        tier: Either ``core`` or ``full``.
+    """
+    if tier not in {"core", "full"}:
+        raise Exit(f"tier must be 'core' or 'full', got {tier!r}")
+    _banner(f"invoke test-integration --tier {tier}", border="cyan")
+    # No test carries `extended` yet, so `core` and `full` currently collect the
+    # same set. The split is here so tiering a slow module later is a one-line
+    # marker change rather than a CI change.
+    marker = "" if tier == "full" else ' -m "not extended"'
+    c.run(f"uv run pytest tests/integration{marker}", pty=True)
+    _success(f"Integration tests passed ({tier})")
+
+
+@task(name="test")
+def test_all(c: Context) -> None:
+    """Run every test in the repository, unit and integration.
+
+    Args:
+        c: Invoke Context.
+    """
+    _banner("invoke test", border="cyan")
+    c.run("uv run pytest tests", pty=True)
+    _success("Tests passed")
 
 
 @task
@@ -706,8 +836,15 @@ ns.add_task(start)
 ns.add_task(destroy)
 ns.add_task(bootstrap)
 ns.add_task(init_demo)
+ns.add_task(lint_markdown)
+ns.add_task(lint_yaml)
+ns.add_task(lint_ruff)
+ns.add_task(lint_mypy)
 ns.add_task(lint)
-ns.add_task(test)
+ns.add_task(format_code)
+ns.add_task(test_unit)
+ns.add_task(test_integration)
+ns.add_task(test_all)
 ns.add_task(batfish)
 ns.add_task(docs)
 ns.add_collection(lab)

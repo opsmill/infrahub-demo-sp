@@ -15,6 +15,9 @@ permissions:
   contents: read
   pull-requests: read
 
+env:
+  VALE_VERSION: "3.13.0"
+
 jobs:
   files-changed:
     name: Detect which file has changed
@@ -25,6 +28,8 @@ jobs:
       python: ${{ steps.changes.outputs.python_all }}
       yaml: ${{ steps.changes.outputs.yaml_all }}
       markdown: ${{ steps.changes.outputs.markdown_all }}
+      dependencies: ${{ steps.changes.outputs.dependencies_all }}
+      integration_scope: ${{ steps.scope.outputs.scope }}
     steps:
       - name: "Check out repository code"
         uses: "actions/checkout@v7"
@@ -34,27 +39,54 @@ jobs:
         with:
           token: ${{ github.token }}
           filters: .github/file-filters.yml
+      - name: Decide how much of the integration suite to run
+        id: scope
+        env:
+          IS_FULL: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'full-integration') }}
+        run: |
+          set -euo pipefail
+          if [ "${IS_FULL}" = "true" ]; then
+            echo "scope=full" >> "$GITHUB_OUTPUT"
+          else
+            echo "scope=core" >> "$GITHUB_OUTPUT"
+          fi
 
   python-lint:
-    if: needs.files-changed.outputs.python == 'true'
+    # `dependencies` as well as `python`: a version-bump pull request touches
+    # only pyproject.toml and uv.lock, matches no `**/*.py` filter, and would
+    # otherwise skip this job entirely. Closed PR #106 is the worked example --
+    # it went green with python-lint, yaml-lint and markdown-lint all skipped.
+    if: |
+      needs.files-changed.outputs.python == 'true' ||
+      needs.files-changed.outputs.dependencies == 'true'
     needs: ["files-changed"]
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both ends of requires-python, so the supported range stays honest.
+        # This is what earns the right to leave `mypy python_version` unset:
+        # each leg checks that leg's own resolved packages, so the declared
+        # floor is verified without pinning semantics against packages
+        # resolved for a different version.
+        python-version: ["3.11", "3.14"]
     steps:
       - uses: actions/checkout@v7
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
           version: "0.9.18"
+          python-version: ${{ matrix.python-version }}
       - run: uv sync
-      - name: Check code formatting
-        run: |
-          uv run ruff format --check --diff
-          uv run ruff check --select I .
-      - name: Run linters
-        run: uv run ruff check
+      # The invoke tasks are the gate; CI calls the same code a developer runs
+      # locally, so the two cannot drift. `ruff check --select I .` used to run
+      # here and is deliberately gone: `I` is already in the select list, and
+      # --select sets rather than extends it, so it could never fail on its own.
+      - name: Run ruff
+        run: uv run invoke lint-ruff
       - name: Run type checks
-        run: uv run mypy .
+        run: uv run invoke lint-mypy
 
   yaml-lint:
     if: needs.files-changed.outputs.yaml == 'true'
@@ -69,7 +101,7 @@ jobs:
           version: "0.9.18"
       - run: uv sync
       - name: Run yamllint
-        run: uv run yamllint -s .
+        run: uv run invoke lint-yaml
 
   markdown-lint:
     if: needs.files-changed.outputs.markdown == 'true'
@@ -78,9 +110,13 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
+      # This job keeps the action rather than calling `invoke lint-markdown`,
+      # because inline pull-request annotations are worth the inconsistency.
+      # The task runs the same `--fail-on error`, so the two gates agree.
       - name: Run rumdl
         uses: rvben/rumdl@v0
         with:
+          config: pyproject.toml
           report-type: annotations
           # Only fail CI on errors (broken relative links, missing required
           # frontmatter, etc.). Pre-existing warnings (line length, bare
@@ -104,7 +140,46 @@ jobs:
           version: "0.9.18"
       - run: uv sync
       - name: Run unit tests
-        run: uv run pytest tests/unit/ tests/catalog/
+        run: uv run invoke test-unit
+
+  # Runs the whole demo against a throwaway Infrahub stack booted by
+  # infrahub-testcontainers. The Infrahub release under test is whatever
+  # `[dependency-groups] dev` pins infrahub-testcontainers to, which is what
+  # update-infrahub.yml bumps when a new version ships — so the bot's PR is
+  # what actually validates the new release against this demo.
+  integration-test:
+    name: "integration-test (${{ needs.files-changed.outputs.integration_scope }})"
+    if: |
+      always() && !cancelled() &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled')
+    needs: ["files-changed", "python-lint", "yaml-lint", "markdown-lint"]
+    runs-on:
+      group: "huge-runners"
+    timeout-minutes: ${{ needs.files-changed.outputs.integration_scope == 'full' && 180 || 75 }}
+    env:
+      INFRAHUB_DB_TYPE: neo4j
+      INFRAHUB_TIMEOUT: 600
+      INFRAHUB_TESTING_LOG_LEVEL: INFO
+      # No INFRAHUB_API_TOKEN here on purpose: the suite reads the container's
+      # seeded admin token from infrahub_testcontainers, so CI and a local run
+      # authenticate identically.
+      SCOPE: ${{ needs.files-changed.outputs.integration_scope }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install tini
+        run: "apt-get update && apt-get install -y tini"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.9.18"
+      - run: uv sync
+      - name: Set environment variables
+        run: |
+          RUNNER_NAME=$(echo "${{ runner.name }}" | grep -o 'ghrunner[0-9]\+' | sed 's/ghrunner\([0-9]\+\)/ghrunner_\1/')
+          echo "PYTEST_DEBUG_TEMPROOT=/var/lib/github/${RUNNER_NAME}/_temp" >> $GITHUB_ENV
+      - name: Run integration tests
+        run: exec tini -s -g -- uv run invoke test-integration --tier="${SCOPE}"
 
   documentation:
     defaults:
@@ -151,8 +226,6 @@ jobs:
     needs: ["files-changed", "yaml-lint", "python-lint", "markdown-lint"]
     runs-on: "ubuntu-22.04"
     timeout-minutes: 5
-    env:
-      VALE_VERSION: "3.13.0"
     steps:
       - uses: "actions/checkout@v7"
         with:
