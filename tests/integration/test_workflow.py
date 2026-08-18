@@ -392,15 +392,23 @@ class TestSpDemoWorkflow(TestInfrahubDockerWithClient):
             )
         logging.info("%d L3VPN sites materialised", len(sites))
 
-        sessions = await client.filters(
-            kind="RoutingBGPSession",
-            description__value=f"L3VPN PE-CE {BOOTSTRAP_VPN} london",
-        )
-        assert sessions, (
-            "generator did not create the PE-CE eBGP session for the london site.\n"
-            f"  sessions present: "
-            f"{[s.description.value for s in await client.all(kind='RoutingBGPSession')]}"
-        )
+        # Derived from the sites the generator actually materialised rather than
+        # naming one. Hardcoding a site name couples this assertion to whichever
+        # dataset happens to be loaded -- it read "london", which the financial
+        # overlay renamed to "trading-london" when it grew a second customer VPN.
+        # Every eBGP site must have its PE-side session; that is the invariant.
+        all_sessions = await client.all(kind="RoutingBGPSession")
+        described = {s.description.value for s in all_sessions}
+        ebgp_sites = [s for s in sites if s.routing_protocol.value == "ebgp"]
+        assert ebgp_sites, "dataset defines no eBGP L3VPN site to verify"
+        for site in ebgp_sites:
+            vpn_name = site.l3vpn.peer.name.value
+            expected = f"L3VPN PE-CE {vpn_name} {site.name.value}"
+            assert expected in described, (
+                f"generator did not create the PE-CE eBGP session for {site.name.value}.\n"
+                f"  expected: {expected}\n"
+                f"  sessions present: {sorted(described)}"
+            )
 
     @pytest.mark.order(10)
     @pytest.mark.dependency(name="artifacts", depends=["generated_data"])
