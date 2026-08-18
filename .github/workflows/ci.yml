@@ -29,6 +29,7 @@ jobs:
       yaml: ${{ steps.changes.outputs.yaml_all }}
       markdown: ${{ steps.changes.outputs.markdown_all }}
       dependencies: ${{ steps.changes.outputs.dependencies_all }}
+      integration_scope: ${{ steps.scope.outputs.scope }}
     steps:
       - name: "Check out repository code"
         uses: "actions/checkout@v7"
@@ -38,6 +39,17 @@ jobs:
         with:
           token: ${{ github.token }}
           filters: .github/file-filters.yml
+      - name: Decide how much of the integration suite to run
+        id: scope
+        env:
+          IS_FULL: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'full-integration') }}
+        run: |
+          set -euo pipefail
+          if [ "${IS_FULL}" = "true" ]; then
+            echo "scope=full" >> "$GITHUB_OUTPUT"
+          else
+            echo "scope=core" >> "$GITHUB_OUTPUT"
+          fi
 
   python-lint:
     # `dependencies` as well as `python`: a version-bump pull request touches
@@ -136,14 +148,15 @@ jobs:
   # update-infrahub.yml bumps when a new version ships — so the bot's PR is
   # what actually validates the new release against this demo.
   integration-test:
+    name: "integration-test (${{ needs.files-changed.outputs.integration_scope }})"
     if: |
       always() && !cancelled() &&
       !contains(needs.*.result, 'failure') &&
       !contains(needs.*.result, 'cancelled')
-    needs: ["python-lint", "yaml-lint", "markdown-lint"]
+    needs: ["files-changed", "python-lint", "yaml-lint", "markdown-lint"]
     runs-on:
       group: "huge-runners"
-    timeout-minutes: 90
+    timeout-minutes: ${{ needs.files-changed.outputs.integration_scope == 'full' && 180 || 75 }}
     env:
       INFRAHUB_DB_TYPE: neo4j
       INFRAHUB_TIMEOUT: 600
@@ -151,6 +164,7 @@ jobs:
       # No INFRAHUB_API_TOKEN here on purpose: the suite reads the container's
       # seeded admin token from infrahub_testcontainers, so CI and a local run
       # authenticate identically.
+      SCOPE: ${{ needs.files-changed.outputs.integration_scope }}
     steps:
       - uses: actions/checkout@v7
       - name: Install tini
@@ -165,7 +179,7 @@ jobs:
           RUNNER_NAME=$(echo "${{ runner.name }}" | grep -o 'ghrunner[0-9]\+' | sed 's/ghrunner\([0-9]\+\)/ghrunner_\1/')
           echo "PYTEST_DEBUG_TEMPROOT=/var/lib/github/${RUNNER_NAME}/_temp" >> $GITHUB_ENV
       - name: Run integration tests
-        run: exec tini -s -g -- uv run invoke test-integration
+        run: exec tini -s -g -- uv run invoke test-integration --tier="${SCOPE}"
 
   documentation:
     defaults:
