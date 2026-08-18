@@ -16,8 +16,11 @@ from pathlib import Path
 
 import pytest
 from infrahub_sdk import Config, InfrahubClient, InfrahubClientSync
+from infrahub_testcontainers import __version__ as testcontainers_version
 from infrahub_testcontainers.container import PROJECT_ENV_VARIABLES
 from infrahub_testcontainers.helpers import TestInfrahubDocker
+
+from .stack_config import StackImage, resolve_stack_image
 
 TEST_DIRECTORY = Path(__file__).parent
 PROJECT_DIRECTORY = TEST_DIRECTORY.parent.parent
@@ -26,7 +29,47 @@ PROJECT_DIRECTORY = TEST_DIRECTORY.parent.parent
 # explicitly keeps the suite self-contained: without it the clients fall back to
 # whatever INFRAHUB_API_TOKEN happens to be in the environment, so mutations
 # fail with AuthenticationError anywhere that variable isn't already set.
-ADMIN_TOKEN = PROJECT_ENV_VARIABLES["INFRAHUB_TESTING_INITIAL_ADMIN_TOKEN"]
+#
+# Resolved through os.environ first, mirroring what the .env writer does at
+# container.py:178-181 (`os.environ.get(key, value)`). Nothing merges an
+# override back into PROJECT_ENV_VARIABLES, so reading the dict alone would hand
+# the clients the packaged default while the container ran the override -- the
+# same resolved-versus-running divergence `stack_config` exists to prevent,
+# arriving through the token instead of the image.
+_ADMIN_TOKEN_VARIABLE = "INFRAHUB_TESTING_INITIAL_ADMIN_TOKEN"
+ADMIN_TOKEN = os.environ.get(_ADMIN_TOKEN_VARIABLE, PROJECT_ENV_VARIABLES[_ADMIN_TOKEN_VARIABLE])
+
+
+@pytest.fixture(scope="session")
+def stack_image() -> StackImage:
+    """Image and tag the stack runs, resolved from the environment.
+
+    This repository runs vanilla Infrahub -- no Dockerfile, no custom image --
+    so it passes no repository, no default tag and no ``custom_build``, and the
+    defaults are the vanilla case.
+
+    Returns:
+        The resolved image. See ``stack_config`` for why this does not read
+        ``PROJECT_ENV_VARIABLES``.
+    """
+    return resolve_stack_image(os.environ, testcontainers_version)
+
+
+@pytest.fixture(scope="session")
+def infrahub_version(stack_image: StackImage) -> str:
+    """Infrahub image tag under test.
+
+    Args:
+        stack_image: The resolved stack image.
+
+    Returns:
+        The resolved tag -- an explicit override when one is set, otherwise the
+        installed ``infrahub-testcontainers`` version. The latter is the case a
+        dependency-bump pull request exercises: moving the pin moves the version
+        under test, with no CI wiring at all.
+    """
+    return stack_image.tag
+
 
 # Tracked subtrees the Infrahub server never reads. Excluding them keeps the
 # snapshot (and the clone the server makes from it) small.

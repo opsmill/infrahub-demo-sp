@@ -455,7 +455,13 @@ def test_unit(c: Context) -> None:
         c: Invoke Context.
     """
     _banner("invoke test-unit", border="cyan")
-    c.run("uv run pytest tests/unit", pty=True)
+    # Two invocations because the deployment-free tests live in two places: the
+    # unit directory, and the integration tests marked `offline`, which read
+    # only repository files and resolution logic. A single `-m offline` run over
+    # tests/ would not cover tests/unit, and a marker selection matching nothing
+    # exits 5 rather than 0, so the two are kept separate and explicit.
+    for cmd in ("uv run pytest tests/unit", "uv run pytest tests/integration -m offline"):
+        c.run(cmd, pty=True)
     _success("Unit tests passed")
 
 
