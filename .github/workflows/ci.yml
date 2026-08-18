@@ -15,6 +15,9 @@ permissions:
   contents: read
   pull-requests: read
 
+env:
+  VALE_VERSION: "3.13.0"
+
 jobs:
   files-changed:
     name: Detect which file has changed
@@ -209,8 +212,6 @@ jobs:
     needs: ["files-changed", "yaml-lint", "python-lint", "markdown-lint"]
     runs-on: "ubuntu-22.04"
     timeout-minutes: 5
-    env:
-      VALE_VERSION: "3.13.0"
     steps:
       - uses: "actions/checkout@v7"
         with:
