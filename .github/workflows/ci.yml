@@ -25,6 +25,7 @@ jobs:
       python: ${{ steps.changes.outputs.python_all }}
       yaml: ${{ steps.changes.outputs.yaml_all }}
       markdown: ${{ steps.changes.outputs.markdown_all }}
+      dependencies: ${{ steps.changes.outputs.dependencies_all }}
     steps:
       - name: "Check out repository code"
         uses: "actions/checkout@v7"
@@ -36,7 +37,13 @@ jobs:
           filters: .github/file-filters.yml
 
   python-lint:
-    if: needs.files-changed.outputs.python == 'true'
+    # `dependencies` as well as `python`: a version-bump pull request touches
+    # only pyproject.toml and uv.lock, matches no `**/*.py` filter, and would
+    # otherwise skip this job entirely. Closed PR #106 is the worked example --
+    # it went green with python-lint, yaml-lint and markdown-lint all skipped.
+    if: |
+      needs.files-changed.outputs.python == 'true' ||
+      needs.files-changed.outputs.dependencies == 'true'
     needs: ["files-changed"]
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -145,7 +152,7 @@ jobs:
           RUNNER_NAME=$(echo "${{ runner.name }}" | grep -o 'ghrunner[0-9]\+' | sed 's/ghrunner\([0-9]\+\)/ghrunner_\1/')
           echo "PYTEST_DEBUG_TEMPROOT=/var/lib/github/${RUNNER_NAME}/_temp" >> $GITHUB_ENV
       - name: Run integration tests
-        run: exec tini -s -g -- uv run pytest tests/integration/
+        run: exec tini -s -g -- uv run invoke test-integration
 
   documentation:
     defaults:

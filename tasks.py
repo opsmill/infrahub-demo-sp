@@ -11,6 +11,7 @@ from pathlib import Path
 import yaml
 from invoke.collection import Collection
 from invoke.context import Context
+from invoke.exceptions import Exit
 from invoke.tasks import task
 from rich import box
 from rich.console import Console
@@ -458,13 +459,34 @@ def test_unit(c: Context) -> None:
     _success("Unit tests passed")
 
 
+@task(
+    name="test-integration",
+    help={"tier": "core (default) runs everything but the extended tier; full runs all of it."},
+)
+def test_integration(c: Context, tier: str = "core") -> None:
+    """Run the integration suite against a throwaway Infrahub deployment.
+
+    Needs Docker. The Infrahub release under test is whatever
+    `[dependency-groups] dev` pins ``infrahub-testcontainers`` to.
+
+    Args:
+        c: Invoke Context.
+        tier: Either ``core`` or ``full``.
+    """
+    if tier not in {"core", "full"}:
+        raise Exit(f"tier must be 'core' or 'full', got {tier!r}")
+    _banner(f"invoke test-integration --tier {tier}", border="cyan")
+    # No test carries `extended` yet, so `core` and `full` currently collect the
+    # same set. The split is here so tiering a slow module later is a one-line
+    # marker change rather than a CI change.
+    marker = "" if tier == "full" else ' -m "not extended"'
+    c.run(f"uv run pytest tests/integration{marker}", pty=True)
+    _success(f"Integration tests passed ({tier})")
+
+
 @task(name="test")
 def test_all(c: Context) -> None:
-    """Run every test in the repository.
-
-    There is no `test-integration` counterpart: this repository has no
-    integration tier yet, so `test` and `test-unit` currently cover the same
-    ground. They diverge when the tier lands.
+    """Run every test in the repository, unit and integration.
 
     Args:
         c: Invoke Context.
@@ -671,6 +693,7 @@ ns.add_task(lint_mypy)
 ns.add_task(lint)
 ns.add_task(format_code)
 ns.add_task(test_unit)
+ns.add_task(test_integration)
 ns.add_task(test_all)
 ns.add_task(batfish)
 ns.add_task(docs)
