@@ -47,12 +47,22 @@ jobs:
     needs: ["files-changed"]
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both ends of requires-python, so the supported range stays honest.
+        # This is what earns the right to leave `mypy python_version` unset:
+        # each leg checks that leg's own resolved packages, so the declared
+        # floor is verified without pinning semantics against packages
+        # resolved for a different version.
+        python-version: ["3.11", "3.14"]
     steps:
       - uses: actions/checkout@v7
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
           version: "0.9.18"
+          python-version: ${{ matrix.python-version }}
       - run: uv sync
       # The invoke tasks are the gate; CI calls the same code a developer runs
       # locally, so the two cannot drift. `ruff check --select I .` used to run
