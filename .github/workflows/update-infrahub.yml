@@ -19,9 +19,11 @@ name: "Update Infrahub Version"
 #
 # Both conditional bump steps are guarded on repository state rather than on a
 # hardcoded repository list, so this file is identical across the demo
-# repositories apart from the `files:` list. In this repository both guards
-# evaluate to "skip": there is no infrahub-testcontainers dependency (no
-# integration tier yet) and no Dockerfile (no custom image).
+# repositories apart from the `files:` list. In this repository the
+# infrahub-testcontainers guard evaluates to "run": pyproject.toml declares
+# infrahub-testcontainers with a version specifier for the integration tier.
+# Only the custom-image guard evaluates to "skip", since there is no
+# Dockerfile here (no custom image).
 
 on:
   workflow_dispatch:
@@ -107,6 +109,18 @@ jobs:
             TC_VERSION="${INPUT_TC}"
           fi
 
+          # Every version below is interpolated, unquoted, into a perl
+          # substitution and into $GITHUB_ENV. A value containing `/` or a
+          # newline would be perl code or env injection respectively -- reject
+          # anything that is not a plausible version before either happens.
+          for name in INFRAHUB_VERSION SDK_VERSION TC_VERSION; do
+            value="${!name}"
+            if [ -n "${value}" ] && ! [[ "${value}" =~ ^[0-9][0-9A-Za-z.+-]*$ ]]; then
+              echo "::error::${name} ('${value}') does not look like a version; refusing to use it."
+              exit 1
+            fi
+          done
+
           if [ -z "${INFRAHUB_VERSION}" ] && [ -z "${SDK_VERSION}" ]; then
             echo "::error::Neither an Infrahub version nor an infrahub-sdk version was given; nothing to bump."
             exit 1
@@ -157,6 +171,10 @@ jobs:
           # this three different ways -- `==1.10.6`, `>=1.11.0b0`, and
           # `>=1.10.0,<2.0.0` -- and a pattern that assumed `==` would silently
           # no-op on two of them, while a greedy one would eat the `<2.0.0`.
+          # This rewrite preserves shape, not pin: raising an unbounded `>=X`
+          # still leaves it unbounded, so `uv lock` may resolve above the
+          # version this bump claims to test. A repository declaring this
+          # dependency with `>=` should check its specifier actually pins.
           perl -pi -e "s/(\"infrahub-testcontainers[=<>~]+)[^,\"]+/\${1}${VERSION}/" pyproject.toml
           grep -q "\"infrahub-testcontainers[=<>~]*${VERSION}" pyproject.toml || {
             echo "::error::Failed to rewrite the infrahub-testcontainers specifier."
@@ -190,12 +208,23 @@ jobs:
       # the compose file from infrahub.opsmill.io instead of vendoring one.
       - name: Update the custom image base version
         if: env.INFRAHUB_VERSION != ''
+        env:
+          WORKFLOW_FILE: .github/workflows/update-infrahub.yml
         run: |
           set -euo pipefail
           if [ ! -f Dockerfile ]; then
             echo "No Dockerfile here; skipping the custom-image bump."
             exit 0
           fi
+          # The commit step below only stages files named literally in its
+          # `files:` list. If a repository grows a Dockerfile without adding
+          # it there, this step would rewrite the ARG and the commit step
+          # would silently drop that edit -- a green PR whose title claims a
+          # bump it only half performed. Fail loudly instead of shipping that.
+          grep -qE '^\s*Dockerfile\s*$' "${WORKFLOW_FILE}" || {
+            echo "::error::Dockerfile exists but is not in the commit step's files: list in ${WORKFLOW_FILE}; add it there before this step can run safely."
+            exit 1
+          }
           COMPOSE_URL="https://infrahub.opsmill.io/${INFRAHUB_VERSION}"
           BODY=$(curl -fsSL "${COMPOSE_URL}")
           # Superseded patch versions return 200 with an empty body, so a
@@ -206,6 +235,10 @@ jobs:
           fi
           perl -pi -e "s/^ARG INFRAHUB_BASE_VERSION=.*/ARG INFRAHUB_BASE_VERSION=${INFRAHUB_VERSION}/" Dockerfile
           if [ -f docker-compose.override.yml ]; then
+            grep -qE '^\s*docker-compose\.override\.yml\s*$' "${WORKFLOW_FILE}" || {
+              echo "::error::docker-compose.override.yml exists but is not in the commit step's files: list in ${WORKFLOW_FILE}; add it there before this step can run safely."
+              exit 1
+            }
             perl -pi -e "s/INFRAHUB_BASE_VERSION:-[^}]*/INFRAHUB_BASE_VERSION:-${INFRAHUB_VERSION}/" docker-compose.override.yml
           fi
 
