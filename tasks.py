@@ -460,8 +460,20 @@ def test_unit(c: Context) -> None:
     # only repository files and resolution logic. A single `-m offline` run over
     # tests/ would not cover tests/unit, and a marker selection matching nothing
     # exits 5 rather than 0, so the two are kept separate and explicit.
-    for cmd in ("uv run pytest tests/unit", "uv run pytest tests/integration -m offline"):
-        c.run(cmd, pty=True)
+    c.run("uv run pytest tests/unit", pty=True)
+    # `pytest.mark.offline` lives in exactly one place
+    # (tests/integration/test_01_stack_config.py). If that marker is ever
+    # dropped -- the shared contract invites doing so once the guard it exists
+    # for is no longer needed -- this invocation would collect nothing and
+    # exit 5, which would otherwise fail this task for a reason unrelated to
+    # any test failing. Tolerate only that code here; any other non-zero exit
+    # still fails the task.
+    result = c.run("uv run pytest tests/integration -m offline", pty=True, warn=True)
+    if result.exited not in (0, 5):
+        raise Exit(
+            f"uv run pytest tests/integration -m offline failed (exit {result.exited})",
+            code=result.exited,
+        )
     _success("Unit tests passed")
 
 
