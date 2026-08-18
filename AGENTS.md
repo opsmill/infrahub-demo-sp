@@ -103,7 +103,8 @@ Schema Definition → Data Loading → Generator Execution → Transform Process
 
 ## Testing Instructions
 
-1. **Before committing**: Run `uv run invoke test` to ensure all tests pass
+1. **Before committing**: Run `uv run invoke test-unit` to ensure the fast tests pass -- it is the
+   exact gate CI's `unit-test` job runs, and it needs no Docker
 2. **For new features**: Add tests under `tests/unit/`
 3. **Use mocks**: Mock external dependencies with `unittest.mock`
 4. **Test both paths**: Cover success and failure scenarios
@@ -143,7 +144,9 @@ This ensures:
 - Python code passes ruff linting and is correctly formatted
 - Type hints are correct (mypy)
 
-CI calls these same tasks, so passing locally means passing in CI.
+CI calls these same tasks, so passing locally means passing in CI -- except mypy, which checks
+whatever interpreter you run it with; only CI's 3.11 leg verifies the declared `requires-python`
+floor (see `[tool.mypy]` in `pyproject.toml`).
 
 ## Security Considerations
 
