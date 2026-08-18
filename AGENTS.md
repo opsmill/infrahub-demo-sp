@@ -33,7 +33,7 @@ uv run invoke init
 ## Build and Test Commands
 
 ```bash
-# Run all tests
+# Run the fast suites (unit + catalog) — the default testpaths
 uv run pytest
 
 # Run tests with verbose output
@@ -41,6 +41,11 @@ uv run pytest -vv
 
 # Run specific test categories
 uv run pytest tests/unit/
+uv run pytest tests/catalog/
+
+# Run the end-to-end suite: boots a throwaway Infrahub via testcontainers.
+# Opt-in (needs Docker) and takes tens of minutes, so it is excluded from the
+# default testpaths.
 uv run pytest tests/integration/
 
 # Lint and type check
@@ -98,7 +103,20 @@ Schema Definition → Data Loading → Generator Execution → Transform Process
 2. **For new features**: Add tests in `tests/unit/` or `tests/integration/`
 3. **Use mocks**: Mock external dependencies with `unittest.mock`
 4. **Test both paths**: Cover success and failure scenarios
-5. **Integration tests**: Require running Infrahub instance
+5. **Integration tests**: Boot their own Infrahub stack with
+   `infrahub-testcontainers` — Docker required, no `invoke start` needed. The
+   pinned version in `[dependency-groups] dev` is the Infrahub release under
+   test, and it is what the release automation bumps.
+
+### Infrahub release automation
+
+When a new Infrahub version ships, `opsmill/infrahub` fires a
+`repository_dispatch` at this repo. `.github/workflows/update-infrahub.yml`
+bumps `infrahub-testcontainers` to that version on a `main-<version>` branch
+and opens a PR; CI then runs `tests/integration/` against the new release, so
+the PR going red is the signal that the release breaks this demo. The same
+flow exists for the SDK in `update-infrahub-sdk.yml`. Both can be run by hand
+from the Actions tab via `workflow_dispatch`.
 
 ## Post-Change Validation
 

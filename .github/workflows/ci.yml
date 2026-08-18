@@ -106,6 +106,43 @@ jobs:
       - name: Run unit tests
         run: uv run pytest tests/unit/ tests/catalog/
 
+  # Runs the whole demo against a throwaway Infrahub stack booted by
+  # infrahub-testcontainers. The Infrahub release under test is whatever
+  # `[dependency-groups] dev` pins infrahub-testcontainers to, which is what
+  # update-infrahub.yml bumps when a new version ships — so the bot's PR is
+  # what actually validates the new release against this demo.
+  integration-test:
+    if: |
+      always() && !cancelled() &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled')
+    needs: ["python-lint", "yaml-lint", "markdown-lint"]
+    runs-on:
+      group: "huge-runners"
+    timeout-minutes: 90
+    env:
+      INFRAHUB_DB_TYPE: neo4j
+      INFRAHUB_TIMEOUT: 600
+      INFRAHUB_TESTING_LOG_LEVEL: INFO
+      # No INFRAHUB_API_TOKEN here on purpose: the suite reads the container's
+      # seeded admin token from infrahub_testcontainers, so CI and a local run
+      # authenticate identically.
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install tini
+        run: "apt-get update && apt-get install -y tini"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.9.18"
+      - run: uv sync
+      - name: Set environment variables
+        run: |
+          RUNNER_NAME=$(echo "${{ runner.name }}" | grep -o 'ghrunner[0-9]\+' | sed 's/ghrunner\([0-9]\+\)/ghrunner_\1/')
+          echo "PYTEST_DEBUG_TEMPROOT=/var/lib/github/${RUNNER_NAME}/_temp" >> $GITHUB_ENV
+      - name: Run integration tests
+        run: exec tini -s -g -- uv run pytest tests/integration/
+
   documentation:
     defaults:
       run:

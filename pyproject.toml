@@ -106,8 +106,14 @@ module = "pandas"
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+# Only the fast suites run on a bare `uv run pytest`. tests/integration/ boots
+# a real Infrahub stack via testcontainers and needs Docker, so it is opt-in:
+# `uv run pytest tests/integration/` or `uv run invoke test --kind integration`.
+testpaths = ["tests/unit", "tests/catalog"]
 asyncio_mode = "auto"
+# The integration suite keeps its Infrahub container alive for a whole test
+# class, so class-scoped async fixtures must share one event loop.
+asyncio_default_fixture_loop_scope = "class"
 addopts = "-vv --strict-markers"
 
 [tool.rumdl.global]
@@ -127,3 +133,10 @@ omit = ["tests/*", "scripts/*"]
 
 [tool.coverage.report]
 fail_under = 70
+
+[dependency-groups]
+dev = [
+    "infrahub-testcontainers==1.10.6",
+    "pytest-dependency>=0.6.0",
+    "pytest-order>=1.3.0",
+]
