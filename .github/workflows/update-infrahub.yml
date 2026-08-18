@@ -1,28 +1,53 @@
 ---
-# yamllint disable rule:truthy rule:truthy rule:line-length
-name: "Update Infrahub Test Containers Version"
+# yamllint disable rule:truthy rule:line-length
+name: "Update Infrahub Version"
+
+# Replaces the former update-infrahub.yml / update-infrahub-sdk.yml pair. The
+# bump opens a pull request and the pull request's own CI is the QA -- this
+# workflow deliberately runs no tests itself.
+#
+# It answers to BOTH upstream release pipelines. They are separate dispatches
+# that both put their number in `client_payload.version`, meaning different
+# things:
+#
+#   trigger-infrahub-update             -> version is the Infrahub version
+#   trigger-infrahub-sdk-python-update  -> version is the infrahub-sdk version
+#
+# Listening for only the first is why merging the two workflows is a trap: the
+# SDK pipeline's dispatch then matches no workflow at all and SDK auto-bumps
+# stop silently, with nothing failing to show it.
+#
+# Both conditional bump steps are guarded on repository state rather than on a
+# hardcoded repository list, so this file is identical across the demo
+# repositories apart from the `files:` list. In this repository the
+# infrahub-testcontainers guard evaluates to "run": pyproject.toml declares
+# infrahub-testcontainers with a version specifier for the integration tier.
+# Only the custom-image guard evaluates to "skip", since there is no
+# Dockerfile here (no custom image).
 
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: "Infrahub version to test"
-        required: true
-        default: "1.8.1"
-      run:
-        description: "Whether to run integration tests"
+      infrahub_version:
+        description: "Infrahub version to bump to (leave empty to bump only the SDK)"
         required: false
-        type: boolean
-        default: true
+        default: "1.10.8"
+      infrahub_sdk_version:
+        description: "infrahub-sdk version to bump to (optional; leave empty to leave the SDK alone)"
+        required: false
+        default: ""
+      infrahub_testcontainers_version:
+        description: "infrahub-testcontainers version (optional; defaults to the Infrahub version)"
+        required: false
+        default: ""
 
   repository_dispatch:
-    types: [trigger-infrahub-update]
+    types:
+      - trigger-infrahub-update
+      - trigger-infrahub-sdk-python-update
 
-env:
-  # always needed
-  # INFRAHUB_API_TOKEN: ${{ secrets.INFRAHUB_API_TOKEN }}
-  INFRAHUB_TIMEOUT: 600
-  INFRAHUB_TESTING_LOG_LEVEL: INFO
+permissions:
+  contents: read
 
 jobs:
   update-dependencies:
@@ -33,43 +58,205 @@ jobs:
 
     runs-on: ubuntu-22.04
     concurrency:
-      group: update-infrahub-${{ github.event.client_payload.version }}-${{ matrix.branch-name }}
+      # Keyed on the dispatch type as well as the version, so an Infrahub bump
+      # and an SDK bump to the same number do not serialize against each other.
+      group: update-infrahub-${{ github.event.action || 'manual' }}-${{ github.event.client_payload.version || github.event.inputs.infrahub_version || github.event.inputs.infrahub_sdk_version }}-${{ matrix.branch-name }}
       cancel-in-progress: false
 
-    env:
-      INFRAHUB_VERSION: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.version || github.event.inputs.version }}
-      BRANCH_NAME: ${{ matrix.branch-name }}-${{ github.event_name == 'repository_dispatch' && github.event.client_payload.version || github.event.inputs.version }}
     steps:
       - name: Check out code
         uses: actions/checkout@v7
 
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
-
       - name: Install uv
-        run: |
-          pip install uv
-          uv sync
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.9.18"
 
-      - name: Update testcontainers to workflow version ${{ env.INFRAHUB_VERSION }}
+      # Resolved in a step rather than in job-level `env:` because the meaning
+      # of client_payload.version depends on which pipeline dispatched, and
+      # nesting that into an expression makes it unreadable.
+      - name: Resolve the requested versions
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_TYPE: ${{ github.event.action }}
+          PAYLOAD_VERSION: ${{ github.event.client_payload.version }}
+          INPUT_INFRAHUB: ${{ github.event.inputs.infrahub_version }}
+          INPUT_SDK: ${{ github.event.inputs.infrahub_sdk_version }}
+          INPUT_TC: ${{ github.event.inputs.infrahub_testcontainers_version }}
+          BRANCH: ${{ matrix.branch-name }}
         run: |
-          uv add --group dev infrahub-testcontainers==${INFRAHUB_VERSION}
+          set -euo pipefail
+          INFRAHUB_VERSION=""
+          SDK_VERSION=""
+          TC_VERSION=""
+
+          if [ "${EVENT_NAME}" = "repository_dispatch" ]; then
+            case "${DISPATCH_TYPE}" in
+              trigger-infrahub-update)
+                INFRAHUB_VERSION="${PAYLOAD_VERSION}"
+                ;;
+              trigger-infrahub-sdk-python-update)
+                SDK_VERSION="${PAYLOAD_VERSION}"
+                ;;
+              *)
+                echo "::error::Unhandled repository_dispatch type '${DISPATCH_TYPE}'."
+                exit 1
+                ;;
+            esac
+          else
+            INFRAHUB_VERSION="${INPUT_INFRAHUB}"
+            SDK_VERSION="${INPUT_SDK}"
+            TC_VERSION="${INPUT_TC}"
+          fi
+
+          # Every version below is interpolated, unquoted, into a perl
+          # substitution and into $GITHUB_ENV. A value containing `/` or a
+          # newline would be perl code or env injection respectively -- reject
+          # anything that is not a plausible version before either happens.
+          for name in INFRAHUB_VERSION SDK_VERSION TC_VERSION; do
+            value="${!name}"
+            if [ -n "${value}" ] && ! [[ "${value}" =~ ^[0-9][0-9A-Za-z.+-]*$ ]]; then
+              echo "::error::${name} ('${value}') does not look like a version; refusing to use it."
+              exit 1
+            fi
+          done
+
+          if [ -z "${INFRAHUB_VERSION}" ] && [ -z "${SDK_VERSION}" ]; then
+            echo "::error::Neither an Infrahub version nor an infrahub-sdk version was given; nothing to bump."
+            exit 1
+          fi
+
+          # The integration suite derives its stack image tag from the installed
+          # testcontainers version, so a testcontainers version that differs from
+          # the Infrahub version would test one release and report success for
+          # another. Refuse rather than produce a green run that means nothing.
+          if [ -n "${TC_VERSION}" ] && [ -n "${INFRAHUB_VERSION}" ] \
+             && [ "${TC_VERSION}" != "${INFRAHUB_VERSION}" ]; then
+            echo "::error::infrahub_testcontainers_version (${TC_VERSION}) differs from infrahub_version (${INFRAHUB_VERSION}). The suite would test ${TC_VERSION} and report it as ${INFRAHUB_VERSION}."
+            exit 1
+          fi
+
+          # The branch and the pull-request subject name whatever actually moved.
+          if [ -n "${INFRAHUB_VERSION}" ]; then
+            SUBJECT="Infrahub ${INFRAHUB_VERSION}"
+            BRANCH_NAME="${BRANCH}-${INFRAHUB_VERSION}"
+          else
+            SUBJECT="infrahub-sdk ${SDK_VERSION}"
+            BRANCH_NAME="${BRANCH}-infrahub-sdk-${SDK_VERSION}"
+          fi
+
+          {
+            echo "INFRAHUB_VERSION=${INFRAHUB_VERSION}"
+            echo "SDK_VERSION=${SDK_VERSION}"
+            echo "TC_VERSION=${TC_VERSION}"
+            echo "SUBJECT=${SUBJECT}"
+            echo "BRANCH_NAME=${BRANCH_NAME}"
+          } >> "$GITHUB_ENV"
+
+      # Guarded on the dependency actually being *declared with a specifier*,
+      # not merely mentioned. Without this guard the step would add
+      # infrahub-testcontainers to a repository that has no integration tier and
+      # therefore never imports it -- which is what closed PR #106 did here.
+      - name: Update infrahub-testcontainers
+        if: env.INFRAHUB_VERSION != ''
+        run: |
+          set -euo pipefail
+          if ! grep -q '"infrahub-testcontainers[=<>~]' pyproject.toml; then
+            echo "::notice::infrahub-testcontainers is not declared here; skipping."
+            exit 0
+          fi
+          VERSION="${TC_VERSION:-$INFRAHUB_VERSION}"
+          # Operator-agnostic, and `[^,"]+` rather than `[^"]+` so a bounded
+          # specifier keeps its upper bound. The four demo repositories declare
+          # this three different ways -- `==1.10.6`, `>=1.11.0b0`, and
+          # `>=1.10.0,<2.0.0` -- and a pattern that assumed `==` would silently
+          # no-op on two of them, while a greedy one would eat the `<2.0.0`.
+          # This rewrite preserves shape, not pin: raising an unbounded `>=X`
+          # still leaves it unbounded, so `uv lock` may resolve above the
+          # version this bump claims to test. A repository declaring this
+          # dependency with `>=` should check its specifier actually pins.
+          perl -pi -e "s/(\"infrahub-testcontainers[=<>~]+)[^,\"]+/\${1}${VERSION}/" pyproject.toml
+          grep -q "\"infrahub-testcontainers[=<>~]*${VERSION}" pyproject.toml || {
+            echo "::error::Failed to rewrite the infrahub-testcontainers specifier."
+            exit 1
+          }
+
+      # Edited in place rather than via `uv add`, on two independent grounds:
+      # `uv add` rewrites the whole specifier, so it drops extras that are not
+      # restated, and it collapses a range like `>=1.22.2,<2.0.0` to an equality
+      # even when the extras *are* restated. Raising the floor in place keeps
+      # both the extras and the upper bound.
+      - name: Update infrahub-sdk
+        if: env.SDK_VERSION != ''
+        run: |
+          set -euo pipefail
+          perl -pi -e "s/(\"infrahub-sdk(?:\[[^\]]*\])?>=)[^,\"]+/\${1}${SDK_VERSION}/" pyproject.toml
+          grep -q "\"infrahub-sdk\(\[[^]]*\]\)\?>=${SDK_VERSION}" pyproject.toml || {
+            echo "::error::Failed to rewrite the infrahub-sdk specifier."
+            exit 1
+          }
+
+      # The in-place edits above change pyproject.toml only; the lock has to be
+      # refreshed separately, and it is what pins what CI actually installs.
+      - name: Refresh the lock file
+        run: |
+          set -euo pipefail
+          uv lock
+
+      # Guarded on the repository actually building a custom image, not on a
+      # hardcoded list. This repository has no Dockerfile: `tasks.py` streams
+      # the compose file from infrahub.opsmill.io instead of vendoring one.
+      - name: Update the custom image base version
+        if: env.INFRAHUB_VERSION != ''
+        env:
+          WORKFLOW_FILE: .github/workflows/update-infrahub.yml
+        run: |
+          set -euo pipefail
+          if [ ! -f Dockerfile ]; then
+            echo "No Dockerfile here; skipping the custom-image bump."
+            exit 0
+          fi
+          # The commit step below only stages files named literally in its
+          # `files:` list. If a repository grows a Dockerfile without adding
+          # it there, this step would rewrite the ARG and the commit step
+          # would silently drop that edit -- a green PR whose title claims a
+          # bump it only half performed. Fail loudly instead of shipping that.
+          grep -qE '^\s*Dockerfile\s*$' "${WORKFLOW_FILE}" || {
+            echo "::error::Dockerfile exists but is not in the commit step's files: list in ${WORKFLOW_FILE}; add it there before this step can run safely."
+            exit 1
+          }
+          COMPOSE_URL="https://infrahub.opsmill.io/${INFRAHUB_VERSION}"
+          BODY=$(curl -fsSL "${COMPOSE_URL}")
+          # Superseded patch versions return 200 with an empty body, so a
+          # missing `services:` key means the version does not exist.
+          if ! printf '%s' "${BODY}" | grep -q 'services:'; then
+            echo "::error::${COMPOSE_URL} returned no compose content; is ${INFRAHUB_VERSION} a real release?"
+            exit 1
+          fi
+          perl -pi -e "s/^ARG INFRAHUB_BASE_VERSION=.*/ARG INFRAHUB_BASE_VERSION=${INFRAHUB_VERSION}/" Dockerfile
+          if [ -f docker-compose.override.yml ]; then
+            grep -qE '^\s*docker-compose\.override\.yml\s*$' "${WORKFLOW_FILE}" || {
+              echo "::error::docker-compose.override.yml exists but is not in the commit step's files: list in ${WORKFLOW_FILE}; add it there before this step can run safely."
+              exit 1
+            }
+            perl -pi -e "s/INFRAHUB_BASE_VERSION:-[^}]*/INFRAHUB_BASE_VERSION:-${INFRAHUB_VERSION}/" docker-compose.override.yml
+          fi
 
       - name: Prepare the branch for the update
-        id: prepare-branch
         run: |
-          echo "Checking if branch ${{ env.BRANCH_NAME }} exists..."
-          BRANCH_EXISTS=$(git ls-remote --heads origin ${{ env.BRANCH_NAME }} | wc -l)
-          echo "BRANCH_EXISTS=$BRANCH_EXISTS" >> $GITHUB_ENV
+          set -euo pipefail
+          BRANCH_EXISTS=$(git ls-remote --heads origin "${BRANCH_NAME}" | wc -l)
+          echo "BRANCH_EXISTS=${BRANCH_EXISTS}" >> "$GITHUB_ENV"
 
-      - name: Commit and push changes with github-actions-x/commit
+      # A PAT, not GITHUB_TOKEN: pushes made with GITHUB_TOKEN do not trigger
+      # workflow runs, so the pull request would open with no checks -- and the
+      # pull request's CI is the entire point of this workflow.
+      - name: Commit and push the update
         uses: github-actions-x/commit@v2.9
         with:
-          github-token: ${{ secrets.PAT_TOKEN }}
+          github-token: ${{ secrets.GH_UPDATE_PACKAGE_OTTO }}
           push-branch: ${{ env.BRANCH_NAME }}
-          commit-message: "chore: update test-containers to version ${{ env.INFRAHUB_VERSION }} and bump version in pyproject"
+          commit-message: "chore: bump ${{ env.SUBJECT }}"
           files: |
             pyproject.toml
             uv.lock
@@ -78,10 +265,19 @@ jobs:
           rebase: ${{ env.BRANCH_EXISTS == 1 }}
 
       - name: Create a pull request
+        env:
+          GH_TOKEN: ${{ secrets.GH_UPDATE_PACKAGE_OTTO }}
+          BASE_BRANCH: ${{ matrix.branch-name }}
         run: |
-          echo ${{ secrets.PAT_TOKEN }} | gh auth login --with-token
+          set -euo pipefail
+          # Re-runs against the same version reuse the branch, so a pull
+          # request may already be open for it.
+          if [ -n "$(gh pr list --head "${BRANCH_NAME}" --state open --json number --jq '.[0].number')" ]; then
+            echo "A pull request for ${BRANCH_NAME} is already open; skipping create."
+            exit 0
+          fi
           gh pr create \
-            --title "update test-containers to version ${{ env.INFRAHUB_VERSION }} against ${{ matrix.branch-name}}" \
-            --body "This PR updates test-containers to version ${{ env.INFRAHUB_VERSION }}." \
-            --base ${{ matrix.branch-name}} \
-            --head ${{ env.BRANCH_NAME }}
+            --title "chore: bump ${SUBJECT} against ${BASE_BRANCH}" \
+            --body "Bumps this demo to ${SUBJECT}. The checks on this pull request are the validation for the bump." \
+            --base "${BASE_BRANCH}" \
+            --head "${BRANCH_NAME}"
