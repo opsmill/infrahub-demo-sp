@@ -1,0 +1,23 @@
+tests/conftest.py
+  s_eadbafaa1ad164::t_bacdecd39e2be1 1-62
+.github/workflows/ci.yml
+  s_eadbafaa1ad164::t_bacdecd39e2be1 28,40-46,155
+tasks.py
+  s_eadbafaa1ad164::t_bacdecd39e2be1 14,462-486,489,696
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "8359b4903a1b242ab131a267aeeb4b13a001956d",
+  "prompts": {},
+  "sessions": {
+    "s_eadbafaa1ad164": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b7ed5902-85f6-473d-b2ee-262f5ade9b2c",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Benoit Kohler <Kohler.benoit@bearchitek.com>"
+    }
+  }
+}
