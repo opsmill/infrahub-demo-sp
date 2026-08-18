@@ -1,0 +1,21 @@
+.github/workflows/ci.yml
+  s_eadbafaa1ad164::t_04629a0e35e1d2 151,156,159,167
+  s_eadbafaa1ad164::t_7a83c860ba4e7f 182
+  s_eadbafaa1ad164::t_a6c698d4f82fee 32,42-52
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "4e41efb1fb70625bea4be5f47c948756d83c4ab2",
+  "prompts": {},
+  "sessions": {
+    "s_eadbafaa1ad164": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b7ed5902-85f6-473d-b2ee-262f5ade9b2c",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Benoit Kohler <Kohler.benoit@bearchitek.com>"
+    }
+  }
+}
