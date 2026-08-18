@@ -71,6 +71,35 @@ def infrahub_version(stack_image: StackImage) -> str:
     return stack_image.tag
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _apply_stack_image_env(stack_image: StackImage) -> None:
+    """Merge the resolved stack image into ``os.environ`` before the stack boots.
+
+    Resolving ``stack_image`` above is not enough by itself: nothing else in this
+    module writes it back into the environment, so an override such as
+    ``INFRAHUB_TESTING_IMAGE_VERSION`` set alone would change what this fixture
+    *reports* without changing what ``TestInfrahubDocker.infrahub_compose`` (in
+    ``infrahub_testcontainers.helpers``) actually boots -- the exact divergence
+    ``stack_config.as_env()`` exists to close. Note also that ``TestInfrahubDocker``
+    defines its own class-scoped ``infrahub_version`` fixture
+    (``helpers.py:22-24``), which pytest resolves in preference to the module-level
+    one above for any test class deriving from it; merging into ``os.environ`` here
+    reaches that fixture too, since it reads ``INFRAHUB_TESTING_IMAGE_VER`` directly.
+
+    Ordering is why this is session-scoped and autouse rather than an explicit
+    dependency of ``infrahub_compose``: pytest instantiates higher-scoped fixtures
+    before narrower-scoped ones for the same test, so this session fixture runs
+    before any class-scoped fixture -- including ``infrahub_compose`` and the
+    ``infrahub_version``/``tmp_directory``/``remote_repos_dir`` fixtures it depends
+    on -- for the first test in any class, in this or any later test module.
+
+    Args:
+        stack_image: The resolved image; ``as_env()`` sets both tag spellings plus
+            the repository and pull flag so every consumer agrees.
+    """
+    os.environ.update(stack_image.as_env())
+
+
 # Tracked subtrees the Infrahub server never reads. Excluding them keeps the
 # snapshot (and the clone the server makes from it) small.
 SNAPSHOT_EXCLUDE_PREFIXES = ("docs/", "tests/")
