@@ -32,6 +32,11 @@ dev = [
     # release breaks this demo.
     "infrahub-testcontainers==1.10.6",
     "mypy>=2.3.1",
+    # Imported directly by tests/conftest.py to guard a psutil.cpu_freq()
+    # crash on Apple Silicon. It otherwise arrives only transitively through
+    # infrahub-testcontainers; declaring it directly means that edge changing
+    # can't take the root conftest -- and the whole suite -- down with it.
+    "psutil>=5.9.0",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "pytest-cov>=4.1.0",
