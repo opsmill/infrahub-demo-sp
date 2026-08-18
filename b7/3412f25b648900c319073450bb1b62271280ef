@@ -1,0 +1,23 @@
+AGENTS.md
+  s_eadbafaa1ad164::t_269ea4996a7636 37,40,47-52,54-55
+  s_eadbafaa1ad164::t_005dc1be32e1b4 106-107
+  s_eadbafaa1ad164::t_5a3a17aa580dfc 165
+  s_eadbafaa1ad164::t_1fa371d3e1e6f1 136,141-143,145-146
+  s_eadbafaa1ad164::t_2e3d228a139537 60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "b73412f25b648900c319073450bb1b62271280ef",
+  "prompts": {},
+  "sessions": {
+    "s_eadbafaa1ad164": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b7ed5902-85f6-473d-b2ee-262f5ade9b2c",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Benoit Kohler <Kohler.benoit@bearchitek.com>"
+    }
+  }
+}
