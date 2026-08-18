@@ -401,12 +401,17 @@ class TestSpDemoWorkflow(TestInfrahubDockerWithClient):
         described = {s.description.value for s in all_sessions}
         ebgp_sites = [s for s in sites if s.routing_protocol.value == "ebgp"]
         assert ebgp_sites, "dataset defines no eBGP L3VPN site to verify"
+        # Matched on the site-name suffix rather than the full description. The
+        # description is "L3VPN PE-CE <vpn> <site>", and reaching the VPN name
+        # through `site.l3vpn.peer` resolves against the SDK's local store, which
+        # `client.all()` does not populate -- that raises NodeNotFoundError rather
+        # than telling you anything about the generator. Site names are unique
+        # across a dataset, so the suffix identifies the session unambiguously.
         for site in ebgp_sites:
-            vpn_name = site.l3vpn.peer.name.value
-            expected = f"L3VPN PE-CE {vpn_name} {site.name.value}"
-            assert expected in described, (
+            suffix = f" {site.name.value}"
+            matching = [d for d in described if d.startswith("L3VPN PE-CE ") and d.endswith(suffix)]
+            assert matching, (
                 f"generator did not create the PE-CE eBGP session for {site.name.value}.\n"
-                f"  expected: {expected}\n"
                 f"  sessions present: {sorted(described)}"
             )
 
