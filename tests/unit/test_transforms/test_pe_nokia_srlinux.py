@@ -120,9 +120,7 @@ async def test_renders_ibgp_mesh_group() -> None:
 
 @pytest.mark.asyncio
 async def test_renders_ibgp_neighbors_from_internal_sessions() -> None:
-    """Each MplsBgpProcess session with session_type=INTERNAL produces a
-    neighbor under the ibgp-mesh peer-group.
-    """
+    """Each INTERNAL RoutingBGPSession produces a neighbor under ibgp-mesh."""
     rendered = await PeNokiaSrLinux.__new__(PeNokiaSrLinux).transform(FIXTURE)
     assert (
         "set / network-instance default protocols bgp neighbor 10.0.0.1 "

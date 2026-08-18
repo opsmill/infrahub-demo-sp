@@ -9,6 +9,9 @@
 {% set isis = data.MplsIsisProcess.edges[0].node %}
 {% set ldp = data.MplsLdpProcess.edges[0].node %}
 {% set bgp = data.MplsBgpProcess.edges[0].node %}
+{# iBGP neighbours come from RoutingBGPSession filtered by device, not from
+   MplsBgpProcess.sessions — nothing ever populates that relationship. #}
+{% set ibgp_sessions = data.RoutingBGPSession.edges %}
 {% set sites = data.ServiceL3VpnSite.edges
     | selectattr('node.pe_interface.node')
     | selectattr('node.pe_address.node')
@@ -17,24 +20,7 @@
 !
 ! Arista EOS configuration for {{ device.name.value }}
 !
-hostname {{ device.name.value }}
-!
-! Demo-only: admin user so the lab cEOS container accepts SSH password
-! auth and `invoke lab.push-arista` can reach it. Replace before any
-! non-local use.
-username admin privilege 15 role network-admin secret 0 admin
-!
-management api http-commands
-   no shutdown
-   ! Demo-only: enable plain HTTP so `invoke lab.push-arista` can POST
-   ! without negotiating cEOS-lab's auto-generated self-signed cert
-   ! against modern Python TLS. Disable for any non-local use.
-   protocol http
-   no protocol https
-!
-management ssh
-   no shutdown
-!
+{{ m.eos_lab_access(device) }}
 ! IP routing must be explicitly enabled in cEOS — without this, IS-IS
 ! never installs an adjacency ("IS-IS is disabled because: Routing is
 ! not enabled"). VRF routing has to be enabled per-VRF below.
@@ -50,6 +36,13 @@ interface Loopback0
 {% for ip in iface.node.ip_addresses.edges %}
    ip address {{ ip.node.address.value }}
 {% endfor %}
+{# IS-IS must run on the loopback, not just the core links, or the /32 is never
+   advertised. Without it every PE has IS-IS adjacencies but no route to any
+   peer's loopback, so the iBGP mesh — which peers loopback-to-loopback via
+   `update-source Loopback0` — sits in Active with 0 messages exchanged and no
+   VPNv4 ever flows. Verified on a live 8-PE lab: adding this took iBGP from
+   0/56 to 56/56 established. #}
+   isis enable 1
 {% endfor %}
 !
 {% for iface in device.interfaces.edges if iface.node.role.value == 'core' %}
@@ -78,8 +71,14 @@ interface {{ site.pe_interface.node.name.value }}
 router isis 1
    net {{ isis.net_id.value }}
    is-type {{ isis.level.value }}
+{# IPv4 only. Enabling `address-family ipv6 unicast` here while no interface
+   carries an IPv6 address stops cEOS forming any adjacency at all: hellos are
+   received and parsed (the IIH counters climb) but every one is discarded, so
+   `show isis neighbors` stays empty and each router elects itself DIS. Verified
+   by bisection on a live 8-PE lab — removing this line alone took the backbone
+   from 0/30 adjacencies to 30/30. Re-add it only alongside real IPv6
+   addressing on the core interfaces. #}
    address-family ipv4 unicast
-   address-family ipv6 unicast
 !
 mpls ldp
    router-id {{ ldp.router_id.value }}
@@ -114,7 +113,7 @@ router bgp {{ device.asn.node.asn.value }}
    ! Extended-community propagation is mandatory for route-targets to
    ! traverse the iBGP mesh — without it VPNv4 routes import nowhere.
    neighbor RR-MESH send-community extended
-{% for session in bgp.sessions.edges if session.node.session_type.value == 'INTERNAL' %}
+{% for session in ibgp_sessions %}
    neighbor {{ m.ip_only(session.node.remote_ip.node.address.value) }} peer group RR-MESH
    neighbor {{ m.ip_only(session.node.remote_ip.node.address.value) }} remote-as {{ session.node.remote_as.node.asn.value }}
    neighbor {{ m.ip_only(session.node.remote_ip.node.address.value) }} update-source Loopback0
@@ -122,7 +121,7 @@ router bgp {{ device.asn.node.asn.value }}
    !
 {% for af in bgp.address_families.value %}
    address-family {{ af | replace('vpnv4', 'vpn-ipv4') | replace('vpnv6', 'vpn-ipv6') }}
-{% for session in bgp.sessions.edges if session.node.session_type.value == 'INTERNAL' %}
+{% for session in ibgp_sessions %}
       neighbor {{ m.ip_only(session.node.remote_ip.node.address.value) }} activate
 {% endfor %}
 {% endfor %}
@@ -147,7 +146,7 @@ router bgp {{ device.asn.node.asn.value }}
          redistribute connected
 {% for s in sites if s.node.l3vpn.node.name.value == vpn.name.value %}
 {% if s.node.routing_protocol.value == 'ebgp' %}
-      neighbor {{ m.ip_only(s.node.ce_address.node.address.value) }} remote-as {{ s.node.bgp_peer_asn.value }}
+      neighbor {{ m.ip_only(s.node.ce_address.node.address.value) }} remote-as {{ m.peer_asn(s.node) }}
 {% elif s.node.routing_protocol.value == 'static' %}
 {% for sr in s.node.static_routes.value or [] %}
       ! static route: {{ sr.prefix }} via {{ sr.next_hop }}

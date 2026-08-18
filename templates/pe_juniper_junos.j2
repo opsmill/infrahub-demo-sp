@@ -3,6 +3,9 @@
 {% set isis = data.MplsIsisProcess.edges[0].node %}
 {% set ldp = data.MplsLdpProcess.edges[0].node %}
 {% set bgp = data.MplsBgpProcess.edges[0].node %}
+{# iBGP neighbours come from RoutingBGPSession filtered by device, not from
+   MplsBgpProcess.sessions — nothing ever populates that relationship. #}
+{% set ibgp_sessions = data.RoutingBGPSession.edges %}
 {% set sites = data.ServiceL3VpnSite.edges
     | selectattr('node.pe_interface.node')
     | selectattr('node.pe_address.node')
@@ -93,7 +96,7 @@ protocols {
             family inet6-vpn {
                 unicast;
             }
-{% for session in bgp.sessions.edges if session.node.session_type.value == 'INTERNAL' %}
+{% for session in ibgp_sessions %}
             neighbor {{ m.ip_only(session.node.remote_ip.node.address.value) }};
 {% endfor %}
         }
@@ -133,7 +136,7 @@ routing-instances {
                        collapses to the last value, breaking VRFs with
                        multiple CEs at different ASNs. */
                     neighbor {{ m.ip_only(s.node.ce_address.node.address.value) }} {
-                        peer-as {{ s.node.bgp_peer_asn.value }};
+                        peer-as {{ m.peer_asn(s.node) }};
                     }
 {% endif %}
 {% endfor %}

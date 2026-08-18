@@ -41,6 +41,7 @@ exceptions:
   - Infrahub
   - Integration with CI/CD
   - IP
+  - LDP
   - Jinja
   - Key Files
   - Linting Requirements

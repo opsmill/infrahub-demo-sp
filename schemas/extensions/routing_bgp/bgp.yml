@@ -133,6 +133,25 @@ nodes:
     order_by:
       - remote_as__asn__value
     display_label: description__value
+    # `description` is this node's natural key, and already used as one: the
+    # L3VPN generator looks sessions up by it. Without it declared here the node
+    # has no key at all, so `infrahubctl object load` inserts instead of
+    # upserting and every re-run of `invoke bootstrap` duplicated all 56 iBGP
+    # sessions (56 -> 112 -> 168), which in turn duplicated every neighbour line
+    # in the rendered PE configs.
+    #
+    # Scoped by `device` rather than global. A session description only
+    # identifies a session next to the router that holds it, so two routers may
+    # each carry one described "iBGP to RR"; keying on the description alone
+    # reserved every description for whichever device used it first, and the
+    # second device's session was rejected instead of inserted. Same shape as
+    # the Interface generic in schemas/base/dcim.yml, which keys on
+    # [device, name__value].
+    human_friendly_id:
+      - device__name__value
+      - description__value
+    uniqueness_constraints:
+      - [device, description__value]
     attributes:
       - name: import_policies
         kind: Text
@@ -199,10 +218,18 @@ nodes:
         optional: true
         cardinality: one
         kind: Attribute
-      - name: device
-        peer: DcimDevice
-        optional: true
-        cardinality: one
+      # `device` is deliberately NOT declared here. It comes from the
+      # RoutingProtocol generic as a mandatory Parent, which is what the
+      # uniqueness constraint above needs — a nullable device would leave every
+      # session without one sharing a single key slot.
+      #
+      # Redeclaring it, even with the generic's own terms, does not override the
+      # inherited relationship: the server merges the two and then rejects the
+      # node with "Only one relationship of type parent is allowed, but all the
+      # following are of type parent: ['device', 'device']". The previous
+      # declaration here (`optional: true`, no kind) escaped that check only
+      # because its kind defaulted to Generic — it silently weakened the
+      # generic's mandatory parent instead.
       - name: peer_group
         peer: RoutingBGPPeerGroup
         optional: true

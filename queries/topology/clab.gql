@@ -32,6 +32,19 @@ query Clab($name: String!) {
       }
     }
   }
+  InterfaceVirtual {
+    edges {
+      node {
+        name { value }
+        dot1q_id { value }
+        device { node { name { value } } }
+        # `parent_interface` peers on a generic — reach `name` through the
+        # concrete kind or the query is rejected and repo sync breaks.
+        parent_interface { node { ... on InterfacePhysical { name { value } } } }
+        ip_addresses { edges { node { address { value } } } }
+      }
+    }
+  }
   ServiceL3VpnSite {
     edges {
       node {
@@ -40,6 +53,9 @@ query Clab($name: String!) {
         pe_interface { node { name { value } } }
         pe_address { node { address { value } } }
         ce_address { node { address { value } } }
+        ce_device { node { name { value } platform { node { name { value } containerlab_os { value } } } } }
+        ce_interface { node { name { value } } }
+        ce_private_interface { node { name { value } } }
         l3vpn { node { name { value } } }
       }
     }

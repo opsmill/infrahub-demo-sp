@@ -1,4 +1,4 @@
-"""Pure-Python validators for catalog form submissions."""
+"""Pure-Python validators for catalog form submissions and generator results."""
 
 from __future__ import annotations
 
@@ -30,16 +30,34 @@ def validate_create_l3vpn_form(
     if len(sites) < 2:
         errors.append("L3VPN must have at least 2 sites.")
 
-    pes = [s["pe"] for s in sites]
+    pes = [s.get("pe") for s in sites]
     if len(pes) != len(set(pes)):
         errors.append("PE reused across multiple sites in this VPN.")
 
     for site in sites:
         proto = site.get("routing_protocol")
-        if proto == "ebgp" and not site.get("bgp_peer_asn"):
-            errors.append(f"Site {site['name']}: bgp_peer_asn required for eBGP.")
+        # bgp_peer_asn is optional for eBGP: left blank, the generator allocates
+        # the VPN's customer AS from customer_asn_pool. Only a value that is
+        # present but out of range is an error.
+        asn = site.get("bgp_peer_asn")
+        if proto == "ebgp" and asn is not None:
+            # Coerce defensively: this function's contract is to RETURN errors,
+            # so a non-numeric value (empty string from a JSON payload, a typo
+            # from a non-Streamlit caller) must be reported, not raised.
+            try:
+                asn_value = int(asn)
+            except (TypeError, ValueError):
+                errors.append(
+                    f"Site {site.get('name', '?')}: bgp_peer_asn must be a number (got {asn!r})."
+                )
+            else:
+                if not 1 <= asn_value <= 4294967295:
+                    errors.append(
+                        f"Site {site.get('name', '?')}: bgp_peer_asn must be between 1 and "
+                        f"4294967295."
+                    )
         if proto == "static" and not site.get("static_routes"):
-            errors.append(f"Site {site['name']}: static_routes required for static.")
+            errors.append(f"Site {site.get('name', '?')}: static_routes required for static.")
 
     nets: list[tuple[str, ipaddress.IPv4Network]] = []
     for site in sites:
@@ -60,7 +78,7 @@ def validate_create_l3vpn_form(
                 f"use the network address (e.g. {net.with_prefixlen}).",
             )
             continue
-        nets.append((site["name"], net))
+        nets.append((site.get("name", "?"), net))
 
     for i, (n1, net1) in enumerate(nets):
         for n2, net2 in nets[i + 1 :]:
@@ -132,3 +150,108 @@ def validate_create_sdwan_form(
                 errors.append(f"{name_a} subnet {net_a} overlaps {name_b} subnet {net_b}.")
 
     return errors
+
+
+def l3vpn_is_materialised(vpn_node: dict[str, Any] | None, *, expected_sites: int) -> bool:
+    """Return whether the L3VPN generator has finished with a service.
+
+    ``ServiceL3Vpn.status`` is not the answer. The generator sets it to
+    ``active`` while materialising the VRF — before it has touched a single
+    site — so a gate on status alone passes with the PE-CE addressing and the
+    eBGP sessions still missing. Everything downstream of the wait then runs on
+    a half-built branch: the artifacts render without the new VRF, and the
+    proposed change opens showing no config diff, which is the exact failure the
+    wait exists to prevent.
+
+    What this looks at instead is the per-site output, which the generator writes
+    last: every site must carry the PE port and the PE-side address, an eBGP site
+    must also carry the CE-side address, and a VPN with any eBGP site that
+    declined to name its own ``bgp_peer_asn`` must have had a ``customer_asn``
+    allocated from the pool.
+
+    ``expected_sites`` is checked too, because the generator can legitimately run
+    against an incomplete service: creating each site emits its own event, so an
+    early run sees only the sites that existed when it started, completes, and
+    leaves every field this function inspects populated for those sites alone.
+
+    Args:
+        vpn_node: The ServiceL3Vpn node from a GraphQL query, or ``None`` when
+            the query matched nothing.
+        expected_sites: Number of sites the request asked for.
+
+    Returns:
+        True when the generator has produced everything the artifacts need.
+    """
+    if not vpn_node or (vpn_node.get("status") or {}).get("value") != "active":
+        return False
+
+    site_edges = (vpn_node.get("sites") or {}).get("edges") or []
+    if len(site_edges) != expected_sites:
+        return False
+
+    needs_pool_asn = False
+    for edge in site_edges:
+        site = edge["node"]
+        if not (site.get("pe_interface") or {}).get("node"):
+            return False
+        if not (site.get("pe_address") or {}).get("node"):
+            return False
+        if (site.get("routing_protocol") or {}).get("value") != "ebgp":
+            continue
+        if not (site.get("ce_address") or {}).get("node"):
+            return False
+        if (site.get("bgp_peer_asn") or {}).get("value") is None:
+            needs_pool_asn = True
+
+    return not needs_pool_asn or bool((vpn_node.get("customer_asn") or {}).get("node"))
+
+
+def sdwan_edges_awaiting_artifacts(
+    data: dict[str, Any], *, expected_sites: int
+) -> list[str] | None:
+    """Return this service's edge names that still have no rendered artifact.
+
+    Scoped to the service's own edges on purpose. The obvious check — count the
+    artifacts belonging to the vendor's artifact definition and compare against
+    the number of sites requested — compares a global total against a per-service
+    expectation. The financial dataset ships three Viptela edges of its own, so a
+    two-site request satisfied ``3 >= 2`` on its first look, stopped before
+    triggering any rendering, and opened a proposed change whose new edges had no
+    configuration at all. Only artifacts pointing at *these* edges count.
+
+    Args:
+        data: Result of the catalog's SD-WAN progress query — the service with
+            its sites' ``sdwan_edge``, plus every artifact of the vendor
+            definition with its target object.
+        expected_sites: Number of sites the request asked for.
+
+    Returns:
+        A sorted list of edge names still awaiting an artifact (empty when every
+        edge has one), or ``None`` while the generator has yet to finish
+        materialising the service — nothing can have rendered yet, so there is
+        nothing to wait on and no point re-triggering.
+    """
+    service_edges = (data.get("ServiceSdwan") or {}).get("edges") or []
+    if not service_edges:
+        return None
+    service = service_edges[0]["node"]
+    if (service.get("status") or {}).get("value") != "active":
+        return None
+
+    site_edges = (service.get("sites") or {}).get("edges") or []
+    if len(site_edges) != expected_sites:
+        return None
+
+    expected: dict[str, str] = {}
+    for edge in site_edges:
+        device = (edge["node"].get("sdwan_edge") or {}).get("node")
+        if not device:
+            # Service is active but this site's edge has not been linked yet.
+            return None
+        expected[device["id"]] = (device.get("name") or {}).get("value") or device["id"]
+
+    rendered = {
+        ((artifact["node"].get("object") or {}).get("node") or {}).get("id")
+        for artifact in (data.get("CoreArtifact") or {}).get("edges", [])
+    }
+    return sorted(name for device_id, name in expected.items() if device_id not in rendered)

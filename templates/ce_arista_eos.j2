@@ -1,0 +1,153 @@
+{% import '_macros.j2' as m %}
+{# Format marker for static analyzers (e.g. Batfish) — see pe_arista_eos.j2. #}
+!RANCID-CONTENT-TYPE: arista
+{% set device = data.DcimDevice.edges[0].node %}
+{% set sessions = data.RoutingBGPSession.edges | selectattr('node.local_ip.node') | list %}
+{% set sites = data.ServiceL3VpnSite.edges | selectattr('node.customer_subnet.node') | list %}
+{# Sub-interfaces are InterfaceVirtual rows with a parent and a VLAN tag; the
+   loopback is virtual too but has neither, so it is excluded. Built with an
+   explicit loop rather than chained selectattr, because a dotted selectattr
+   path raises on any node that lacks the key instead of skipping it. #}
+{% set subinterfaces = [] %}
+{% set subinterface_parents = [] %}
+{% for edge in device.interfaces.edges %}
+{% set n = edge.node %}
+{% if n.__typename == 'InterfaceVirtual'
+      and n.dot1q_id is defined and n.dot1q_id and n.dot1q_id.value is not none
+      and n.parent_interface is defined and n.parent_interface and n.parent_interface.node %}
+{% set _ = subinterfaces.append(n) %}
+{% set _ = subinterface_parents.append(n.parent_interface.node.name.value) %}
+{% endif %}
+{% endfor %}
+{# Loopback0's addresses, collected once. Three separate scans used to walk the
+   interface list for this — router-id, the advertised prefixes, and the network
+   statements — and each new use added another. #}
+{% set loopback_prefixes = [] %}
+{% for edge in device.interfaces.edges if edge.node.name.value == 'Loopback0' %}
+{% for ip in edge.node.ip_addresses.edges %}
+{% set _ = loopback_prefixes.append(ip.node.address.value) %}
+{% endfor %}
+{% endfor %}
+!
+! Arista EOS configuration for {{ device.name.value }} (customer edge)
+!
+{{ m.eos_lab_access(device) }}
+ip routing
+!
+{# The CE is not VPN-aware: no MPLS, no VRFs, no LDP. It sees a plain routed
+   handoff to the PE and one LAN behind it. #}
+{% for iface in device.interfaces.edges if iface.node.name.value == 'Loopback0' %}
+interface Loopback0
+   description {{ iface.node.description.value }}
+{% for ip in iface.node.ip_addresses.edges %}
+   ip address {{ ip.node.address.value }}
+{% endfor %}
+!
+{% endfor %}
+{# A physical port is worth rendering if it carries an address, or if it is the
+   parent of a dot1q sub-interface — the parent of a tagged handoff is
+   deliberately unaddressed, so an address check alone would omit it. #}
+{% for iface in device.interfaces.edges
+    if iface.node.__typename == 'InterfacePhysical'
+       and (iface.node.ip_addresses.edges or iface.node.name.value in subinterface_parents) %}
+interface {{ iface.node.name.value }}
+   description {{ iface.node.description.value }}
+   mtu {{ iface.node.mtu.value }}
+   no switchport
+{% for ip in iface.node.ip_addresses.edges %}
+   ip address {{ ip.node.address.value }}
+{% endfor %}
+!
+{% endfor %}
+{# dot1q sub-interfaces: the customer VLAN handoff. The VLAN comes from that
+   customer's pool, so the tag differs per customer and per site. #}
+{% for iface in subinterfaces %}
+interface {{ iface.name.value }}
+   description {{ iface.description.value }}
+   encapsulation dot1q vlan {{ iface.dot1q_id.value }}
+{% for ip in iface.ip_addresses.edges %}
+   ip address {{ ip.node.address.value }}
+{% endfor %}
+!
+{% endfor %}
+{% if sessions %}
+{# EOS runs one BGP instance per device, so one AS has to be the instance's.
+   `device.asn` is it — the first L3VPN site to need it claims it (see
+   _bind_ce_side). A CE that terminates sites of two L3VPNs has a second
+   customer AS, which is carried per neighbour below rather than by a second
+   instance. Falling back to the first session's local AS keeps a CE whose
+   `asn` was never set from rendering `router bgp None`. #}
+{% set base_as = device.asn.node.asn.value
+     if device.asn is defined and device.asn and device.asn.node
+     else sessions[0].node.local_as.node.asn.value %}
+{# Advertisement filtering, one policy per neighbour. The single unfiltered
+   address-family that used to sit below sent EVERY site's LAN to EVERY PE: on a
+   CE terminating sites of two L3VPNs, VPN A's PE received and installed VPN B's
+   customer prefix and vice versa, so the two customers got mutual reachability
+   and the VRF boundary meant nothing. A CE like that is a supported shape — the
+   per-neighbour `local-as` below and `_bind_ce_side`'s second-AS branch exist
+   for it.
+
+   A session is joined to its sites through the PE-CE /30: the session's local_ip
+   is that site's `ce_address`. Loopback0 goes to every neighbour — it is the
+   CE's own address and the ping source the lab uses from either VPN. #}
+{% for session_edge in sessions %}
+{% set session = session_edge.node %}
+{% set tag = m.ip_only(session.remote_ip.node.address.value) | replace('.', '_') %}
+{% set advertised = [] %}
+{% for site_edge in sites %}
+{% if site_edge.node.ce_address is defined and site_edge.node.ce_address
+      and site_edge.node.ce_address.node
+      and site_edge.node.ce_address.node.address.value == session.local_ip.node.address.value %}
+{% set _ = advertised.append(site_edge.node.customer_subnet.node.prefix.value) %}
+{% endif %}
+{% endfor %}
+{% for prefix in loopback_prefixes %}
+{% set _ = advertised.append(prefix) %}
+{% endfor %}
+ip prefix-list PL-{{ tag }}-OUT
+{% for prefix in advertised %}
+   seq {{ loop.index * 10 }} permit {{ prefix }}
+{% endfor %}
+!
+route-map RM-{{ tag }}-OUT permit 10
+   match ip address prefix-list PL-{{ tag }}-OUT
+!
+{% endfor %}
+router bgp {{ base_as }}
+{% if loopback_prefixes %}
+   router-id {{ m.ip_only(loopback_prefixes[0]) }}
+{% endif %}
+{% for session_edge in sessions %}
+{% set session = session_edge.node %}
+   ! {{ session.description.value }}
+   neighbor {{ m.ip_only(session.remote_ip.node.address.value) }} remote-as {{ session.remote_as.node.asn.value }}
+{% if session.local_as is defined and session.local_as and session.local_as.node
+      and session.local_as.node.asn.value != base_as %}
+   ! This site's customer AS differs from the instance AS above, so it is
+   ! announced per neighbour. replace-as strips the instance AS from the path.
+   neighbor {{ m.ip_only(session.remote_ip.node.address.value) }} local-as {{ session.local_as.node.asn.value }} no-prepend replace-as
+{% endif %}
+   neighbor {{ m.ip_only(session.remote_ip.node.address.value) }} maximum-routes 12000
+{% endfor %}
+   !
+   address-family ipv4
+{% for session_edge in sessions %}
+{% set peer = m.ip_only(session_edge.node.remote_ip.node.address.value) %}
+      neighbor {{ peer }} activate
+      neighbor {{ peer }} route-map RM-{{ peer | replace('.', '_') }}-OUT out
+{% endfor %}
+{# Advertise the customer LAN into the VPN. `network` rather than
+   `redistribute connected` so the CE only ever originates the subnets the
+   service actually covers. Every site's prefix is originated here; which
+   neighbour is allowed to hear each one is decided by the outbound route-maps
+   above. #}
+{% for site_edge in sites %}
+      network {{ site_edge.node.customer_subnet.node.prefix.value }}
+{% endfor %}
+{% for prefix in loopback_prefixes %}
+      network {{ prefix }}
+{% endfor %}
+!
+{% endif %}
+end

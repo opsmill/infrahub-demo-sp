@@ -14,6 +14,10 @@ spec:
       description: PEs running Nokia SR OS.
     - name: pes
       description: All PE devices in the backbone.
+    - name: ce_arista_eos
+      description: Pre-provisioned CE routers running Arista EOS (artifact target).
+    - name: ces
+      description: All pre-provisioned customer edge (CE) devices.
     - name: topologies_mpls
       description: All MplsBackbone topology rows.
     # l3vpns group is populated dynamically when ServiceL3Vpn objects are created;

@@ -5,7 +5,10 @@ spec:
   kind: TopologyMplsBackbone
   data:
     - name: mpls-backbone-1
-      description: EMEA MPLS backbone — 8 Arista cEOS PEs in a partial mesh.
+      description: >-
+        EMEA MPLS backbone — 8 Arista cEOS PEs in a 15-link partial mesh.
+        pe-01 (London) and pe-08 (Zurich) are the hub PEs carrying the
+        customer edge attachments.
       isis_area: "49.0001"
       isis_level: level-2
       location: emea

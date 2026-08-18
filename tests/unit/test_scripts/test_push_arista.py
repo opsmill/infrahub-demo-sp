@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+from typing import Any
+
+import pytest
 
 SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "push_arista.py"
 spec = importlib.util.spec_from_file_location("push_arista", SCRIPT)
@@ -39,3 +42,97 @@ def test_strip_preserves_indented_commands() -> None:
         "router bgp 65000",
         "   neighbor 10.0.0.2 peer group RR-MESH",
     ]
+
+
+class _Resp:
+    """Minimal stand-in for a `requests` response."""
+
+    def __init__(self, body: dict) -> None:
+        self._body = body
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict:
+        return self._body
+
+
+def test_ready_probe_retries_until_the_routing_agent_answers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """cEOS answers eAPI before its agents register their CLI commands.
+
+    Pushing in that window fails on a plain `ip routing` with "not supported
+    on this hardware platform". The probe must keep polling until a
+    routing-agent-backed read command parses.
+    """
+    responses = [
+        {"error": {"message": "Unavailable command (not supported on this hardware platform)"}},
+        {"error": {"message": "Unavailable command (not supported on this hardware platform)"}},
+        {"result": [{}, {}]},
+    ]
+    calls: list[list[str]] = []
+
+    def fake_post(  # noqa: A002 - mirror requests' signature
+        url: str, auth: tuple[str, str], json: dict[str, Any], timeout: int
+    ) -> _Resp:
+        """Return the next canned eAPI response, recording the commands sent."""
+        calls.append(json["params"]["cmds"])
+        return _Resp(responses[len(calls) - 1])
+
+    monkeypatch.setattr(push_arista.requests, "post", fake_post)
+    monkeypatch.setattr(push_arista.time, "sleep", lambda _: None)
+
+    push_arista._wait_for_eapi_ready("clab-mpls-backbone-1-pe-05")
+
+    assert len(calls) == 3, "should have retried past both not-ready responses"
+    assert calls[0] == list(push_arista.READY_PROBE_CMDS)
+
+
+def test_ready_probe_treats_transport_errors_as_not_ready(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A refused connection mid-boot is a retry, not a crash."""
+    state = {"n": 0}
+
+    def fake_post(  # noqa: A002
+        url: str, auth: tuple[str, str], json: dict[str, Any], timeout: int
+    ) -> _Resp:
+        """Fail the first two attempts at transport level, then answer."""
+        state["n"] += 1
+        if state["n"] < 3:
+            raise OSError("connection reset by peer")
+        return _Resp({"result": [{}, {}]})
+
+    monkeypatch.setattr(push_arista.requests, "post", fake_post)
+    monkeypatch.setattr(push_arista.time, "sleep", lambda _: None)
+
+    push_arista._wait_for_eapi_ready("clab-mpls-backbone-1-pe-05")
+    assert state["n"] == 3
+
+
+def test_ready_probe_times_out_with_the_last_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give up eventually, and say what the node was still complaining about."""
+    monkeypatch.setattr(
+        push_arista.requests,
+        "post",
+        lambda url, auth, json, timeout: _Resp({"error": {"message": "agent not ready"}}),
+    )
+    monkeypatch.setattr(push_arista.time, "sleep", lambda _: None)
+    monkeypatch.setattr(push_arista, "READY_TIMEOUT_SECONDS", 0.01)
+
+    try:
+        push_arista._wait_for_eapi_ready("clab-mpls-backbone-1-pe-05")
+    except TimeoutError as exc:
+        assert "agent not ready" in str(exc)
+    else:
+        raise AssertionError("expected TimeoutError")
+
+
+def test_push_does_not_sleep_a_fixed_settle_window(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The blind settle sleep is gone — readiness is probed, not guessed.
+
+    A fixed sleep cannot scale with how many cEOS nodes the host boots at
+    once, which is what made this flaky as the lab grew to twelve.
+    """
+    assert not hasattr(push_arista, "POST_PORT_SETTLE_SECONDS")

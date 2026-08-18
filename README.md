@@ -15,10 +15,14 @@ Catalog.
 git clone https://github.com/opsmill/infrahub-demo-sp.git
 cd infrahub-demo-sp
 cp .env.example .env
-source .env
+set -a; source .env; set +a
 uv sync
 uv run invoke init
 ```
+
+`set -a` is required: `.env` holds quoted assignments, so a bare `source .env`
+leaves them as shell variables that `invoke` and `infrahubctl` never see, and
+`invoke init` fails at "Loading schemas" with `Authentication is required`.
 
 Visit <http://localhost:8000> (admin / infrahub) for the Infrahub UI. To
 enable the Streamlit Service Catalog sidecar set

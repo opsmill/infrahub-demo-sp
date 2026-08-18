@@ -54,8 +54,10 @@ def pe_fixture(name: str, loopback: str, net_id: str) -> dict:
                                         "__typename": "InterfacePhysical",
                                         "id": "e1",
                                         # Schema convention: abstract Ethernet<N> (1-indexed).
-                                        # Per-vendor templates translate via _macros.j2
-                                        # (`iosxr_iface`, `junos_iface`, `srl_iface`).
+                                        # Per-vendor templates translate it:
+                                        # `iosxr_iface` and `junos_iface` in
+                                        # _macros.j2, `srl_iface` in
+                                        # pe_nokia_srlinux.j2.
                                         "name": {"value": "Ethernet1"},
                                         "description": {"value": "To backbone peer"},
                                         "status": {"value": "active"},
@@ -110,22 +112,22 @@ def pe_fixture(name: str, loopback: str, net_id: str) -> dict:
                     "node": {
                         "router_id": {"value": loopback_ip},
                         "address_families": {"value": ["vpnv4", "vpnv6"]},
-                        "sessions": {
-                            "edges": [
-                                {
-                                    "node": {
-                                        "description": {"value": "iBGP to peer"},
-                                        "session_type": {"value": "INTERNAL"},
-                                        "local_ip": {"node": {"address": {"value": loopback}}},
-                                        "remote_ip": {
-                                            "node": {"address": {"value": "10.0.0.1/32"}}
-                                        },
-                                        "local_as": {"node": {"asn": {"value": 65000}}},
-                                        "remote_as": {"node": {"asn": {"value": 65000}}},
-                                    }
-                                }
-                            ]
-                        },
+                    }
+                }
+            ]
+        },
+        # iBGP sessions are queried from RoutingBGPSession by device, not via
+        # MplsBgpProcess.sessions (which nothing populates).
+        "RoutingBGPSession": {
+            "edges": [
+                {
+                    "node": {
+                        "description": {"value": "iBGP to peer"},
+                        "session_type": {"value": "INTERNAL"},
+                        "local_ip": {"node": {"address": {"value": loopback}}},
+                        "remote_ip": {"node": {"address": {"value": "10.0.0.1/32"}}},
+                        "local_as": {"node": {"asn": {"value": 65000}}},
+                        "remote_as": {"node": {"asn": {"value": 65000}}},
                     }
                 }
             ]
@@ -155,6 +157,10 @@ def pe_fixture_with_site(name: str, loopback: str, net_id: str) -> dict:
     l3vpn_node = {
         "name": {"value": "acme-prod"},
         "vpn_id": {"value": 100},
+        # queries/config/pe.gql selects this, so the fixture must carry it or a
+        # template that reads it would pass here and fail against the server.
+        "address_family": {"value": "ipv4"},
+        "customer_asn": {"node": {"asn": {"value": 65100}}},
         "vrf": {
             "node": {
                 "name": {"value": "acme-prod"},
@@ -169,7 +175,15 @@ def pe_fixture_with_site(name: str, loopback: str, net_id: str) -> dict:
         "name": {"value": "lon"},
         "l3vpn": {"node": l3vpn_node},
         "pe_interface": {"node": {"name": {"value": "Ethernet4"}}},
-        "customer_subnet": {"value": "192.168.1.0/24"},
+        # Relationship, not a flat attribute — queries/config/pe.gql returns
+        # `customer_subnet { node { prefix { value } vrf { node { name { value } } } } }`,
+        # so a `{"value": ...}` shape here would be one the server cannot produce.
+        "customer_subnet": {
+            "node": {
+                "prefix": {"value": "192.168.1.0/24"},
+                "vrf": {"node": {"name": {"value": "acme-prod"}}},
+            }
+        },
         "pe_address": {"node": {"address": {"value": "10.100.0.1/30"}}},
         "ce_address": {"node": {"address": {"value": "10.100.0.2/30"}}},
         "routing_protocol": {"value": "ebgp"},
@@ -179,6 +193,136 @@ def pe_fixture_with_site(name: str, loopback: str, net_id: str) -> dict:
 
     fixture["ServiceL3VpnSite"] = {"edges": [{"node": site_node}]}
     return fixture
+
+
+def ce_fixture(
+    *,
+    name: str = "ce-trading-lon",
+    asn: int = 65100,
+    loopback: str = "10.0.1.1/32",
+    pe_facing_address: str = "10.100.0.2/30",
+    pe_address: str = "10.100.0.1/30",
+    lan_address: str = "10.200.10.1/24",
+    customer_subnet: str = "10.200.10.0/24",
+    vlan: int = 110,
+    sessions: bool = True,
+) -> dict:
+    """Return a CE query-result fixture for the ``ce`` GraphQL query.
+
+    Args:
+        name: CE hostname.
+        asn: The customer AS the CE peers from (allocated from customer_asn_pool).
+        loopback: Loopback0 address in CIDR notation.
+        pe_facing_address: CE-side address of the PE-CE /30, on Ethernet1.
+        pe_address: PE-side address of the PE-CE /30 (the eBGP neighbor).
+        lan_address: Customer LAN gateway address on Ethernet2.
+        customer_subnet: The LAN prefix the CE advertises into the VPN.
+        vlan: dot1q tag on the private-side sub-interface, from the customer pool.
+        sessions: When ``False``, omit the eBGP session — models a CE whose
+            L3VPN generator hasn't run yet.
+
+    Returns:
+        Dictionary matching the shape returned by the ``ce`` GraphQL query.
+    """
+
+    def _iface(
+        typename: str,
+        iface_name: str,
+        description: str,
+        address: str | None,
+        *,
+        dot1q: int | None = None,
+        parent: str | None = None,
+    ) -> dict:
+        addresses = [{"node": {"address": {"value": address}}}] if address else []
+        node: dict = {
+            "__typename": typename,
+            "id": iface_name,
+            "name": {"value": iface_name},
+            "description": {"value": description},
+            "status": {"value": "active"},
+            "role": {"value": "access"},
+            "mtu": {"value": 1500},
+            "ip_addresses": {"edges": addresses},
+        }
+        if typename == "InterfaceVirtual":
+            # The `ce` query returns these for every InterfaceVirtual; the
+            # loopback simply has them empty.
+            node["dot1q_id"] = {"value": dot1q}
+            node["parent_interface"] = (
+                {"node": {"name": {"value": parent}}} if parent else {"node": None}
+            )
+        return {"node": node}
+
+    session_edges = []
+    if sessions:
+        session_edges = [
+            {
+                "node": {
+                    "description": {"value": f"L3VPN CE-PE trading-floor-vpn {name}"},
+                    "local_ip": {"node": {"address": {"value": pe_facing_address}}},
+                    "remote_ip": {"node": {"address": {"value": pe_address}}},
+                    "local_as": {"node": {"asn": {"value": asn}}},
+                    "remote_as": {"node": {"asn": {"value": 65000}}},
+                }
+            }
+        ]
+
+    return {
+        "DcimDevice": {
+            "edges": [
+                {
+                    "node": {
+                        "id": "ce-id",
+                        "name": {"value": name},
+                        "platform": {"node": {"name": {"value": "arista_eos"}}},
+                        "asn": {"node": {"asn": {"value": asn}}},
+                        "interfaces": {
+                            "edges": [
+                                _iface("InterfaceVirtual", "Loopback0", "Router-ID", loopback),
+                                _iface(
+                                    "InterfacePhysical",
+                                    "Ethernet1",
+                                    "To pe-01",
+                                    pe_facing_address,
+                                ),
+                                _iface("InterfacePhysical", "Ethernet2", "Customer LAN", None),
+                                _iface(
+                                    "InterfaceVirtual",
+                                    f"Ethernet2.{vlan}",
+                                    "Customer LAN (customer VLAN)",
+                                    lan_address,
+                                    dot1q=vlan,
+                                    parent="Ethernet2",
+                                ),
+                            ]
+                        },
+                    }
+                }
+            ]
+        },
+        "RoutingBGPSession": {"edges": session_edges},
+        "ServiceL3VpnSite": {
+            "edges": [
+                {
+                    "node": {
+                        "name": {"value": "trading-london"},
+                        "customer_subnet": {"node": {"prefix": {"value": customer_subnet}}},
+                        # Joins this site to its BGP session, whose `local_ip` is
+                        # this same address — that is how the template decides
+                        # which prefixes each neighbour may hear.
+                        "ce_address": {"node": {"address": {"value": pe_facing_address}}},
+                        "l3vpn": {
+                            "node": {
+                                "name": {"value": "trading-floor-vpn"},
+                                "vpn_id": {"value": 100},
+                            }
+                        },
+                    }
+                }
+            ]
+        },
+    }
 
 
 def sdwan_edge_data(

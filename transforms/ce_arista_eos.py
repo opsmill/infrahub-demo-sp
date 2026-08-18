@@ -1,4 +1,4 @@
-"""Juniper Junos PE config transform."""
+"""Arista EOS CE config transform."""
 
 from __future__ import annotations
 
@@ -11,19 +11,19 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoes
 TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 
 
-class PeJuniperJunos(InfrahubTransform):
-    """Render Juniper Junos PE configuration."""
+class CeAristaEos(InfrahubTransform):
+    """Render Arista EOS customer-edge configuration."""
 
-    query = "pe"
+    query = "ce"
 
     async def transform(self, data: dict[str, Any]) -> str:
-        """Render the Junos Jinja2 template against query data.
+        """Render the CE EOS Jinja2 template against query data.
 
         Args:
-            data: Result of the ``pe`` GraphQL query for this device.
+            data: Result of the ``ce`` GraphQL query for this device.
 
         Returns:
-            Rendered Junos configuration as plain text.
+            Rendered EOS configuration as plain text.
         """
         env = Environment(
             loader=FileSystemLoader(str(TEMPLATES_DIR)),
@@ -33,5 +33,5 @@ class PeJuniperJunos(InfrahubTransform):
             lstrip_blocks=True,
             undefined=StrictUndefined,
         )
-        template = env.get_template("pe_juniper_junos.j2")
+        template = env.get_template("ce_arista_eos.j2")
         return template.render(data=data)

@@ -1,0 +1,64 @@
+query CE($device: String!) {
+  DcimDevice(name__value: $device) {
+    edges {
+      node {
+        id
+        name { value }
+        platform { node { name { value } } }
+        asn { node { asn { value } } }
+        interfaces {
+          edges {
+            node {
+              __typename
+              id
+              name { value }
+              description { value }
+              status { value }
+              role { value }
+              mtu { value }
+              ... on InterfacePhysical {
+                ip_addresses { edges { node { address { value } } } }
+              }
+              ... on InterfaceVirtual {
+                dot1q_id { value }
+                # `parent_interface` peers on the InterfaceHasSubInterface generic,
+                # which has no `name` — it must be reached through an inline
+                # fragment on the concrete kind.
+                parent_interface { node { ... on InterfacePhysical { name { value } } } }
+                ip_addresses { edges { node { address { value } } } }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  # CE-side PE-CE eBGP sessions. Filtered to EXTERNAL so a future iBGP session
+  # on the CE (none today) would not be rendered as a PE peering.
+  RoutingBGPSession(device__name__value: $device, session_type__value: "EXTERNAL") {
+    edges {
+      node {
+        description { value }
+        local_ip { node { address { value } } }
+        remote_ip { node { address { value } } }
+        local_as { node { asn { value } } }
+        remote_as { node { asn { value } } }
+      }
+    }
+  }
+  # The sites this CE terminates, for the customer prefixes it advertises.
+  ServiceL3VpnSite(ce_device__name__value: $device) {
+    edges {
+      node {
+        name { value }
+        customer_subnet { node { prefix { value } } }
+        # Joins a site to its session: a session's local_ip IS this address, and
+        # that is how the template works out which prefixes each neighbour may
+        # be advertised. Without it a CE serving two VPNs sends every LAN to
+        # every PE.
+        ce_address { node { address { value } } }
+        l3vpn { node { name { value } vpn_id { value } } }
+      }
+    }
+  }
+}

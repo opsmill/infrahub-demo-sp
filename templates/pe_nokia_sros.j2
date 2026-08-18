@@ -3,6 +3,9 @@
 {% set isis = data.MplsIsisProcess.edges[0].node %}
 {% set ldp = data.MplsLdpProcess.edges[0].node %}
 {% set bgp = data.MplsBgpProcess.edges[0].node %}
+{# iBGP neighbours come from RoutingBGPSession filtered by device, not from
+   MplsBgpProcess.sessions — nothing ever populates that relationship. #}
+{% set ibgp_sessions = data.RoutingBGPSession.edges %}
 {% set sites = data.ServiceL3VpnSite.edges
     | selectattr('node.pe_interface.node')
     | selectattr('node.pe_address.node')
@@ -83,7 +86,7 @@ configure {
                     vpn-ipv4
                     vpn-ipv6
                 }
-{% for session in bgp.sessions.edges if session.node.session_type.value == 'INTERNAL' %}
+{% for session in ibgp_sessions %}
                 neighbor "{{ m.ip_only(session.node.remote_ip.node.address.value) }}" {
                     admin-state enable
                 }
@@ -138,9 +141,17 @@ configure {
                 admin-state enable
                 group "ce" {
                     admin-state enable
-                    peer-as {{ s.node.bgp_peer_asn.value }}
+                    /* peer-as must be per-neighbour, not on the group. SR OS
+                       merges repeated paths, so two sites of this VPN on this PE
+                       land in one group whose single peer-as leaf takes the last
+                       value rendered — the other CE is then configured with the
+                       wrong AS and its OPEN is rejected. Two sites at different
+                       peer ASNs (one override, one pool-allocated) is a
+                       first-class flow here. pe_juniper_junos.j2 carries the
+                       same note for the same reason. */
                     neighbor "{{ m.ip_only(s.node.ce_address.node.address.value) }}" {
                         admin-state enable
+                        peer-as {{ m.peer_asn(s.node) }}
                     }
                 }
             }

@@ -6,9 +6,57 @@ from pools and look up objects by deterministic keys.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, cast
 
 from infrahub_sdk.client import InfrahubClient
+from infrahub_sdk.exceptions import GraphQLError
+
+LOG = logging.getLogger(__name__)
+
+# Provider-owned address space (PE-CE /30s, SD-WAN LAN addresses, every pool in
+# objects/50_pools.yml) lives here.
+#
+# Customer space does not: each L3VPN's customer prefixes are created in a
+# namespace of their own, named `vrf-<vpn name>`, because IpamPrefix and
+# IpamIPAddress are unique on [value, ip_namespace] and two customers may
+# legitimately use the same private prefix — the financial and isp datasets each
+# hand 10.200.10.0/24 to a different customer. That namespace is created by
+# whoever creates the prefix (the datasets declare it, the Service Catalog and
+# scripts/smoke_create_l3vpn.py create it inline); the L3VPN generator only
+# *reads* it, off the site's own customer_subnet.
+#
+# The generator deliberately does not create or re-save it. Generators run under
+# `delete_unused_nodes=True`, so every node they save joins their tracking group
+# and any run that then fails to save it makes the reaper delete it — for a
+# namespace that still holds live customer prefixes the delete fails, and the
+# whole generator run dies on an unreadable IpamNamespaceDelete GraphQL error.
+# Observed on a live server. Reading the namespace keeps it out of that set.
+DEFAULT_IP_NAMESPACE = "default"
+
+
+async def touch(node: Any) -> Any:
+    """Re-save a node the generator owns so the tracking reaper keeps it.
+
+    Generators run inside ``start_tracking(..., delete_unused_nodes=True)``: any
+    node a previous run created that this run does not save is treated as unused
+    and deleted. Adopting an existing node and returning it without a save is
+    therefore not a no-op — it orphans the node, and the next run finds it gone.
+    Every "found it, reuse it" path has to end here.
+
+    Exists so that invariant has one name and one place instead of a
+    hand-written ``save(allow_upsert=True)`` at each adopt site; forgetting one
+    is what made ``invoke bootstrap`` destructive on a populated database. See
+    the module docstring of generators/generate_l3vpn.py.
+
+    Args:
+        node: The Infrahub node to re-save unchanged.
+
+    Returns:
+        The same node, so callers can ``return await touch(existing[0])``.
+    """
+    await node.save(allow_upsert=True)
+    return node
 
 
 async def allocate_prefix_from_pool(
@@ -43,6 +91,53 @@ async def allocate_prefix_from_pool(
     )
 
 
+async def allocate_asn_from_pool(
+    client: InfrahubClient,
+    pool_name: str,
+    branch: str,
+    *,
+    name: str,
+    organization_id: str,
+    description: str | None = None,
+) -> Any:
+    """Create a RoutingAutonomousSystem whose ASN comes from a CoreNumberPool.
+
+    Number pools are consumed by handing the pool node itself to the attribute
+    on create; the server allocates the next free value and records it against
+    the pool, so utilisation stays visible in the UI.
+
+    This saves WITHOUT ``allow_upsert``. ``RoutingAutonomousSystem``'s
+    human-friendly ID is ``[asn__value, name__value]``, and ``asn`` is what the
+    pool assigns — so the HFID is different on every attempt and can never
+    match an existing row. The server rejects that combination outright
+    ("Attribute 'asn' is sourced from a CoreNumberPool and is part of this
+    node's HFID"). Idempotency has to come from the caller instead: look the AS
+    up by its stable ``name`` first and only call this when it is absent.
+
+    Args:
+        client: Active Infrahub SDK client.
+        pool_name: Name of the CoreNumberPool (e.g. ``customer_asn_pool``).
+        branch: Branch on which to allocate.
+        name: Name for the new autonomous system (its natural key).
+        organization_id: Infrahub ID of the owning organization.
+        description: Optional description for the new autonomous system.
+
+    Returns:
+        The Infrahub node for the newly-created RoutingAutonomousSystem.
+    """
+    pool: Any = await client.get(kind="CoreNumberPool", name__value=pool_name, branch=branch)
+    autonomous_system = await client.create(
+        kind="RoutingAutonomousSystem",
+        branch=branch,
+        name=name,
+        asn=pool,
+        description=description,
+        organization={"id": organization_id},
+    )
+    await autonomous_system.save()
+    return autonomous_system
+
+
 async def find_or_create_route_target(
     client: InfrahubClient,
     name: str,
@@ -51,7 +146,7 @@ async def find_or_create_route_target(
     """Return the IpamRouteTarget with this name, creating it if absent."""
     rt = await client.filters(kind="IpamRouteTarget", name__value=name, branch=branch)
     if rt:
-        return rt[0]
+        return await touch(rt[0])
     obj = await client.create(kind="IpamRouteTarget", branch=branch, name=name)
     await obj.save(allow_upsert=True)
     return obj
@@ -113,7 +208,9 @@ async def find_or_create_device(
     """
     existing = await client.filters(kind="DcimDevice", name__value=name, branch=branch)
     if existing:
-        return existing[0]
+        # Without the touch the SD-WAN edge devices are deleted on the
+        # generator's second run.
+        return await touch(existing[0])
     device = await client.create(
         kind="DcimDevice",
         branch=branch,
@@ -126,3 +223,112 @@ async def find_or_create_device(
     )
     await device.save(allow_upsert=True)
     return device
+
+
+async def allocate_vlan_subinterface(
+    client: InfrahubClient,
+    branch: str,
+    *,
+    pool_name: str,
+    parent: Any,
+    device_name: str,
+    parent_name: str,
+    description: str,
+) -> Any:
+    """Create a dot1q sub-interface whose VLAN ID comes from a CoreNumberPool.
+
+    The VLAN is allocated by handing the pool node to ``dot1q_id`` on create.
+    Pools allocate on create only, which is why the VLAN lands on a
+    sub-interface the generator makes rather than on the pre-provisioned parent
+    port — there is nothing to allocate into on an object that already exists.
+
+    Unlike the customer ASN, ``dot1q_id`` is not part of this node's
+    human-friendly ID (``[device__name__value, name__value]``), so saving with
+    ``allow_upsert`` is safe here.
+
+    Args:
+        client: Active Infrahub SDK client.
+        branch: Branch on which to allocate.
+        pool_name: Name of the CoreNumberPool holding the customer's VLANs.
+        parent: The parent InterfacePhysical node.
+        device_name: Name of the device the sub-interface belongs to.
+        parent_name: Name of the parent port (e.g. ``Ethernet2``).
+        description: Description for the new sub-interface.
+
+    Returns:
+        The InterfaceVirtual node, with ``dot1q_id`` populated by the pool.
+    """
+    pool: Any = await client.get(kind="CoreNumberPool", name__value=pool_name, branch=branch)
+    # The name cannot be known before allocation (it embeds the VLAN), so create
+    # with a placeholder, read back the assigned VLAN, then set the real name.
+    sub: Any = await client.create(
+        kind="InterfaceVirtual",
+        branch=branch,
+        name=f"{parent_name}.pending",
+        description=description,
+        status="active",
+        role="access",
+        mtu=1500,
+        dot1q_id=pool,
+        device={"hfid": [device_name]},
+        parent_interface=parent,
+    )
+    try:
+        await sub.save()
+    except GraphQLError:
+        # Lost the race to a concurrent run. Several runs of the L3VPN generator
+        # are routinely in flight for one service (see its module docstring), and
+        # interfaces are unique on [device, name] — so two runs both creating
+        # `<parent>.pending` means one save is rejected.
+        #
+        # Adopting the winner is not optional politeness: retrying would take a
+        # SECOND VLAN from the customer's pool, leaving two sub-interfaces with
+        # identical descriptions. The description-keyed lookup would then return
+        # one arbitrarily and the reaper would delete the other — a pool
+        # allocation leaked permanently.
+        raced = await find_vlan_subinterface(
+            client, branch, device_name=device_name, parent_id=parent.id, description=description
+        )
+        if raced is None:
+            raise
+        LOG.info("Adopted %s created by a concurrent run", description)
+        return await touch(raced)
+    vlan = int(sub.dot1q_id.value)
+    sub.name.value = f"{parent_name}.{vlan}"
+    await sub.save(allow_upsert=True)
+    return sub
+
+
+async def find_vlan_subinterface(
+    client: InfrahubClient,
+    branch: str,
+    *,
+    device_name: str,
+    parent_id: str,
+    description: str,
+) -> Any | None:
+    """Return the sub-interface a site owns on a parent port, or ``None``.
+
+    The description is the key rather than the name, which cannot be used: the
+    name embeds the VLAN, and the VLAN is not known until the pool has allocated
+    it. Keying on the parent alone was wrong once a CE port carries two services
+    — the second site adopted the first's sub-interface and inherited its VLAN.
+
+    Args:
+        client: Active Infrahub SDK client.
+        branch: Branch to search.
+        device_name: Name of the device holding the sub-interface.
+        parent_id: Infrahub id of the parent physical port.
+        description: The site-specific description that identifies it.
+
+    Returns:
+        The InterfaceVirtual node, or ``None`` when the site has none yet.
+    """
+    found = await client.filters(
+        kind="InterfaceVirtual",
+        device__name__value=device_name,
+        parent_interface__ids=[parent_id],
+        description__value=description,
+        branch=branch,
+    )
+    return found[0] if found else None

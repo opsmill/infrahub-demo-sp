@@ -11,6 +11,7 @@ from pathlib import Path
 import yaml
 from invoke.collection import Collection
 from invoke.context import Context
+from invoke.exceptions import Exit
 from invoke.tasks import task
 from rich import box
 from rich.console import Console
@@ -26,6 +27,9 @@ INFRAHUB_VERSION = os.getenv("INFRAHUB_VERSION", "stable")
 INFRAHUB_SERVICE_CATALOG = os.getenv("INFRAHUB_SERVICE_CATALOG", "false").lower() == "true"
 INFRAHUB_GIT_LOCAL = os.getenv("INFRAHUB_GIT_LOCAL", "false").lower() == "true"
 INFRAHUB_DATASET = os.getenv("INFRAHUB_DATASET", "financial")
+# Git ref the server clones for transforms/generators/checks. Defaults to the
+# branch you have checked out, NOT to `main` — see _github_repo_ref.
+INFRAHUB_REPO_REF = os.getenv("INFRAHUB_REPO_REF", "")
 INFRAHUB_ENTERPRISE = os.getenv("INFRAHUB_ENTERPRISE", "false").lower() == "true"
 LOCAL_COMPOSE_FILE = REPO_ROOT / "docker-compose.yml"
 OVERRIDE_FILE = REPO_ROOT / "docker-compose.override.yml"
@@ -58,6 +62,11 @@ def _wait(msg: str) -> None:
 def _success(msg: str) -> None:
     """Print a success marker."""
     console.print(f"[green]✓[/green] {msg}")
+
+
+def _error(msg: str) -> None:
+    """Print a failure marker for a step that stops the run."""
+    console.print(f"[red]✗[/red] {msg}")
 
 
 def _sleep_with_progress(seconds: int, description: str) -> None:
@@ -223,6 +232,106 @@ def destroy(c: Context) -> None:
 
 
 DATASETS_DIR = REPO_ROOT / "objects" / "datasets"
+GIT_REPO_DIR = REPO_ROOT / "objects" / "git-repo"
+# Rendered repo object goes under lab/ because lab/* is gitignored — the ref
+# is machine-specific and must never be committed.
+RENDERED_REPO_FILE = REPO_ROOT / "lab" / "git-repo.yml"
+
+
+def _repo_ref(c: Context) -> str:
+    """Return the git ref the server should read `.infrahub.yml` code from.
+
+    Object data is loaded from the working tree, but transforms, generators,
+    queries and checks are read by the server from a *clone*. Pinning that
+    clone to `main` while the working tree is on a feature branch runs new data
+    against old code — and the failure is opaque ("One or more generators
+    failed") because the traceback stays server-side. So the ref follows the
+    checked-out branch by default.
+
+    Args:
+        c: Invoke context, used to shell out to git.
+
+    Returns:
+        The ref to use: ``INFRAHUB_REPO_REF`` if set, else the current branch,
+        falling back to ``main`` when the branch can't be determined.
+    """
+    if INFRAHUB_REPO_REF:
+        return INFRAHUB_REPO_REF
+    result = c.run("git rev-parse --abbrev-ref HEAD", hide=True, warn=True)
+    branch = (result.stdout or "").strip() if result.ok else ""
+    if not branch or branch == "HEAD":  # detached
+        return "main"
+    return branch
+
+
+def _render_repo_file(c: Context, ref: str) -> Path:
+    """Write the repository object, pinned to ``ref``.
+
+    Both registration modes pin a branch and both default to ``main`` on disk,
+    so both need rewriting — a local mount pointed at ``main`` reads stale code
+    just as surely as a GitHub clone does.
+
+    Args:
+        c: Invoke context, used to verify the ref is visible to the server.
+        ref: Git ref to pin the repository to.
+
+    Returns:
+        Path to the rendered object file.
+
+    Raises:
+        Exit: If the ref is not present on the repository the server will clone.
+            A local mount is only warned about, because a stale working tree
+            still produces a usable (if outdated) clone; a missing remote ref
+            produces nothing at all.
+    """
+    template = GIT_REPO_DIR / ("local-dev.yml" if INFRAHUB_GIT_LOCAL else "github.yml")
+    spec = yaml.safe_load(template.read_text())
+    # CoreRepository calls it `default_branch`; CoreReadOnlyRepository, `ref`.
+    key = "default_branch" if INFRAHUB_GIT_LOCAL else "ref"
+    spec["spec"]["data"][0][key] = ref
+    RENDERED_REPO_FILE.parent.mkdir(parents=True, exist_ok=True)
+    RENDERED_REPO_FILE.write_text(yaml.safe_dump(spec, sort_keys=False))
+
+    if INFRAHUB_GIT_LOCAL:
+        # The server clones the mounted repo, so it sees committed history
+        # only — uncommitted edits to generators/transforms are invisible.
+        dirty = c.run("git status --porcelain", hide=True, warn=True)
+        if dirty.ok and (dirty.stdout or "").strip():
+            _wait(
+                "Working tree has uncommitted changes. The server clones committed "
+                "history, so those edits will NOT be used — commit them first."
+            )
+    else:
+        # The server clones over HTTPS, so an unpushed local branch is invisible
+        # to it and the sync fails with a bare "couldn't find remote ref". Probe
+        # the URL the server will actually clone, not the contributor's `origin`:
+        # on a fork those differ, so probing `origin` reports a branch that is
+        # present on the fork but absent from the repository being registered.
+        location = spec["spec"]["data"][0]["location"]
+        probe = c.run(
+            f"git ls-remote --exit-code --heads {shlex.quote(location)} {shlex.quote(ref)}",
+            hide=True,
+            warn=True,
+        )
+        if not probe.ok:
+            # Abort rather than warn. Continuing is guaranteed to fail, but not
+            # for another two minutes and not with this message: the sync finds
+            # no ref, so no CoreGeneratorDefinition is ever created and bootstrap
+            # dies in scripts/run_generator.py on a timeout that says nothing
+            # about the ref. A warning here was read as advisory and scrolled
+            # past — by the time the run failed, the reason was 100 lines up.
+            # Printed through the console, not passed to Exit: invoke writes an
+            # Exit message out verbatim, so Rich markup would reach the terminal
+            # as literal "[red]" text.
+            _error(
+                f"Ref '{ref}' is not on {location} — the server clones that URL over HTTPS "
+                f"and will not find it, so no transforms, generators or checks would be "
+                f"registered.\n"
+                f"Push the branch there, set INFRAHUB_REPO_REF to a ref that exists, or set "
+                f"INFRAHUB_GIT_LOCAL=true to mount the working tree instead."
+            )
+            raise Exit(code=1)
+    return RENDERED_REPO_FILE
 
 
 def _dataset_files(dataset: str) -> list[Path]:
@@ -276,10 +385,11 @@ def bootstrap(c: Context) -> None:
         c.run(f"uv run infrahubctl object load {shlex.quote(str(path))}", pty=True)
     _success("Bootstrap objects loaded")
 
-    repo_file = (
-        "objects/git-repo/local-dev.yml" if INFRAHUB_GIT_LOCAL else "objects/git-repo/github.yml"
-    )
-    _step(f"Registering CoreRepository ({repo_file})")
+    ref = _repo_ref(c)
+    repo_file = str(_render_repo_file(c, ref).relative_to(REPO_ROOT))
+    source = "/upstream mount" if INFRAHUB_GIT_LOCAL else "github.com"
+    kind = "CoreRepository" if INFRAHUB_GIT_LOCAL else "CoreReadOnlyRepository"
+    _step(f"Registering {kind} ({source} @ {ref})")
     c.run(f"uv run infrahubctl object load {shlex.quote(repo_file)}", pty=True)
     _success("CoreRepository registered")
 
@@ -547,18 +657,41 @@ def lab_push_arista(c: Context) -> None:
     if not ceos_nodes:
         _wait("No cEOS nodes in the topology; nothing to push.")
         return
+    # Keep going past a node that fails. push_arista.py exits non-zero when a
+    # node never becomes ready, and letting invoke raise on the first one left
+    # every remaining node unconfigured — the opposite of what you want when
+    # twelve cEOS containers are still settling. Failures are reported at the
+    # end instead, the same way a missing config is.
+    failed: list[str] = []
+    pushed = 0
     for node_name in ceos_nodes:
         cfg = LAB_DEVICES_DIR / f"{node_name}.cfg"
         if not cfg.exists():
             _wait(f"No config at {cfg.relative_to(REPO_ROOT)}; run `invoke lab.deploy` first.")
+            failed.append(node_name)
             continue
         host = f"clab-{lab_name}-{node_name}"
         _step(f"Pushing {cfg.relative_to(REPO_ROOT)} → {host}")
-        c.run(
+        result = c.run(
             f"uv run python scripts/push_arista.py {shlex.quote(str(cfg))} {shlex.quote(host)}",
             pty=True,
+            warn=True,
         )
-    _success("Config(s) pushed")
+        if result.ok:
+            pushed += 1
+        else:
+            failed.append(node_name)
+    if failed:
+        # Non-zero, not just a printed warning. Keeping going past a failed node
+        # is right — the remaining eleven are still worth configuring — but
+        # exiting 0 afterwards told `invoke lab.deploy && invoke lab.push-arista
+        # && <checks>` that every router was configured when none might be.
+        _error(
+            f"Pushed {pushed}/{len(ceos_nodes)} node(s); failed: {', '.join(sorted(failed))}. "
+            f"Re-run `invoke lab.push-arista` once they finish booting."
+        )
+        raise Exit(code=1)
+    _success(f"Config pushed to {pushed} node(s)")
 
 
 lab.add_task(lab_deploy)

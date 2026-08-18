@@ -42,6 +42,15 @@ spec:
       # the catalog from handing out an id that already exists on disk.
       start_range: 200
       end_range: 9999
+    - name: customer_asn_pool
+      node: RoutingAutonomousSystem
+      node_attribute: asn
+      # Private-use ASNs designated for L3VPN customers (PE-CE eBGP). One AS
+      # per customer VPN, allocated by generate_l3vpn and linked as the VPN's
+      # `customer_asn`. The backbone AS (65000) is seeded on disk and sits
+      # deliberately outside this range so the pool can never re-issue it.
+      start_range: 65100
+      end_range: 65199
 
 ---
 apiVersion: infrahub.app/v1

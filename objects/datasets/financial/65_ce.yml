@@ -1,0 +1,170 @@
+---
+# Pre-provisioned customer edge (CE) routers.
+#
+# Four CEs, two per customer, wired to the two hub PEs from the demo diagram:
+#
+#   ce-trading-lon  -> pe-01 Ethernet3      ce-trading-zrh -> pe-08 Ethernet3
+#   ce-ib-lon       -> pe-01 Ethernet4      ce-ib-zrh      -> pe-08 Ethernet4
+#
+# Each CE is an Arista cEOS box so the lab actually brings the PE-CE eBGP
+# session up. The PE-facing Ethernet1 is deliberately left without an IP: the
+# L3VPN generator allocates the /30 from `pe_ce_pool` and binds the CE side to
+# this interface. Ethernet2 is the customer LAN the CE advertises into the VPN.
+#
+# The customer ASNs are NOT set here — they are allocated from
+# `customer_asn_pool` by the L3VPN generator and written onto the CE's `asn`
+# relationship, so the pool stays the single source of truth for customer AS
+# numbers.
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: IpamPrefix
+  data:
+    - prefix: 10.0.1.0/24
+      description: CE Loopback0 supernet
+      status: active
+      role: loopback
+
+---
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: DcimDevice
+  data:
+    - name: ce-trading-lon
+      description: Markets & Trading CE — London trading floor.
+      status: active
+      role: cpe
+      location: lon
+      platform: arista_eos
+      device_type: 7280R3
+      member_of_groups:
+        - ce_arista_eos
+        - ces
+    - name: ce-ib-lon
+      description: Investment Banking CE — London deal floor.
+      status: active
+      role: cpe
+      location: lon
+      platform: arista_eos
+      device_type: 7280R3
+      member_of_groups:
+        - ce_arista_eos
+        - ces
+    - name: ce-trading-zrh
+      description: Markets & Trading CE — Zurich trading floor.
+      status: active
+      role: cpe
+      location: zrh
+      platform: arista_eos
+      device_type: 7280R3
+      member_of_groups:
+        - ce_arista_eos
+        - ces
+    - name: ce-ib-zrh
+      description: Investment Banking CE — Zurich deal floor.
+      status: active
+      role: cpe
+      location: zrh
+      platform: arista_eos
+      device_type: 7280R3
+      member_of_groups:
+        - ce_arista_eos
+        - ces
+
+---
+# CE Loopback0 — router-id and a per-CE address to ping across the VPN.
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: InterfaceVirtual
+  data:
+    - name: Loopback0
+      description: Router-ID / VPN reachability test source
+      mtu: 1500
+      status: active
+      role: management
+      device: ce-trading-lon
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.0.1.1/32
+            description: ce-trading-lon loopback
+    - name: Loopback0
+      description: Router-ID / VPN reachability test source
+      mtu: 1500
+      status: active
+      role: management
+      device: ce-ib-lon
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.0.1.2/32
+            description: ce-ib-lon loopback
+    - name: Loopback0
+      description: Router-ID / VPN reachability test source
+      mtu: 1500
+      status: active
+      role: management
+      device: ce-trading-zrh
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.0.1.3/32
+            description: ce-trading-zrh loopback
+    - name: Loopback0
+      description: Router-ID / VPN reachability test source
+      mtu: 1500
+      status: active
+      role: management
+      device: ce-ib-zrh
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.0.1.4/32
+            description: ce-ib-zrh loopback
+
+---
+# CE physical interfaces.
+#
+# Neither port carries an IP here, on purpose. `generate_l3vpn` allocates the
+# PE-CE /30 and attaches the CE address to Ethernet1. Ethernet2 is the *parent*
+# of a dot1q sub-interface the generator creates: the VLAN comes from the
+# customer's pool (52_vlan_pools.yml) and the LAN gateway address is derived
+# from the site's customer_subnet, so neither is duplicated here.
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: InterfacePhysical
+  data:
+    - {name: Ethernet1, description: To pe-01 Ethernet3, mtu: 1500, status: active, role: upstream, device: ce-trading-lon}
+    - name: Ethernet2
+      description: Trading floor LAN — London
+      mtu: 1500
+      status: active
+      role: access
+      device: ce-trading-lon
+
+    - {name: Ethernet1, description: To pe-01 Ethernet4, mtu: 1500, status: active, role: upstream, device: ce-ib-lon}
+    - name: Ethernet2
+      description: Deal floor LAN — London
+      mtu: 1500
+      status: active
+      role: access
+      device: ce-ib-lon
+
+    - {name: Ethernet1, description: To pe-08 Ethernet3, mtu: 1500, status: active, role: upstream, device: ce-trading-zrh}
+    - name: Ethernet2
+      description: Trading floor LAN — Zurich
+      mtu: 1500
+      status: active
+      role: access
+      device: ce-trading-zrh
+
+    - {name: Ethernet1, description: To pe-08 Ethernet4, mtu: 1500, status: active, role: upstream, device: ce-ib-zrh}
+    - name: Ethernet2
+      description: Deal floor LAN — Zurich
+      mtu: 1500
+      status: active
+      role: access
+      device: ce-ib-zrh

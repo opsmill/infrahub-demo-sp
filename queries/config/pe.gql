@@ -56,18 +56,23 @@ query PE($device: String!) {
       node {
         router_id { value }
         address_families { value }
-        sessions {
-          edges {
-            node {
-              description { value }
-              session_type { value }
-              local_ip { node { address { value } } }
-              remote_ip { node { address { value } } }
-              local_as { node { asn { value } } }
-              remote_as { node { asn { value } } }
-            }
-          }
-        }
+      }
+    }
+  }
+  # iBGP overlay sessions, read from RoutingBGPSession directly rather than
+  # through MplsBgpProcess.sessions. Nothing populates that relationship — not
+  # the bootstrap data, not any generator — so templates iterating it rendered
+  # zero neighbours and every PE ended up with an empty `router bgp`. The
+  # sessions themselves have always existed, keyed by device.
+  RoutingBGPSession(device__name__value: $device, session_type__value: "INTERNAL") {
+    edges {
+      node {
+        description { value }
+        session_type { value }
+        local_ip { node { address { value } } }
+        remote_ip { node { address { value } } }
+        local_as { node { asn { value } } }
+        remote_as { node { asn { value } } }
       }
     }
   }
@@ -87,6 +92,7 @@ query PE($device: String!) {
             name { value }
             vpn_id { value }
             address_family { value }
+            customer_asn { node { asn { value } } }
             vrf {
               node {
                 name { value }

@@ -1,9 +1,9 @@
 # Financial dataset MPLS backbone — 8 PE routers, all Arista cEOS.
 #
-# Topology: ring (pe-01..pe-08..pe-01) + cross-chords (01-05, 02-06, 03-07,
-# 04-08) => 12 backbone p2p links, every PE degree 3 (partial mesh). iBGP is a
-# full mesh (56 directional sessions). Generated data — see the demo docs for
-# the topology diagram.
+# Topology: the demo partial mesh — pe-01 (west) and pe-08 (east) are the
+# two-degree hub PEs that carry every CE attachment; pe-02..pe-07 form the
+# meshed core between them. 15 backbone p2p links; per-PE core degree
+# is pe-01:2, pe-02:4, pe-03:4, pe-04:5, pe-05:5, pe-06:4, pe-07:4, pe-08:2. iBGP is a full mesh (56 directional sessions).
 #
 # NOTE: this file is generated deterministically; regenerate rather than
 # hand-editing individual rows to keep the addressing plan consistent.
@@ -192,7 +192,16 @@ spec:
             description: pe-08 loopback
 
 ---
-# Backbone physical interfaces (3 core p2p + 4 free customer per PE)
+# Backbone physical interfaces: core p2p links first (Ethernet1..N in ascending
+# peer order), then the customer-facing ports.
+#
+# On pe-01 and pe-08 the first two customer ports are pre-wired to the
+# pre-provisioned CE routers. They are status=active (not free) so the L3VPN
+# generator's free-interface allocator can never hand them to another service,
+# and their description matches the generator's idempotency key
+# ("L3VPN <vpn name>") so it binds the site to this exact port instead of
+# allocating a new one. The remaining ports stay status=free for the Service
+# Catalog to allocate.
 apiVersion: infrahub.app/v1
 kind: Object
 spec:
@@ -210,7 +219,7 @@ spec:
         data:
           - address: 10.1.0.0/31
     - name: Ethernet2
-      description: To pe-05
+      description: To pe-03
       mtu: 9000
       status: active
       role: core
@@ -219,16 +228,10 @@ spec:
         kind: IpamIPAddress
         data:
           - address: 10.1.0.2/31
-    - name: Ethernet3
-      description: To pe-08
-      mtu: 9000
-      status: active
-      role: core
-      device: pe-01
-      ip_addresses:
-        kind: IpamIPAddress
-        data:
-          - address: 10.1.0.4/31
+    - {name: Ethernet3, description: L3VPN trading-floor-vpn, mtu: 1500, status: active, role: cust, device: pe-01}
+    - {name: Ethernet4, description: L3VPN ib-advisory-vpn, mtu: 1500, status: active, role: cust, device: pe-01}
+    - {name: Ethernet5, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-01}
+    - {name: Ethernet6, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-01}
     # pe-02 (fra)
     - name: Ethernet1
       description: To pe-01
@@ -249,9 +252,19 @@ spec:
       ip_addresses:
         kind: IpamIPAddress
         data:
-          - address: 10.1.0.6/31
+          - address: 10.1.0.4/31
     - name: Ethernet3
-      description: To pe-06
+      description: To pe-04
+      mtu: 9000
+      status: active
+      role: core
+      device: pe-02
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.1.0.6/31
+    - name: Ethernet4
+      description: To pe-05
       mtu: 9000
       status: active
       role: core
@@ -260,8 +273,20 @@ spec:
         kind: IpamIPAddress
         data:
           - address: 10.1.0.8/31
+    - {name: Ethernet5, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-02}
+    - {name: Ethernet6, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-02}
     # pe-03 (ams)
     - name: Ethernet1
+      description: To pe-01
+      mtu: 9000
+      status: active
+      role: core
+      device: pe-03
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.1.0.3/31
+    - name: Ethernet2
       description: To pe-02
       mtu: 9000
       status: active
@@ -270,8 +295,8 @@ spec:
       ip_addresses:
         kind: IpamIPAddress
         data:
-          - address: 10.1.0.7/31
-    - name: Ethernet2
+          - address: 10.1.0.5/31
+    - name: Ethernet3
       description: To pe-04
       mtu: 9000
       status: active
@@ -281,8 +306,8 @@ spec:
         kind: IpamIPAddress
         data:
           - address: 10.1.0.10/31
-    - name: Ethernet3
-      description: To pe-07
+    - name: Ethernet4
+      description: To pe-05
       mtu: 9000
       status: active
       role: core
@@ -291,8 +316,20 @@ spec:
         kind: IpamIPAddress
         data:
           - address: 10.1.0.12/31
+    - {name: Ethernet5, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-03}
+    - {name: Ethernet6, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-03}
     # pe-04 (par)
     - name: Ethernet1
+      description: To pe-02
+      mtu: 9000
+      status: active
+      role: core
+      device: pe-04
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.1.0.7/31
+    - name: Ethernet2
       description: To pe-03
       mtu: 9000
       status: active
@@ -302,7 +339,7 @@ spec:
         kind: IpamIPAddress
         data:
           - address: 10.1.0.11/31
-    - name: Ethernet2
+    - name: Ethernet3
       description: To pe-05
       mtu: 9000
       status: active
@@ -312,8 +349,8 @@ spec:
         kind: IpamIPAddress
         data:
           - address: 10.1.0.14/31
-    - name: Ethernet3
-      description: To pe-08
+    - name: Ethernet4
+      description: To pe-06
       mtu: 9000
       status: active
       role: core
@@ -322,9 +359,21 @@ spec:
         kind: IpamIPAddress
         data:
           - address: 10.1.0.16/31
+    - name: Ethernet5
+      description: To pe-07
+      mtu: 9000
+      status: active
+      role: core
+      device: pe-04
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.1.0.18/31
+    - {name: Ethernet6, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-04}
+    - {name: Ethernet7, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-04}
     # pe-05 (mad)
     - name: Ethernet1
-      description: To pe-01
+      description: To pe-02
       mtu: 9000
       status: active
       role: core
@@ -332,8 +381,18 @@ spec:
       ip_addresses:
         kind: IpamIPAddress
         data:
-          - address: 10.1.0.3/31
+          - address: 10.1.0.9/31
     - name: Ethernet2
+      description: To pe-03
+      mtu: 9000
+      status: active
+      role: core
+      device: pe-05
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.1.0.13/31
+    - name: Ethernet3
       description: To pe-04
       mtu: 9000
       status: active
@@ -343,7 +402,7 @@ spec:
         kind: IpamIPAddress
         data:
           - address: 10.1.0.15/31
-    - name: Ethernet3
+    - name: Ethernet4
       description: To pe-06
       mtu: 9000
       status: active
@@ -352,10 +411,22 @@ spec:
       ip_addresses:
         kind: IpamIPAddress
         data:
-          - address: 10.1.0.18/31
+          - address: 10.1.0.20/31
+    - name: Ethernet5
+      description: To pe-07
+      mtu: 9000
+      status: active
+      role: core
+      device: pe-05
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.1.0.22/31
+    - {name: Ethernet6, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-05}
+    - {name: Ethernet7, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-05}
     # pe-06 (mil)
     - name: Ethernet1
-      description: To pe-02
+      description: To pe-04
       mtu: 9000
       status: active
       role: core
@@ -363,7 +434,7 @@ spec:
       ip_addresses:
         kind: IpamIPAddress
         data:
-          - address: 10.1.0.9/31
+          - address: 10.1.0.17/31
     - name: Ethernet2
       description: To pe-05
       mtu: 9000
@@ -373,7 +444,7 @@ spec:
       ip_addresses:
         kind: IpamIPAddress
         data:
-          - address: 10.1.0.19/31
+          - address: 10.1.0.21/31
     - name: Ethernet3
       description: To pe-07
       mtu: 9000
@@ -383,10 +454,22 @@ spec:
       ip_addresses:
         kind: IpamIPAddress
         data:
-          - address: 10.1.0.20/31
+          - address: 10.1.0.24/31
+    - name: Ethernet4
+      description: To pe-08
+      mtu: 9000
+      status: active
+      role: core
+      device: pe-06
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.1.0.26/31
+    - {name: Ethernet5, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-06}
+    - {name: Ethernet6, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-06}
     # pe-07 (dub)
     - name: Ethernet1
-      description: To pe-03
+      description: To pe-04
       mtu: 9000
       status: active
       role: core
@@ -394,8 +477,18 @@ spec:
       ip_addresses:
         kind: IpamIPAddress
         data:
-          - address: 10.1.0.13/31
+          - address: 10.1.0.19/31
     - name: Ethernet2
+      description: To pe-05
+      mtu: 9000
+      status: active
+      role: core
+      device: pe-07
+      ip_addresses:
+        kind: IpamIPAddress
+        data:
+          - address: 10.1.0.23/31
+    - name: Ethernet3
       description: To pe-06
       mtu: 9000
       status: active
@@ -404,8 +497,8 @@ spec:
       ip_addresses:
         kind: IpamIPAddress
         data:
-          - address: 10.1.0.21/31
-    - name: Ethernet3
+          - address: 10.1.0.25/31
+    - name: Ethernet4
       description: To pe-08
       mtu: 9000
       status: active
@@ -414,10 +507,12 @@ spec:
       ip_addresses:
         kind: IpamIPAddress
         data:
-          - address: 10.1.0.22/31
+          - address: 10.1.0.28/31
+    - {name: Ethernet5, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-07}
+    - {name: Ethernet6, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-07}
     # pe-08 (zrh)
     - name: Ethernet1
-      description: To pe-01
+      description: To pe-06
       mtu: 9000
       status: active
       role: core
@@ -425,18 +520,8 @@ spec:
       ip_addresses:
         kind: IpamIPAddress
         data:
-          - address: 10.1.0.5/31
+          - address: 10.1.0.27/31
     - name: Ethernet2
-      description: To pe-04
-      mtu: 9000
-      status: active
-      role: core
-      device: pe-08
-      ip_addresses:
-        kind: IpamIPAddress
-        data:
-          - address: 10.1.0.17/31
-    - name: Ethernet3
       description: To pe-07
       mtu: 9000
       status: active
@@ -445,61 +530,34 @@ spec:
       ip_addresses:
         kind: IpamIPAddress
         data:
-          - address: 10.1.0.23/31
-    # Free customer-facing interfaces — allocated to L3VPN sites by the
-    # generate_l3vpn generator (status=free is its allocation filter).
-    - {name: Ethernet4, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-01}
-    - {name: Ethernet5, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-01}
-    - {name: Ethernet6, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-01}
-    - {name: Ethernet7, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-01}
-    - {name: Ethernet4, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-02}
-    - {name: Ethernet5, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-02}
-    - {name: Ethernet6, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-02}
-    - {name: Ethernet7, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-02}
-    - {name: Ethernet4, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-03}
-    - {name: Ethernet5, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-03}
-    - {name: Ethernet6, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-03}
-    - {name: Ethernet7, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-03}
-    - {name: Ethernet4, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-04}
-    - {name: Ethernet5, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-04}
-    - {name: Ethernet6, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-04}
-    - {name: Ethernet7, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-04}
-    - {name: Ethernet4, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-05}
-    - {name: Ethernet5, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-05}
-    - {name: Ethernet6, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-05}
-    - {name: Ethernet7, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-05}
-    - {name: Ethernet4, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-06}
-    - {name: Ethernet5, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-06}
-    - {name: Ethernet6, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-06}
-    - {name: Ethernet7, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-06}
-    - {name: Ethernet4, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-07}
-    - {name: Ethernet5, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-07}
-    - {name: Ethernet6, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-07}
-    - {name: Ethernet7, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-07}
-    - {name: Ethernet4, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-08}
+          - address: 10.1.0.29/31
+    - {name: Ethernet3, description: L3VPN trading-floor-vpn, mtu: 1500, status: active, role: cust, device: pe-08}
+    - {name: Ethernet4, description: L3VPN ib-advisory-vpn, mtu: 1500, status: active, role: cust, device: pe-08}
     - {name: Ethernet5, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-08}
     - {name: Ethernet6, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-08}
-    - {name: Ethernet7, description: Customer-facing (free), mtu: 1500, status: free, role: cust, device: pe-08}
 
 ---
-# Backbone p2p prefixes (12 x /31 from 10.1.0.0/16)
+# Backbone p2p prefixes (15 x /31 from 10.1.0.0/16)
 apiVersion: infrahub.app/v1
 kind: Object
 spec:
   kind: IpamPrefix
   data:
     - {prefix: 10.1.0.0/31, description: pe-01 <-> pe-02, status: active, role: technical}
-    - {prefix: 10.1.0.2/31, description: pe-01 <-> pe-05, status: active, role: technical}
-    - {prefix: 10.1.0.4/31, description: pe-01 <-> pe-08, status: active, role: technical}
-    - {prefix: 10.1.0.6/31, description: pe-02 <-> pe-03, status: active, role: technical}
-    - {prefix: 10.1.0.8/31, description: pe-02 <-> pe-06, status: active, role: technical}
+    - {prefix: 10.1.0.2/31, description: pe-01 <-> pe-03, status: active, role: technical}
+    - {prefix: 10.1.0.4/31, description: pe-02 <-> pe-03, status: active, role: technical}
+    - {prefix: 10.1.0.6/31, description: pe-02 <-> pe-04, status: active, role: technical}
+    - {prefix: 10.1.0.8/31, description: pe-02 <-> pe-05, status: active, role: technical}
     - {prefix: 10.1.0.10/31, description: pe-03 <-> pe-04, status: active, role: technical}
-    - {prefix: 10.1.0.12/31, description: pe-03 <-> pe-07, status: active, role: technical}
+    - {prefix: 10.1.0.12/31, description: pe-03 <-> pe-05, status: active, role: technical}
     - {prefix: 10.1.0.14/31, description: pe-04 <-> pe-05, status: active, role: technical}
-    - {prefix: 10.1.0.16/31, description: pe-04 <-> pe-08, status: active, role: technical}
-    - {prefix: 10.1.0.18/31, description: pe-05 <-> pe-06, status: active, role: technical}
-    - {prefix: 10.1.0.20/31, description: pe-06 <-> pe-07, status: active, role: technical}
-    - {prefix: 10.1.0.22/31, description: pe-07 <-> pe-08, status: active, role: technical}
+    - {prefix: 10.1.0.16/31, description: pe-04 <-> pe-06, status: active, role: technical}
+    - {prefix: 10.1.0.18/31, description: pe-04 <-> pe-07, status: active, role: technical}
+    - {prefix: 10.1.0.20/31, description: pe-05 <-> pe-06, status: active, role: technical}
+    - {prefix: 10.1.0.22/31, description: pe-05 <-> pe-07, status: active, role: technical}
+    - {prefix: 10.1.0.24/31, description: pe-06 <-> pe-07, status: active, role: technical}
+    - {prefix: 10.1.0.26/31, description: pe-06 <-> pe-08, status: active, role: technical}
+    - {prefix: 10.1.0.28/31, description: pe-07 <-> pe-08, status: active, role: technical}
 
 ---
 # ISIS processes
