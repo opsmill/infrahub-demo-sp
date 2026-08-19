@@ -33,21 +33,30 @@ uv run invoke init
 ## Build and Test Commands
 
 ```bash
-# Run all tests
-uv run pytest
+# Run every test, unit and integration
+uv run invoke test
 
-# Run tests with verbose output
-uv run pytest -vv
+# Run only the tests that need no Infrahub deployment (fast, no Docker)
+uv run invoke test-unit
 
-# Run specific test categories
-uv run pytest tests/unit/
-uv run pytest tests/integration/
+# Run the end-to-end suite: boots a throwaway Infrahub via testcontainers.
+# Needs Docker and takes tens of minutes.
+uv run invoke test-integration              # core scope
+uv run invoke test-integration --tier full  # includes the `extended` tier
 
-# Lint and type check
-uv run invoke lint         # Full suite: ruff, mypy, yamllint
-uv run ruff check . --fix  # Format and lint
-uv run mypy .              # Type checking only
+# Lint and type check -- CI runs these same tasks, so they cannot drift
+uv run invoke lint            # Full suite: markdown, YAML, ruff, mypy
+uv run invoke lint-ruff       # ruff check + ruff format --check --diff
+uv run invoke lint-mypy       # mypy --show-error-codes .
+uv run invoke lint-yaml       # yamllint -s .
+uv run invoke lint-markdown   # rumdl check .
+
+# Apply formatting and safe lint fixes
+uv run invoke format
 ```
+
+A bare `uv run pytest` collects `tests/` in full, integration included, so it
+needs Docker. Use `invoke test-unit` for the fast loop.
 
 ## Code Style Guidelines
 
@@ -94,25 +103,51 @@ Schema Definition → Data Loading → Generator Execution → Transform Process
 
 ## Testing Instructions
 
-1. **Before committing**: Run `uv run pytest` to ensure all tests pass
-2. **For new features**: Add tests in `tests/unit/` or `tests/integration/`
+1. **Before committing**: Run `uv run invoke test-unit` to ensure the fast tests pass -- it is the
+   exact gate CI's `unit-test` job runs, and it needs no Docker
+2. **For new features**: Add tests under `tests/unit/`
 3. **Use mocks**: Mock external dependencies with `unittest.mock`
 4. **Test both paths**: Cover success and failure scenarios
-5. **Integration tests**: Require running Infrahub instance
+5. **Test tiers**: Tiers are defined by directory, matching the sibling demo repositories.
+   `tests/unit/` needs no deployment. `tests/integration/` boots its own
+   Infrahub stack with `infrahub-testcontainers` — Docker required, no
+   `invoke start` needed. The floor declared in `[dependency-groups] dev` is
+   the Infrahub release under test, and it is what the release automation
+   bumps.
+
+### Infrahub release automation
+
+When a new Infrahub version ships, `opsmill/infrahub` fires a
+`repository_dispatch` at this repo. `.github/workflows/update-infrahub.yml`
+bumps `infrahub-testcontainers` to that version on an `update-infrahub-<version>`
+branch and opens a PR; CI then runs `tests/integration/` against the new release, so
+the PR going red is the signal that the release breaks this demo.
+
+One workflow serves both pipelines. It answers `trigger-infrahub-update` and
+`trigger-infrahub-sdk-python-update`, routing on `github.event.action` because
+both dispatches carry their number in `client_payload.version` and mean
+different things by it. There is no separate `update-infrahub-sdk.yml`. Both
+paths can also be run by hand from the Actions tab via `workflow_dispatch`.
 
 ## Post-Change Validation
 
 **IMPORTANT**: After making code changes, always run the full lint suite:
 
 ```bash
-uv run invoke lint  # Runs: ruff, mypy, yamllint
+uv run invoke lint  # Runs: rumdl, yamllint, ruff, mypy
 ```
 
 This ensures:
 
-- Python code passes ruff linting
+- Markdown passes rumdl at its default `any` severity -- what this repository tolerates is
+  `disable` in `[tool.rumdl.global]`, which CI and a local run both read
+- YAML files are valid under `yamllint -s`, where warnings are errors
+- Python code passes ruff linting and is correctly formatted
 - Type hints are correct (mypy)
-- YAML files are valid
+
+CI calls these same tasks, so passing locally means passing in CI -- except mypy, which checks
+whatever interpreter you run it with; only CI's 3.11 leg verifies the declared `requires-python`
+floor (see `[tool.mypy]` in `pyproject.toml`).
 
 ## Security Considerations
 
@@ -131,7 +166,7 @@ This ensures:
 ## Development Environment
 
 - **Package Manager**: `uv` (required)
-- **Python Version**: 3.10, 3.11, or 3.12
+- **Python Version**: 3.11 through 3.14
 - **Container Runtime**: Docker (for Infrahub)
 
 ### Environment Variables

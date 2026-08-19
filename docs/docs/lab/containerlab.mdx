@@ -99,7 +99,7 @@ Configuration push to the Nokia PE is therefore not available in v1 (see
 - containerlab >= 0.50
 - Docker with access to pull:
   - `ceos:latest` (requires an Arista account and local image import — see
-    https://containerlab.dev/manual/kinds/ceos/)
+    [the containerlab cEOS guide](https://containerlab.dev/manual/kinds/ceos/))
   - `ghcr.io/nokia/srlinux` (public)
   - `nicolaka/netshoot` (public — the `cust-*` customer hosts on the CE LAN side)
 - A running Infrahub instance with bootstrap data loaded (`invoke init`)
@@ -117,7 +117,7 @@ uv run invoke lab.deploy
 Expected output (default **financial** dataset — 8 Arista cEOS PEs, the four
 pre-provisioned Arista cEOS CE routers, and one customer host behind each CE):
 
-```
+```text
 [INFO] Fetching clab-mpls-topology artifact from Infrahub...
 [INFO] Writing lab/mpls-backbone.clab.yml
 [INFO] Running: containerlab deploy -t lab/mpls-backbone.clab.yml
@@ -281,7 +281,8 @@ If containerlab fails with `Error response from daemon: pull access denied`:
    `docker login ghcr.io -u <github-user> -p <PAT>`
 
 2. **cEOS** — the image is not on any public registry. Download the `.tar.xz`
-   from https://www.arista.com/en/support/software-download and import it:
+   from the [Arista software download page](https://www.arista.com/en/support/software-download)
+   and import it:
 
    ```bash
    docker import cEOS-lab-4.30.0F.tar.xz ceos:latest

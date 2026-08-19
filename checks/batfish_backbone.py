@@ -12,7 +12,6 @@ The split exists because Infrahub executes checks inside the stock
 bake those heavy deps into the worker, the engine lives in ``batfish_runner``
 and is reached over HTTP.
 
-See ``docs/superpowers/specs/2026-06-08-batfish-runner-sidecar-design.md``.
 """
 
 from __future__ import annotations

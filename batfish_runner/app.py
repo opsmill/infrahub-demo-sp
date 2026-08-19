@@ -14,7 +14,6 @@ verbatim from ``checks/batfish_helpers.py``; this module only owns the HTTP
 contract, the temp snapshot directory, and JSON-safe serialization of the
 pandas-derived ``detail`` payloads.
 
-See ``docs/superpowers/specs/2026-06-08-batfish-runner-sidecar-design.md``.
 """
 
 from __future__ import annotations
