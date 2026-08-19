@@ -1,7 +1,6 @@
 ---
 name: CI
 # yamllint disable rule:truthy rule:line-length
-# what is local to this file.
 
 env:
   UV_VERSION: "0.9.18"
@@ -12,9 +11,6 @@ on:
   push:
     branches:
       - main
-  # The tier input is the only guaranteed part of a dispatch. Path filters still evaluate
-  # (paths-filter diffs a non-pull-request event against the default branch), so the lint and unit
-  # jobs may or may not run depending on what the ref changed -- neither outcome is a bug.
   workflow_dispatch:
     inputs:
       tier:
@@ -58,11 +54,7 @@ jobs:
           filters: .github/file-filters.yml
       - name: Decide how much of the integration suite to run
         id: scope
-        # Full is bounded to an explicit dispatch and Infrahub-version bump branches; everything
-        # else, pushes to main included, stays core -- a runner-cost decision. The
-        # branch name is the signal because update-infrahub.yml encodes the component in it, and
-        # `update-infrahub-sdk-` is tested first: an SDK branch also starts with the broader
-        # Infrahub prefix, which would otherwise select `full` for every SDK bump.
+        # `update-infrahub-sdk-` must be tested first: an SDK branch also matches `update-infrahub-`.
         env:
           DISPATCH_TIER: ${{ github.event.inputs.tier }}
           HEAD_REF: ${{ github.head_ref }}
@@ -80,9 +72,6 @@ jobs:
           echo "Integration scope selected -> ${SCOPE}"
 
   python-lint:
-    # `dependencies` as well as `python`: a version-bump pull request touches only pyproject.toml
-    # and uv.lock, matches no `**/*.py` filter, and would otherwise skip this job entirely. Closed
-    # PR #106 is the worked example -- it went green with all three lint jobs skipped.
     if: needs.files-changed.outputs.python == 'true' || needs.files-changed.outputs.dependencies == 'true'
     needs: ["files-changed"]
     runs-on: ubuntu-latest
@@ -90,8 +79,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Both ends of `requires-python`, resolving real packages at each end;
-        # `mypy python_version` was rejected -- it inherits the numpy stub workarounds.
         python-version: ["3.11", "3.14"]
     steps:
       - uses: actions/checkout@v7
@@ -133,9 +120,6 @@ jobs:
         with:
           version: ${{ env.UV_VERSION }}
       - run: uv sync
-      # rumdl comes from uv.lock, so this gate runs the binary contributors run locally
-      # The rvben/rumdl action it replaces both sourced its own binary and narrowed
-      # the gate with --fail-on error; either alone breaks local/CI parity.
       - name: Run rumdl
         run: uv run invoke lint-markdown
 
@@ -154,14 +138,8 @@ jobs:
       - name: Run the tests that need no deployment
         run: uv run invoke test-unit
 
-  # Runs the demo against a throwaway Infrahub stack booted by infrahub-testcontainers. The release
-  # under test is whatever `[dependency-groups] dev` floors infrahub-testcontainers at, which is
-  # what update-infrahub.yml bumps -- so the bot's pull request is what validates a new Infrahub
-  # release against this demo.
   integration-test:
     name: "integration-test (${{ needs.files-changed.outputs.integration_scope }})"
-    # files-changed must have succeeded so its outputs hold real values; an empty scope only skips
-    # the advisory step below. `always()` ignores whether the lint jobs ran, not whether they failed.
     if: |
       always() && !cancelled() &&
       needs.files-changed.result == 'success' &&
@@ -170,15 +148,11 @@ jobs:
     needs: ["files-changed", "python-lint", "yaml-lint", "markdown-lint", "unit-test"]
     runs-on:
       group: "huge-runners"
-    # 75 minutes covers the single run every scope but `full` performs; 180 covers the two
-    # sequential runs of a `full` scope (blocking core, then advisory full), each booting a stack.
     timeout-minutes: ${{ needs.files-changed.outputs.run_full == 'true' && 180 || 75 }}
     env:
       INFRAHUB_DB_TYPE: neo4j
       INFRAHUB_TIMEOUT: 600
       INFRAHUB_TESTING_LOG_LEVEL: INFO
-      # No INFRAHUB_API_TOKEN here on purpose: the suite reads the container's seeded admin token
-      # from infrahub_testcontainers, so CI and a local run authenticate identically.
     steps:
       - uses: actions/checkout@v7
       - name: Install tini
@@ -189,40 +163,23 @@ jobs:
           version: ${{ env.UV_VERSION }}
       - run: uv sync
       - name: Set environment variables
-        # Through `env:`, never interpolated into the `run:` body -- a ${{ }} expression becomes
-        # script text before the shell sees it, and three sibling repositories copy this file
         env:
           RUNNER_LABEL: ${{ runner.name }}
         run: |
-          # Fail by name rather than fall through: a runner without the ghrunnerN token would
-          # otherwise yield the silently wrong temp root /var/lib/github//_temp.
           if ! RUNNER_NAME=$(echo "${RUNNER_LABEL}" | grep -o 'ghrunner[0-9]\+'); then
             echo "::error::Runner name '${RUNNER_LABEL}' does not match ghrunner<N>; cannot derive PYTEST_DEBUG_TEMPROOT."
             exit 1
           fi
           echo "PYTEST_DEBUG_TEMPROOT=/var/lib/github/${RUNNER_NAME/ghrunner/ghrunner_}/_temp" >> "$GITHUB_ENV"
       - name: "Run the core integration tier (blocking)"
-        # The merge gate on every pull request, bumps included. Separate from the advisory run
-        # below because job-level `continue-on-error` -- this job's previous shape -- also swallowed
-        # core regressions and every infrastructure step, on exactly the bump pull requests whose
-        # only QA is this run.
         run: exec tini -s -g -- uv run invoke test-integration --tier=core
       - name: "Run the full integration tier (advisory)"
         id: full
-        # Reports the whole suite without blocking: Infrahub intermittently returns HTTP 500 while
-        # resolving its own CoreGeneratorGroup / CoreGraphQLQueryGroup members -- intermittent, so
-        # not xfail-able. Delete this step's
-        # `continue-on-error` and collapse the two steps back into one blocking `--tier=full` run
-        # the day that fault is fixed. A `full` scope boots the stack twice; that is bounded to
-        # Infrahub bumps and explicit full-tier dispatches. No `always()`: a failed core run
-        # already blocks the merge, so the advisory hour of huge-runner time would buy nothing.
+        # Advisory until the upstream CoreGeneratorGroup / CoreGraphQLQueryGroup HTTP 500 fault is fixed; then drop `continue-on-error`, fold this into one blocking `--tier=full` run, and delete the report step below.
         if: needs.files-changed.outputs.run_full == 'true'
         continue-on-error: true
         run: exec tini -s -g -- uv run invoke test-integration --tier=full
       - name: "Report what the advisory full tier did"
-        # `continue-on-error` above keeps the job green, so the checks list stops carrying the
-        # advisory signal -- write it into the run summary instead. `skipped` is a real outcome
-        # (the core step failed first). Delete this step together with the advisory one.
         if: always() && needs.files-changed.outputs.run_full == 'true'
         env:
           OUTCOME: ${{ steps.full.outcome }}
@@ -244,7 +201,6 @@ jobs:
     defaults:
       run:
         working-directory: ./docs
-    # Same downstream-of-files-changed clause as every other consumer of its outputs.
     if: |
       always() && !cancelled() &&
       needs.files-changed.result == 'success' &&

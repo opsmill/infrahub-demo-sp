@@ -472,17 +472,8 @@ def init_demo(c: Context) -> None:
 
 @task(name="lint-ruff")
 def lint_ruff(c: Context) -> None:
-    """Lint and check the formatting of all Python files with ruff.
-
-    Args:
-        c: Invoke Context.
-    """
+    """Lint and check the formatting of all Python files with ruff."""
     _step("ruff check")
-    # Two commands, not one: `ruff check` does not check formatting, and the
-    # `format` task cannot stand in for it because `format` rewrites files and
-    # would pass in CI regardless of what it rewrote. `ruff check --select I .`
-    # is deliberately absent -- `I` is already in select, and --select sets
-    # rather than extends the rule list, so it could never fail on its own.
     c.run("uv run ruff check .", pty=True)
     _step("ruff format --check")
     c.run("uv run ruff format --check --diff .", pty=True)
@@ -490,51 +481,28 @@ def lint_ruff(c: Context) -> None:
 
 @task(name="lint-mypy")
 def lint_mypy(c: Context) -> None:
-    """Type-check all Python files with mypy.
-
-    Args:
-        c: Invoke Context.
-    """
+    """Type-check all Python files with mypy."""
     _step("mypy")
     c.run("uv run mypy --show-error-codes .", pty=True)
 
 
 @task(name="lint-yaml")
 def lint_yaml(c: Context) -> None:
-    """Lint all YAML files with yamllint.
-
-    Args:
-        c: Invoke Context.
-    """
+    """Lint all YAML files with yamllint."""
     _step("yamllint")
-    # -s promotes warnings to errors. CI has always passed it and this task
-    # never did; without it, routing CI through this task would silently end
-    # warning-level YAML enforcement.
     c.run("uv run yamllint -s .", pty=True)
 
 
 @task(name="lint-markdown")
 def lint_markdown(c: Context) -> None:
-    """Lint all Markdown files with rumdl.
-
-    Args:
-        c: Invoke Context.
-    """
+    """Lint all Markdown files with rumdl."""
     _step("rumdl")
-    # No --fail-on: rumdl's default `any` severity applies here and in CI alike,
-    # because ci.yml's markdown-lint gate is this task. What the
-    # repository tolerates is expressed as `disable` in pyproject.toml instead,
-    # where both ends read it.
     c.run("uv run rumdl check .", pty=True)
 
 
 @task
 def lint(c: Context) -> None:
-    """Run the full lint suite: markdown, YAML, ruff, mypy.
-
-    Args:
-        c: Invoke Context.
-    """
+    """Run the full lint suite: markdown, YAML, ruff, mypy."""
     _banner("invoke lint", border="cyan")
     lint_markdown(c)
     lint_yaml(c)
@@ -545,11 +513,7 @@ def lint(c: Context) -> None:
 
 @task(name="format")
 def format_code(c: Context) -> None:
-    """Format all Python files with ruff, applying safe lint fixes.
-
-    Args:
-        c: Invoke Context.
-    """
+    """Format all Python files with ruff, applying safe lint fixes."""
     _banner("invoke format", border="green")
     _step("ruff format")
     c.run("uv run ruff format .", pty=True)
@@ -560,25 +524,10 @@ def format_code(c: Context) -> None:
 
 @task(name="test-unit")
 def test_unit(c: Context) -> None:
-    """Run every test that needs no Infrahub deployment.
-
-    Args:
-        c: Invoke Context.
-    """
+    """Run every test that needs no Infrahub deployment."""
     _banner("invoke test-unit", border="cyan")
-    # Two invocations because the deployment-free tests live in two places: the
-    # unit directory, and the integration tests marked `offline`, which read
-    # only repository files and resolution logic. A single `-m offline` run over
-    # tests/ would not cover tests/unit, and a marker selection matching nothing
-    # exits 5 rather than 0, so the two are kept separate and explicit.
     c.run("uv run pytest tests/unit", pty=True)
-    # `pytest.mark.offline` lives in exactly one place
-    # (tests/integration/test_01_stack_config.py). If that marker is ever
-    # dropped -- a cheap follow-up once the guard it exists
-    # for is no longer needed -- this invocation would collect nothing and
-    # exit 5, which would otherwise fail this task for a reason unrelated to
-    # any test failing. Tolerate only that code here; any other non-zero exit
-    # still fails the task.
+    # Exit 5 means the `offline` marker selected nothing, which is not a failure.
     result = c.run("uv run pytest tests/integration -m offline", pty=True, warn=True)
     if result.exited not in (0, 5):
         raise Exit(
@@ -597,17 +546,11 @@ def test_integration(c: Context, tier: str = "core") -> None:
 
     Needs Docker. The Infrahub release under test is whatever
     `[dependency-groups] dev` pins ``infrahub-testcontainers`` to.
-
-    Args:
-        c: Invoke Context.
-        tier: Either ``core`` or ``full``.
     """
     if tier not in {"core", "full"}:
         raise Exit(f"tier must be 'core' or 'full', got {tier!r}")
     _banner(f"invoke test-integration --tier {tier}", border="cyan")
-    # `core` deselects the `extended` tests; `full` collects everything. The
-    # proposed-change tail of tests/integration/test_workflow.py is what
-    # currently carries `extended` -- see issue #111.
+    # `core` deselects the `extended` tests -- see issue #111.
     marker = "" if tier == "full" else ' -m "not extended"'
     c.run(f"uv run pytest tests/integration{marker}", pty=True)
     _success(f"Integration tests passed ({tier})")
@@ -615,11 +558,7 @@ def test_integration(c: Context, tier: str = "core") -> None:
 
 @task(name="test")
 def test_all(c: Context) -> None:
-    """Run every test in the repository, unit and integration.
-
-    Args:
-        c: Invoke Context.
-    """
+    """Run every test in the repository, unit and integration."""
     _banner("invoke test", border="cyan")
     c.run("uv run pytest tests", pty=True)
     _success("Tests passed")

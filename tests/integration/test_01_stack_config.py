@@ -61,11 +61,7 @@ def test_explicit_env_beats_the_default_tag() -> None:
 
 
 def test_base_version_is_read_only_for_a_custom_build() -> None:
-    """INFRAHUB_BASE_VERSION is the custom image's build arg, not a knob on the vanilla stack.
-
-    A repository can hold a Dockerfile for its demo stack while running its tests against vanilla
-    Infrahub, so this variable must not leak into the tag unless the caller opts in.
-    """
+    """INFRAHUB_BASE_VERSION is the custom image's build arg, not a knob on the vanilla stack."""
     env = {"INFRAHUB_BASE_VERSION": "1.10.0"}
     assert resolve_stack_image(env, PACKAGED).tag == PACKAGED
     assert resolve_stack_image(env, PACKAGED, custom_build=True).tag == "1.10.0"
@@ -86,13 +82,7 @@ def test_explicit_falsy_pull_wins_over_the_vanilla_default(value: str) -> None:
 
 @pytest.mark.parametrize("value", ["true", "1", "yes", "on", "TRUE", " true "])
 def test_explicit_truthy_pull_wins_over_the_custom_build_default(value: str) -> None:
-    """`1` is the conventional spelling for a Docker-adjacent boolean, so it must not read as false.
-
-    Treating only the literal "true" as truthy would invert the caller's intent, and `as_env()`
-    would then write the inversion back out — so a repository setting `=1` and merging `as_env()`
-    into `os.environ` would overwrite its own value and run a stale local image while the suite
-    reported the resolved tag.
-    """
+    """`1` is the conventional spelling for a Docker-adjacent boolean; it must not read false."""
     env = {"INFRAHUB_TESTING_DOCKER_PULL": value}
     assert resolve_stack_image(env, PACKAGED, custom_build=True).pull is True
 
@@ -112,12 +102,7 @@ def test_reference_joins_repository_and_tag() -> None:
 
 
 def test_as_env_sets_both_tag_variables_to_the_same_value() -> None:
-    """The whole point: one resolution, every path agreeing.
-
-    ``INFRAHUB_TESTING_IMAGE_VERSION`` reaches the .env writer and
-    ``INFRAHUB_TESTING_IMAGE_VER`` is what the helpers fixture reads. Setting one and not the other
-    is how a suite ends up reporting one version while running another.
-    """
+    """The whole point: one resolution, every path agreeing."""
     env = resolve_stack_image({}, PACKAGED, repository="opsmill/custom", custom_build=True).as_env()
     assert env == {
         "INFRAHUB_TESTING_DOCKER_IMAGE": "opsmill/custom",

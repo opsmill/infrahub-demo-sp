@@ -1,15 +1,7 @@
 ---
-# Integration-test service request, loaded onto a branch to mimic what the
-# Streamlit service catalog does.
-#
-# Chosen so it never collides with the bootstrap dataset:
-#   - vpn_id 150 sits in the 100-199 range reserved for on-disk services
-#     (`vpn_id_pool` hands out 200+), so RD 65000:150 is unique and the
-#     l3vpn_overlap check passes.
-#   - 10.201.x.0/24 subnets are disjoint from the bootstrap 10.200.x.0/24
-#     LANs and from each other, so the l3vpn_site_subnet check passes.
-#   - pe-05 / pe-06 carry no bootstrap L3VPN, so the generator has to pick
-#     genuinely free physical interfaces on them.
+# Integration-test service request, loaded onto a branch as the Streamlit catalog does.
+# vpn_id 150, the 10.201.x.0/24 subnets and pe-05/pe-06 are all chosen not to collide with
+# the bootstrap dataset, so the l3vpn_overlap and l3vpn_site_subnet checks pass.
 apiVersion: infrahub.app/v1
 kind: Object
 spec:
@@ -19,8 +11,7 @@ spec:
     - {prefix: 10.201.20.0/24, description: Integration test LAN — Madrid, status: active, role: public}
 
 ---
-# Adding the service to the `l3vpns` group is what fires generate_l3vpn on
-# this branch, via the CoreGroupTriggerRule in objects/events/00_triggers.yml.
+# Membership of the `l3vpns` group is what fires generate_l3vpn on this branch.
 apiVersion: infrahub.app/v1
 kind: Object
 spec:

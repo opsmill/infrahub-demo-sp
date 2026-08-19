@@ -1,22 +1,11 @@
 # pyright: reportAttributeAccessIssue=false
 """End-to-end demo workflow against a containerised Infrahub.
 
-Walks the same path a user follows in the README, in two halves:
+Two halves, following the README: bootstrap (schemas, menu, objects, protocol export,
+repository registration, generators, event triggers, artifacts) and a service request
+(branch, load a ServiceL3Vpn, group trigger, diff, proposed change, merge, verify main).
 
-Bootstrap (mirrors ``invoke bootstrap``)
-    schemas -> menu -> bootstrap objects -> protocol export -> repository
-    registration -> L3VPN generator -> SD-WAN generator -> event triggers ->
-    artifact regeneration.
-
-Service request (mirrors what the Streamlit catalog does)
-    branch -> load a ServiceL3Vpn -> group trigger fires the generator ->
-    diff -> proposed change -> validations -> merge -> verify on main.
-
-This is the suite the Infrahub version-bump automation runs: when
-``.github/workflows/update-infrahub.yml`` bumps ``infrahub-testcontainers``
-and opens a PR, CI runs this against the new release. Anything the upgrade
-breaks — schema syntax, SDK API, generator or transform behaviour, the
-proposed-change pipeline — surfaces here.
+This is the suite the Infrahub version-bump automation runs against a new release.
 """
 
 from __future__ import annotations
@@ -42,8 +31,7 @@ BOOTSTRAP_VPN = "trading-floor-vpn"
 BRANCH_VPN = "integration-test-vpn"
 BRANCH_REQUEST_FILE = "tests/integration/data/l3vpn_branch_request.yml"
 
-# Polling budgets. Generous because a cold container pulls images, syncs the
-# repository, and renders every artifact before the suite gets going.
+# Generous: a cold container pulls images, syncs the repository, and renders artifacts.
 REPO_SYNC_ATTEMPTS = 60
 REPO_SYNC_INTERVAL = 10
 GENERATOR_DEFINITION_ATTEMPTS = 18
@@ -59,14 +47,8 @@ VALIDATION_ATTEMPTS = 40
 VALIDATION_INTERVAL = 30
 MERGE_PROPAGATION_DELAY = 10
 
-# The batfish_backbone check posts device configs to the batfish-runner sidecar
-# from docker-compose.override.yml. The testcontainers stack has no such
-# sidecar, and its task-worker environment is a fixed allowlist, so the check's
-# BATFISH_DISABLED escape hatch cannot be set from here either. The check would
-# therefore always conclude failure — and Infrahub refuses to merge a proposed
-# change with a failing check, which would make the merge path untestable. The
-# suite drops this one definition before branching so every remaining validator
-# is required to pass.
+# This check needs the batfish-runner sidecar, which the testcontainers stack has no way
+# to provide, so it would always fail and block the merge. Dropped before branching.
 SIDECAR_DEPENDENT_CHECK = "batfish_backbone"
 
 T = TypeVar("T")
@@ -79,20 +61,12 @@ class TestSpDemoWorkflow(TestInfrahubDockerWithClient):
 
     @pytest.fixture(scope="class")
     def default_branch(self) -> str:
-        """Branch the service request is staged on.
-
-        Returns:
-            Branch name used for the proposed-change half of the suite.
-        """
+        """Branch the service request is staged on."""
         return SERVICE_BRANCH
 
     @pytest.fixture(scope="class")
     def workflow_state(self) -> dict[str, Any]:
-        """IDs and task handles shared between ordered tests.
-
-        Returns:
-            Mutable dict carried across the class.
-        """
+        """IDs and task handles shared between ordered tests."""
         return {}
 
     @staticmethod
@@ -202,12 +176,7 @@ class TestSpDemoWorkflow(TestInfrahubDockerWithClient):
     @pytest.mark.order(4)
     @pytest.mark.dependency(name="protocols", depends=["objects"])
     def test_04_export_protocols(self, client_main: InfrahubClientSync, tmp_path: Path) -> None:
-        """Export Python protocols from the live schema.
-
-        Writes to a temp path rather than ``generators/schema_protocols.py``:
-        the point is to prove the exporter still works against this Infrahub
-        release, not to rewrite a tracked file mid-test.
-        """
+        """Export Python protocols from the live schema, to a temp path not the tracked file."""
         out = tmp_path / "schema_protocols.py"
         result = self.execute_command(
             f"infrahubctl protocols --branch main --out {out}",
@@ -227,9 +196,7 @@ class TestSpDemoWorkflow(TestInfrahubDockerWithClient):
     ) -> None:
         """Register the project as a ``CoreRepository`` and wait for sync.
 
-        The sync is what discovers ``.infrahub.yml`` and instantiates the
-        generator, transform, artifact, and check definitions the rest of the
-        suite depends on.
+        The sync instantiates the definitions in ``.infrahub.yml`` that later tests need.
         """
         repo = GitRepo(
             name=REPO_NAME,
@@ -278,8 +245,7 @@ class TestSpDemoWorkflow(TestInfrahubDockerWithClient):
     ) -> None:
         """Trigger a ``CoreGeneratorDefinition`` by name and await its task.
 
-        Mirrors ``scripts/run_generator.py``: bootstrap runs the generators
-        explicitly so their output lands before artifacts render.
+        Mirrors ``scripts/run_generator.py``.
 
         Args:
             client: Async Infrahub client.
@@ -351,9 +317,7 @@ class TestSpDemoWorkflow(TestInfrahubDockerWithClient):
     def test_08_load_event_triggers(self, client_main: InfrahubClientSync) -> None:
         """Load the generator action and group trigger rule.
 
-        Loaded after repository sync because the trigger references the
-        ``generate_l3vpn`` definition, which only exists once ``.infrahub.yml``
-        has been imported.
+        After repository sync: the trigger references a definition from ``.infrahub.yml``.
         """
         result = self.execute_command(
             "infrahubctl object load objects/events/00_triggers.yml",
@@ -392,10 +356,8 @@ class TestSpDemoWorkflow(TestInfrahubDockerWithClient):
             )
         logging.info("%d L3VPN sites materialised", len(sites))
 
-        # Site names are dataset-defined and service-prefixed (`trading-london`,
-        # `ib-london`), so assert on the VPN's session prefix rather than one
-        # hard-coded site: adding or renaming a site is a dataset change, not a
-        # generator regression, and should not fail here.
+        # Assert on the VPN's session prefix, not a hard-coded site name: sites are
+        # dataset-defined, and renaming one is not a generator regression.
         prefix = f"L3VPN PE-CE {BOOTSTRAP_VPN} "
         all_sessions = await client.all(kind="RoutingBGPSession")
         sessions = [s for s in all_sessions if (s.description.value or "").startswith(prefix)]
@@ -411,12 +373,7 @@ class TestSpDemoWorkflow(TestInfrahubDockerWithClient):
         client_main: InfrahubClientSync,
         async_client_main: InfrahubClient,
     ) -> None:
-        """Regenerate every artifact and require all of them to reach Ready.
-
-        Runs the same script bootstrap does, so a transform or template that
-        breaks on the new release fails here rather than silently leaving
-        artifacts in ``Error``.
-        """
+        """Regenerate every artifact and require all of them to reach Ready."""
         result = self.execute_command(
             "python scripts/regenerate_artifacts.py",
             address=client_main.config.address,
@@ -449,9 +406,8 @@ class TestSpDemoWorkflow(TestInfrahubDockerWithClient):
     async def test_11_drop_sidecar_dependent_check(self, async_client_main: InfrahubClient) -> None:
         """Remove the check that needs the batfish-runner sidecar.
 
-        Runs before the branch is created so the branch never inherits the
-        definition. See ``SIDECAR_DEPENDENT_CHECK`` for why this is necessary;
-        every other check still runs and is required to pass.
+        Before the branch exists, so it never inherits the definition. See
+        ``SIDECAR_DEPENDENT_CHECK``; every other check still has to pass.
         """
         definition = await async_client_main.get(
             kind="CoreCheckDefinition",
@@ -516,9 +472,7 @@ class TestSpDemoWorkflow(TestInfrahubDockerWithClient):
     ) -> None:
         """Verify the group trigger fired the generator on the branch.
 
-        Adding the service to the ``l3vpns`` group should fire the
-        ``CoreGroupTriggerRule`` from ``objects/events/00_triggers.yml``, which
-        runs ``generate_l3vpn`` on the branch. Its VRF appearing is the proof.
+        Adding the service to the ``l3vpns`` group runs ``generate_l3vpn``; its VRF is the proof.
         """
         client = async_client_main
         client.default_branch = default_branch
@@ -610,12 +564,7 @@ class TestSpDemoWorkflow(TestInfrahubDockerWithClient):
         default_branch: str,
         workflow_state: dict[str, Any],
     ) -> None:
-        """Open a proposed change and let the full validation pipeline run.
-
-        This is where the repository's checks, transforms, and artifact
-        definitions all execute server-side, so it is the most sensitive part
-        of the suite to an Infrahub upgrade.
-        """
+        """Open a proposed change and let the full validation pipeline run server-side."""
         pc_name = f"Add {BRANCH_VPN} ({default_branch})"
         mutation = Mutation(
             mutation="CoreProposedChangeCreate",
@@ -649,9 +598,8 @@ class TestSpDemoWorkflow(TestInfrahubDockerWithClient):
             peers = [v.peer for v in pc.validations.peers]
             complete = bool(peers) and all(peer.state.value == "completed" for peer in peers)
 
-            # The pipeline registers validators progressively, so "every known
-            # validator is complete" is briefly true while more are still being
-            # enqueued. Only accept it once the count has stopped moving.
+            # Validators register progressively, so "all complete" is briefly true
+            # while more are enqueued. Accept it only once the count stops moving.
             if complete and len(peers) == settled_count:
                 validations = peers
                 break
@@ -712,9 +660,8 @@ class TestSpDemoWorkflow(TestInfrahubDockerWithClient):
         logging.info("merge task %s finished in state %s", task_id, task.state)
         logging.info("merge task log tail:\n%s", self.task_log_tail(task))
 
-        # The proposed change's own state is authoritative: the merge task can
-        # report a non-COMPLETED state from post-merge bookkeeping even when
-        # the branch itself merged cleanly.
+        # The proposed change's own state is authoritative: post-merge bookkeeping
+        # can report a non-COMPLETED task even when the branch merged cleanly.
         pc = client_main.get("CoreProposedChange", id=pc_id)
         state = pc.state.value
         assert state in ("merged", "closed"), (

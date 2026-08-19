@@ -39,12 +39,11 @@ uv run invoke test
 # Run only the tests that need no Infrahub deployment (fast, no Docker)
 uv run invoke test-unit
 
-# Run the end-to-end suite: boots a throwaway Infrahub via testcontainers.
-# Needs Docker and takes tens of minutes.
+# End-to-end suite: boots a throwaway Infrahub. Needs Docker, takes tens of minutes.
 uv run invoke test-integration              # core scope
 uv run invoke test-integration --tier full  # includes the `extended` tier
 
-# Lint and type check -- CI runs these same tasks, so they cannot drift
+# Lint and type check -- the same tasks CI runs
 uv run invoke lint            # Full suite: markdown, YAML, ruff, mypy
 uv run invoke lint-ruff       # ruff check + ruff format --check --diff
 uv run invoke lint-mypy       # mypy --show-error-codes .
@@ -55,8 +54,7 @@ uv run invoke lint-markdown   # rumdl check .
 uv run invoke format
 ```
 
-A bare `uv run pytest` collects `tests/` in full, integration included, so it
-needs Docker. Use `invoke test-unit` for the fast loop.
+A bare `uv run pytest` collects `tests/` in full, integration included, so it needs Docker.
 
 ## Code Style Guidelines
 
@@ -103,31 +101,22 @@ Schema Definition → Data Loading → Generator Execution → Transform Process
 
 ## Testing Instructions
 
-1. **Before committing**: Run `uv run invoke test-unit` to ensure the fast tests pass -- it is the
-   exact gate CI's `unit-test` job runs, and it needs no Docker
+1. **Before committing**: Run `uv run invoke test-unit` -- the same gate CI's `unit-test` job runs,
+   and it needs no Docker
 2. **For new features**: Add tests under `tests/unit/`
 3. **Use mocks**: Mock external dependencies with `unittest.mock`
 4. **Test both paths**: Cover success and failure scenarios
-5. **Test tiers**: Tiers are defined by directory, matching the sibling demo repositories.
-   `tests/unit/` needs no deployment. `tests/integration/` boots its own
-   Infrahub stack with `infrahub-testcontainers` — Docker required, no
-   `invoke start` needed. The floor declared in `[dependency-groups] dev` is
-   the Infrahub release under test, and it is what the release automation
-   bumps.
+5. **Test tiers**: Tiers are defined by directory. `tests/unit/` needs no deployment;
+   `tests/integration/` boots its own Infrahub stack with `infrahub-testcontainers` (Docker
+   required, no `invoke start`) at the version declared in `[dependency-groups] dev`.
 
 ### Infrahub release automation
 
-When a new Infrahub version ships, `opsmill/infrahub` fires a
-`repository_dispatch` at this repo. `.github/workflows/update-infrahub.yml`
-bumps `infrahub-testcontainers` to that version on an `update-infrahub-<version>`
-branch and opens a PR; CI then runs `tests/integration/` against the new release, so
-the PR going red is the signal that the release breaks this demo.
-
-One workflow serves both pipelines. It answers `trigger-infrahub-update` and
-`trigger-infrahub-sdk-python-update`, routing on `github.event.action` because
-both dispatches carry their number in `client_payload.version` and mean
-different things by it. There is no separate `update-infrahub-sdk.yml`. Both
-paths can also be run by hand from the Actions tab via `workflow_dispatch`.
+`.github/workflows/update-infrahub.yml` answers a `repository_dispatch` from
+`opsmill/infrahub` or `infrahub-sdk-python`, bumps the specifier on an
+`update-infrahub-<version>` branch and opens a PR, whose CI is the QA for that release. It
+serves both pipelines -- there is no `update-infrahub-sdk.yml` -- and also runs by hand from
+the Actions tab.
 
 ## Post-Change Validation
 
@@ -139,15 +128,13 @@ uv run invoke lint  # Runs: rumdl, yamllint, ruff, mypy
 
 This ensures:
 
-- Markdown passes rumdl at its default `any` severity -- what this repository tolerates is
-  `disable` in `[tool.rumdl.global]`, which CI and a local run both read
+- Markdown passes rumdl at its default `any` severity
 - YAML files are valid under `yamllint -s`, where warnings are errors
 - Python code passes ruff linting and is correctly formatted
 - Type hints are correct (mypy)
 
 CI calls these same tasks, so passing locally means passing in CI -- except mypy, which checks
-whatever interpreter you run it with; only CI's 3.11 leg verifies the declared `requires-python`
-floor (see `[tool.mypy]` in `pyproject.toml`).
+whatever interpreter you run it with; only CI's 3.11 leg verifies the `requires-python` floor.
 
 ## Security Considerations
 

@@ -1,10 +1,7 @@
 """Fixtures for the integration suite.
 
 The suite runs the whole demo against a throwaway Infrahub stack booted by
-``infrahub-testcontainers``. The pinned ``infrahub-testcontainers`` version in
-``[dependency-groups] dev`` selects which Infrahub release is exercised, which
-is what ``.github/workflows/update-infrahub.yml`` bumps when a new version
-ships.
+``infrahub-testcontainers``, at the version declared in ``[dependency-groups] dev``.
 """
 
 from __future__ import annotations
@@ -25,49 +22,22 @@ from .stack_config import StackImage, resolve_stack_image
 TEST_DIRECTORY = Path(__file__).parent
 PROJECT_DIRECTORY = TEST_DIRECTORY.parent.parent
 
-# The container seeds this token for its initial admin account. Passing it
-# explicitly keeps the suite self-contained: without it the clients fall back to
-# whatever INFRAHUB_API_TOKEN happens to be in the environment, so mutations
-# fail with AuthenticationError anywhere that variable isn't already set.
-#
-# Resolved through os.environ first, mirroring what the .env writer does at
-# container.py:178-181 (`os.environ.get(key, value)`). Nothing merges an
-# override back into PROJECT_ENV_VARIABLES, so reading the dict alone would hand
-# the clients the packaged default while the container ran the override -- the
-# same resolved-versus-running divergence `stack_config` exists to prevent,
-# arriving through the token instead of the image.
+# The token the container seeds for its admin account. Read through os.environ first: an
+# override never lands back in PROJECT_ENV_VARIABLES, so the dict alone can disagree with
+# what the container is running.
 _ADMIN_TOKEN_VARIABLE = "INFRAHUB_TESTING_INITIAL_ADMIN_TOKEN"
 ADMIN_TOKEN = os.environ.get(_ADMIN_TOKEN_VARIABLE, PROJECT_ENV_VARIABLES[_ADMIN_TOKEN_VARIABLE])
 
 
 @pytest.fixture(scope="session")
 def stack_image() -> StackImage:
-    """Image and tag the stack runs, resolved from the environment.
-
-    This repository runs vanilla Infrahub -- no Dockerfile, no custom image --
-    so it passes no repository, no default tag and no ``custom_build``, and the
-    defaults are the vanilla case.
-
-    Returns:
-        The resolved image. See ``stack_config`` for why this does not read
-        ``PROJECT_ENV_VARIABLES``.
-    """
+    """Image and tag the stack runs, resolved from the environment."""
     return resolve_stack_image(os.environ, testcontainers_version)
 
 
 @pytest.fixture(scope="session")
 def infrahub_version(stack_image: StackImage) -> str:
-    """Infrahub image tag under test.
-
-    Args:
-        stack_image: The resolved stack image.
-
-    Returns:
-        The resolved tag -- an explicit override when one is set, otherwise the
-        installed ``infrahub-testcontainers`` version. The latter is the case a
-        dependency-bump pull request exercises: moving the pin moves the version
-        under test, with no CI wiring at all.
-    """
+    """Infrahub image tag under test."""
     return stack_image.tag
 
 
@@ -75,33 +45,13 @@ def infrahub_version(stack_image: StackImage) -> str:
 def _apply_stack_image_env(stack_image: StackImage) -> None:
     """Merge the resolved stack image into ``os.environ`` before the stack boots.
 
-    Resolving ``stack_image`` above is not enough by itself: nothing else in this
-    module writes it back into the environment, so an override such as
-    ``INFRAHUB_TESTING_IMAGE_VERSION`` set alone would change what this fixture
-    *reports* without changing what ``TestInfrahubDocker.infrahub_compose`` (in
-    ``infrahub_testcontainers.helpers``) actually boots -- the exact divergence
-    ``stack_config.as_env()`` exists to close. Note also that ``TestInfrahubDocker``
-    defines its own class-scoped ``infrahub_version`` fixture
-    (``helpers.py:22-24``), which pytest resolves in preference to the module-level
-    one above for any test class deriving from it; merging into ``os.environ`` here
-    reaches that fixture too, since it reads ``INFRAHUB_TESTING_IMAGE_VER`` directly.
-
-    Ordering is why this is session-scoped and autouse rather than an explicit
-    dependency of ``infrahub_compose``: pytest instantiates higher-scoped fixtures
-    before narrower-scoped ones for the same test, so this session fixture runs
-    before any class-scoped fixture -- including ``infrahub_compose`` and the
-    ``infrahub_version``/``tmp_directory``/``remote_repos_dir`` fixtures it depends
-    on -- for the first test in any class, in this or any later test module.
-
-    Args:
-        stack_image: The resolved image; ``as_env()`` sets both tag spellings plus
-            the repository and pull flag so every consumer agrees.
+    Session-scoped and autouse for ordering: it must run before the class-scoped
+    ``infrahub_compose``, which reads these variables to decide what to boot.
     """
     os.environ.update(stack_image.as_env())
 
 
-# Tracked subtrees the Infrahub server never reads. Excluding them keeps the
-# snapshot (and the clone the server makes from it) small.
+# Tracked subtrees the Infrahub server never reads.
 SNAPSHOT_EXCLUDE_PREFIXES = ("docs/", "tests/")
 
 
@@ -112,12 +62,7 @@ class TestInfrahubDockerWithClient(TestInfrahubDocker):
     def async_client_main(self, infrahub_port: int) -> InfrahubClient:
         """Async client bound to the container, scoped per test.
 
-        Function scope is deliberate: pytest-asyncio gives each async test its
-        own event loop, and a class-scoped client would carry HTTP transport
-        bound to an already-closed loop into later tests.
-
-        Returns:
-            InfrahubClient pointed at the test container.
+        Function-scoped because a class-scoped client outlives its event loop.
         """
         return InfrahubClient(
             config=Config(address=f"http://localhost:{infrahub_port}", api_token=ADMIN_TOKEN)
@@ -125,11 +70,7 @@ class TestInfrahubDockerWithClient(TestInfrahubDocker):
 
     @pytest.fixture(scope="class")
     def client_main(self, infrahub_port: int) -> InfrahubClientSync:
-        """Sync client bound to the container, shared across the class.
-
-        Returns:
-            InfrahubClientSync pointed at the test container.
-        """
+        """Sync client bound to the container, shared across the class."""
         return InfrahubClientSync(
             config=Config(address=f"http://localhost:{infrahub_port}", api_token=ADMIN_TOKEN)
         )
@@ -138,13 +79,8 @@ class TestInfrahubDockerWithClient(TestInfrahubDocker):
     def project_snapshot(self, tmp_directory: Path) -> Path:
         """Copy the git-tracked project into a temp dir for ``GitRepo``.
 
-        ``GitRepo`` copies its ``src_directory`` wholesale, so pointing it at
-        the live working tree would drag in ``.venv`` and any build output.
-        Copying only tracked files gives the server the same content a real
-        clone would see.
-
-        Returns:
-            Path to the snapshot directory.
+        ``GitRepo`` copies its ``src_directory`` wholesale, so the live working tree
+        would drag in ``.venv`` and build output.
 
         Raises:
             RuntimeError: If the project directory is not a git working tree.
@@ -169,8 +105,7 @@ class TestInfrahubDockerWithClient(TestInfrahubDocker):
             if relative.startswith(SNAPSHOT_EXCLUDE_PREFIXES):
                 continue
             source = PROJECT_DIRECTORY / relative
-            # Submodule entries appear as directories and staged-but-deleted
-            # files may be absent; skip anything that isn't a readable file.
+            # Submodules list as directories, staged-but-deleted files may be absent.
             if not source.is_file():
                 continue
             destination = snapshot / relative
@@ -188,18 +123,8 @@ class TestInfrahubDockerWithClient(TestInfrahubDocker):
     ) -> subprocess.CompletedProcess[str]:
         """Run a shell command against the test container from the repo root.
 
-        Overrides the base helper only to pin ``cwd`` to the project root, so
-        relative paths in ``infrahubctl`` invocations resolve the same way they
-        do in ``invoke bootstrap``.
-
-        Args:
-            command: Shell command to run.
-            address: Infrahub server address.
-            concurrent_execution: Value for ``INFRAHUB_MAX_CONCURRENT_EXECUTION``.
-            pagination_size: Value for ``INFRAHUB_PAGINATION_SIZE``.
-
-        Returns:
-            The completed process, with stdout and stderr captured.
+        Overrides the base helper only to pin ``cwd``, so relative paths resolve as
+        they do under ``invoke bootstrap``.
         """
         env = os.environ.copy()
         env["INFRAHUB_ADDRESS"] = address
@@ -222,12 +147,7 @@ class TestInfrahubDockerWithClient(TestInfrahubDocker):
 def dataset_object_files() -> list[Path]:
     """Ordered bootstrap object files for the default dataset.
 
-    Reuses ``tasks._dataset_files`` so the suite loads objects in exactly the
-    order ``invoke bootstrap`` does; a reordering in ``tasks.py`` cannot drift
-    away from what the test exercises.
-
-    Returns:
-        Ordered list of YAML object files.
+    Reuses ``tasks._dataset_files`` so load order cannot drift from ``invoke bootstrap``.
     """
     from tasks import INFRAHUB_DATASET, _dataset_files
 

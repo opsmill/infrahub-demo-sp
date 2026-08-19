@@ -1,6 +1,5 @@
 ---
 # yamllint disable rule:truthy rule:line-length
-# what is local to this file.
 name: "Update Infrahub version"
 
 env:
@@ -9,14 +8,9 @@ env:
 on:
   workflow_dispatch:
     inputs:
-      # No `tier` input: a bump pull request's tier comes from its branch name; the manual
-      # full-tier control is ci.yml's own workflow_dispatch input.
       infrahub_version:
         description: "Infrahub version to validate against"
         required: true
-        # Tracks the declared infrahub-testcontainers floor: a lower default opens a *downgrade*
-        # pull request. Dispatching with the default unchanged is therefore a no-op, which the
-        # change detection reports as such.
         default: "1.10.8"
       infrahub_sdk_version:
         description: "Optional: also bump infrahub-sdk to this version"
@@ -27,11 +21,6 @@ on:
         required: false
         default: ""
 
-  # The legacy type is still dispatched by infrahub-sdk-python's release workflow; drop it once
-  # that producer is repointed at trigger-infrahub-update. Both producers send only the ambiguous
-  # client_payload.version key, so the resolution step attributes it by dispatch type.
-  # Listening for only one of the two is the trap this merged workflow replaced: the other
-  # pipeline's dispatch would then match no workflow at all and its bumps would stop silently.
   repository_dispatch:
     types: [trigger-infrahub-update, trigger-infrahub-sdk-python-update]
 
@@ -43,18 +32,11 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     concurrency:
-      # Keyed on dispatch type + raw payload versions: the type is what disambiguates
-      # client_payload.version, and raw values need none of the resolved-form expressions.
-      # Separate bracketed slots so two manual dispatches differing only in SDK version do not
-      # serialise, and an absent version reads as `[]` instead of a doubled or trailing dash.
       group: update-infrahub-${{ github.event.action || 'manual' }}-iv[${{ github.event.client_payload.version || github.event.inputs.infrahub_version }}]-sdk[${{ github.event.inputs.infrahub_sdk_version }}]
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v7
 
-      # A shell `case` on the dispatch type, not job-level `env:` expressions: nesting the
-      # attribution into ${{ }} is what put an Infrahub version onto the infrahub-sdk specifier in
-      # two sibling repositories. This step owns every $GITHUB_ENV write the later steps read.
       - name: "Resolve the requested versions"
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -84,8 +66,6 @@ jobs:
               trigger-infrahub-sdk-python-update)
                 SDK_VERSION="${SDK_VERSION:-${PAYLOAD_VERSION}}"
                 ;;
-              # Failing rather than defaulting is the point: silently bucketing an unknown type is
-              # how a trigger-infrahub-update dispatch came to be read as an SDK bump.
               *)
                 echo "::error::Unhandled repository_dispatch type '${DISPATCH_TYPE}'. Which component client_payload.version names depends on the dispatch type, so add an arm for this type before accepting it."
                 exit 1
@@ -97,8 +77,6 @@ jobs:
             TC_VERSION="${INPUT_TC}"
           fi
 
-          # Every version below is interpolated, unquoted, into a perl substitution and into
-          # $GITHUB_ENV -- reject anything that is not a plausible version first.
           for name in INFRAHUB_VERSION SDK_VERSION TC_VERSION; do
             value="${!name}"
             if [ -n "${value}" ] && ! [[ "${value}" =~ ^[0-9][0-9A-Za-z.+-]*$ ]]; then
@@ -107,15 +85,11 @@ jobs:
             fi
           done
 
-          # A malformed dispatch, not the "nothing to bump" no-op the change detection reports:
-          # failing by name here beats gh pr create failing later with "no commits between...".
           if [ -z "${INFRAHUB_VERSION}" ] && [ -z "${SDK_VERSION}" ]; then
             echo "::error::Neither an Infrahub version nor an infrahub-sdk version resolved from this ${EVENT_NAME} event; nothing to bump. Checked the explicit client_payload keys, the legacy client_payload.version key (an Infrahub version for trigger-infrahub-update, an SDK version for trigger-infrahub-sdk-python-update) and the workflow_dispatch inputs."
             exit 1
           fi
 
-          # The suite derives its stack image tag from the installed testcontainers version, so a
-          # TC version other than the Infrahub version would test one release and report another
           if [ -n "${TC_VERSION}" ]; then
             if [ -z "${INFRAHUB_VERSION}" ]; then
               echo "::error::infrahub_testcontainers_version (${TC_VERSION}) was given with no infrahub_version. The testcontainers specifier is rewritten to the Infrahub version, so a testcontainers version on its own would be accepted and then ignored; pass infrahub_version with the same value."
@@ -127,8 +101,7 @@ jobs:
             fi
           fi
 
-          # ci.yml's tier gate reads these exact branch names to pick a bump pull request's tier,
-          # so do not change their shape.
+          # ci.yml's tier gate matches these branch names.
           if [ -n "${INFRAHUB_VERSION}" ] && [ -n "${SDK_VERSION}" ]; then
             BRANCH_NAME="update-infrahub-${INFRAHUB_VERSION}-sdk-${SDK_VERSION}"
             SUBJECT="Infrahub ${INFRAHUB_VERSION} and infrahub-sdk ${SDK_VERSION}"
@@ -154,13 +127,9 @@ jobs:
 
       - run: uv sync
 
-      # Tested on repository state, not a hardcoded list: bumping testcontainers where it is not
-      # declared is the defect this workflow replaced in two repositories, and the
-      # guard flips on its own if a repository later gains or loses an integration tier.
       - name: "Check whether infrahub-testcontainers is declared"
         id: tc
         run: |
-          # Extras count as declared.
           if grep -qE '"infrahub-testcontainers(\[[^]]*\])?[=<>~]' pyproject.toml; then
             echo "declared=true" >> "$GITHUB_OUTPUT"
           else
@@ -168,11 +137,7 @@ jobs:
             echo "::notice::infrahub-testcontainers is not declared here; skipping the testcontainers bump."
           fi
 
-      # Edited in place rather than `uv add pkg==X`, which rewrites the whole specifier and drops
-      # bounds and extras. Operator- and extras-agnostic: [^,"]+ stops at the comma so an upper
-      # bound survives (`>=1.19.0,<2.0.0` keeps its ceiling), and the read-back grep escapes dots
-      # so `1.11.0` cannot pass as `1a11b0`. Requires the matching version: declared-but-no-version
-      # is not the same case as not-declared.
+      # Edited in place, never `uv add pkg==X`: that rewrites the whole specifier and drops bounds and extras.
       - name: "Bump the declared specifiers"
         env:
           TC_DECLARED: ${{ steps.tc.outputs.declared }}
@@ -194,13 +159,6 @@ jobs:
             bump_specifier infrahub-sdk "${SDK_VERSION}"
           fi
 
-      # A dispatch that resolved a real version can still change nothing (repeat dispatch, or a
-      # testcontainers-undeclared repository given only an Infrahub version): that is a loud no-op,
-      # not a failure, and it gates every later step off. An attempted rewrite that
-      # failed cannot reach here -- bump_specifier verifies its own edit. pyproject.toml alone is
-      # the signal, deliberately not uv.lock: `uv sync` above rewrites a drifted lock, so a lock
-      # diff can exist on a run that bumped nothing; the gated `uv lock` below regenerates it
-      # whenever the specifier really moved.
       - name: "Detect whether anything actually changed"
         id: changed
         run: |
@@ -212,15 +170,10 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # One lock refresh for however many specifiers changed.
       - name: "Refresh the lock for whatever changed"
         if: steps.changed.outputs.changed == 'true'
         run: uv lock
 
-      # A failed probe must fail the step, not read as "branch absent": absent selects the force
-      # path, which would discard a human fix pushed onto the bump branch. `--exit-code` separates
-      # the cases by status (0 match, 2 no refs, else a query that did not work) where `wc -l`
-      # cannot tell an empty listing from a failed one.
       - name: "Prepare the branch"
         if: steps.changed.outputs.changed == 'true'
         run: |
@@ -239,9 +192,7 @@ jobs:
           esac
           echo "BRANCH_EXISTS=${BRANCH_EXISTS}" >> "$GITHUB_ENV"
 
-      # GH_UPDATE_PACKAGE_OTTO, never GITHUB_TOKEN: GITHUB_TOKEN events trigger no workflow runs,
-      # and PR CI is the only QA a bump receives. `rebase:` on an existing branch is
-      # what makes a re-dispatch idempotent while preserving human fixes pushed onto the branch.
+      # GH_UPDATE_PACKAGE_OTTO, never GITHUB_TOKEN: GITHUB_TOKEN events trigger no workflow runs.
       - name: "Commit the bump"
         if: steps.changed.outputs.changed == 'true'
         uses: github-actions-x/commit@v2.9
@@ -256,22 +207,17 @@ jobs:
           email: github-bot@opsmill.com
           rebase: ${{ env.BRANCH_EXISTS == 1 }}
 
-      # No label: what a bump pull request runs comes from its branch name in ci.yml.
       - name: "Open the pull request"
         if: steps.changed.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GH_UPDATE_PACKAGE_OTTO }}
         run: |
-          # A re-dispatch reuses the branch, so an open pull request may already carry it; the push
-          # above already updated it, and `gh pr create` would fail on "already exists".
           EXISTING=$(gh pr list --head "${BRANCH_NAME}" --state open --json number --jq '.[0].number')
           if [ -n "${EXISTING}" ]; then
             echo "::notice::Pull request #${EXISTING} for ${BRANCH_NAME} is already open and has been updated in place."
             exit 0
           fi
           BODY="${INFRAHUB_VERSION:+Bumps infrahub-testcontainers to ${INFRAHUB_VERSION}. }${SDK_VERSION:+Bumps infrahub-sdk to ${SDK_VERSION}.}"
-          # Joined with printf rather than a continued YAML string: the indentation would land in
-          # the body text, where markdown reads it as a code block.
           QA_NOTE="This pull request's CI is the QA for this bump. The core integration tier runs and blocks the merge. An Infrahub-version bump additionally runs the full suite as an advisory non-blocking report -- read its outcome in the run summary -- for as long as the upstream CoreGeneratorGroup / CoreGraphQLQueryGroup resolution fault keeps that tier from blocking."
           BODY=$(printf '%s\n\n%s' "${BODY}" "${QA_NOTE}")
           gh pr create \
