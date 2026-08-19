@@ -1,0 +1,19 @@
+.github/workflows/ci.yml
+  s_c61e7f2a6f8b30::t_70977fcecce8a2 4-11,17-29,51,63-67,69-70,72-76,78-82,85-88,95-96,103,106,121,133-134,136-142,145-146,154,156,159-162,165-166,169,172,175-177,182-183,191,194-231,233-244,250,253,279,288,306-307
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "3f8feeb502a1c69d471060e6f60a6a8f8ad273b9",
+  "prompts": {},
+  "sessions": {
+    "s_c61e7f2a6f8b30": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f96e34cf-79d1-45f1-ade3-89a74eb5ed2e",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Benoit Kohler <Kohler.benoit@bearchitek.com>"
+    }
+  }
+}
