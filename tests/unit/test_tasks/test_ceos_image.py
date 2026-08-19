@@ -10,7 +10,12 @@ from __future__ import annotations
 
 import pytest
 
-from tasks import CEOS_IMAGE_AMD64, CEOS_IMAGE_ARM64, _ceos_image_for_machine
+from tasks import (
+    CEOS_IMAGE_AMD64,
+    CEOS_IMAGE_ARM64,
+    _ceos_image_for_machine,
+    _resolve_ceos_image,
+)
 
 
 @pytest.mark.parametrize("machine", ["aarch64", "arm64", "ARM64", "armv8l"])
@@ -51,3 +56,40 @@ def test_both_images_are_cgroup_v2_capable(image: str) -> None:
     """
     major, minor = (int(part) for part in image.rsplit(":", 1)[1].split(".")[:2])
     assert (major, minor) >= (4, 32)
+
+
+def test_an_exported_ceos_image_wins_over_the_architecture_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``CEOS_IMAGE`` from the environment overrides the host-architecture pick.
+
+    ``lab.deploy`` passes the resolved image through ``c.run(env=...)``, which
+    merges over ``os.environ`` — so resolving to the architecture default
+    unconditionally would silently discard a build the user pinned. That path is
+    the documented escape hatch for an arm64 mismatch, for an Arista-supplied
+    build, and for re-testing the LDP data-plane gap, so it has to hold.
+    """
+    monkeypatch.setenv("CEOS_IMAGE", "ceos:local")
+    assert _resolve_ceos_image() == "ceos:local"
+
+
+def test_no_exported_ceos_image_falls_back_to_the_host_architecture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With nothing exported, the image comes from the host architecture."""
+    monkeypatch.delenv("CEOS_IMAGE", raising=False)
+    monkeypatch.setattr("tasks.platform.machine", lambda: "aarch64")
+    assert _resolve_ceos_image() == CEOS_IMAGE_ARM64
+
+
+def test_an_empty_ceos_image_falls_back_to_the_host_architecture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty ``CEOS_IMAGE`` is treated as unset rather than passed through.
+
+    containerlab's ``${VAR:=default}`` expansion does the same, so an empty
+    export would otherwise leave the topology and the environment disagreeing.
+    """
+    monkeypatch.setenv("CEOS_IMAGE", "")
+    monkeypatch.setattr("tasks.platform.machine", lambda: "x86_64")
+    assert _resolve_ceos_image() == CEOS_IMAGE_AMD64

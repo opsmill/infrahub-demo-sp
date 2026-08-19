@@ -567,6 +567,19 @@ def _ceos_image_for_machine(machine: str) -> str:
     return CEOS_IMAGE_ARM64 if machine.lower() in _ARM64_MACHINES else CEOS_IMAGE_AMD64
 
 
+def _resolve_ceos_image() -> str:
+    """Return the cEOS image ``invoke lab.deploy`` should hand to containerlab.
+
+    Returns:
+        An explicit ``CEOS_IMAGE`` from the environment if set, otherwise the
+        image matching the host architecture. The export has to win here:
+        ``c.run(env=...)`` merges over ``os.environ``, so passing the
+        architecture default unconditionally would shadow it and silently
+        ignore a build the user pinned on purpose.
+    """
+    return os.environ.get("CEOS_IMAGE") or _ceos_image_for_machine(platform.machine())
+
+
 def _fetch_artifact(c: Context, artifact_name: str, dest: Path) -> None:
     """Download the latest artifact content into ``dest``.
 
@@ -639,7 +652,7 @@ def lab_deploy(c: Context) -> None:
     # expands ${VAR:=default} in the topology file). Setting it here — rather
     # than pinning one image in the template — is what lets the same Infrahub
     # artifact deploy on an amd64 host and on Apple Silicon under a Linux VM.
-    ceos_image = _ceos_image_for_machine(platform.machine())
+    ceos_image = _resolve_ceos_image()
     _step(f"Running containerlab deploy [dim](cEOS image: {ceos_image})[/dim]")
     c.run(
         f"containerlab deploy --topo {LAB_TOPO}",
