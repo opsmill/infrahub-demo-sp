@@ -41,7 +41,21 @@ topology:
     ceos:
       # OpsMill-hosted public mirror; the upstream Arista cEOS image
       # is gated by login. Matches the image used by infrahub-demo-dc.
-      image: registry.opsmill.io/external/ceos-image:4.29.0.2F
+      #
+      # Must stay >= 4.32.0F. Older cEOS-lab builds require a cgroups v1 host
+      # and silently fail to boot on a cgroups v2 one (the default on Ubuntu
+      # 21.04+, OrbStack and most current distros): the container starts, EOS
+      # never comes up, and `containerlab deploy` blocks forever in
+      # "Running postdeploy actions" because that step waits on the EOS CLI.
+      # 4.32.0F is where cEOS-lab began detecting the host's cgroup version
+      # itself. See docs/docs/troubleshooting.mdx.
+      #
+      # Resolved through CEOS_IMAGE (containerlab expands ${VAR:=default}
+      # anywhere in the topology) because the mirror publishes no multi-arch
+      # tag: the default below is amd64, and arm64 hosts need a different tag
+      # entirely. `invoke lab.deploy` sets CEOS_IMAGE from the host arch, so
+      # the artifact Infrahub renders stays host-independent.
+      image: "${CEOS_IMAGE:=registry.opsmill.io/external/ceos-image:4.36.0.1F}"
     srl:
       image: ghcr.io/nokia/srlinux:23.10
     linux:
