@@ -1,0 +1,31 @@
+docs/docs/architecture.mdx
+  s_c61e7f2a6f8b30::t_d47710ac4679aa 7,116
+docs/docs/lab/containerlab.mdx
+  s_c61e7f2a6f8b30::t_bc81401d8babfe 77,95,227-228
+docs/docs/quickstart.mdx
+  s_c61e7f2a6f8b30::t_ce3547596d5a05 13,15,49,62
+docs/docs/troubleshooting.mdx
+  s_c61e7f2a6f8b30::t_a480a87be4fd77 119
+pyproject.toml
+  s_c61e7f2a6f8b30::t_b8e4690abd4cd3 12-15,32-37,166-171,174-175,178
+tasks.py
+  s_c61e7f2a6f8b30::t_65c459bcdf9f9f 414-418
+uv.lock
+  s_c61e7f2a6f8b30::t_26e48a3cafb771 1121,1135
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "deb442a37c3ea045266efc7de6ef4d9914674ceb",
+  "prompts": {},
+  "sessions": {
+    "s_c61e7f2a6f8b30": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f96e34cf-79d1-45f1-ade3-89a74eb5ed2e",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Benoit Kohler <Kohler.benoit@bearchitek.com>"
+    }
+  }
+}
