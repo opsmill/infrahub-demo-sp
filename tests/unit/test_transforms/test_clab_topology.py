@@ -493,3 +493,29 @@ def test_lan_host_address_stays_inside_small_prefixes() -> None:
     # No room beside the .1 gateway at all.
     assert _lan_host_address(ipaddress.ip_network("10.0.0.0/31")) is None
     assert _lan_host_address(ipaddress.ip_network("10.0.0.1/32")) is None
+
+
+@pytest.mark.asyncio
+async def test_ceos_image_is_overridable_and_defaults_to_a_cgroup_v2_safe_build() -> None:
+    """The cEOS image resolves through ``CEOS_IMAGE`` with an amd64 default.
+
+    Two things matter here and both have burned us. The image must be
+    overridable per host, because the mirror publishes no multi-arch tag and an
+    arm64 host needs a different tag entirely; containerlab expands
+    ``${VAR:=default}`` in the topology file, so the indirection costs nothing
+    and keeps the artifact Infrahub renders host-independent. And the default
+    must be a build that boots on a cgroups v2 host — anything older than
+    4.32.0F does not, and fails by hanging in postdeploy rather than erroring.
+    """
+    rendered = await ClabTopology.__new__(ClabTopology).transform(FIXTURE)
+    image = yaml.safe_load(rendered)["topology"]["kinds"]["ceos"]["image"]
+    assert image.startswith("${CEOS_IMAGE:="), (
+        f"cEOS image must be overridable via CEOS_IMAGE, got {image!r}"
+    )
+    default = image.removeprefix("${CEOS_IMAGE:=").removesuffix("}")
+    version = default.rsplit(":", 1)[1]
+    major, minor = (int(part) for part in version.split(".")[:2])
+    assert (major, minor) >= (4, 32), (
+        f"cEOS default {version} predates 4.32.0F, which is where cEOS-lab began "
+        "detecting the host cgroup version; older builds never boot on cgroups v2"
+    )

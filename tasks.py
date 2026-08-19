@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import os
+import platform
 import shlex
 import time
 from pathlib import Path
@@ -536,6 +537,48 @@ LAB_DIR = REPO_ROOT / "lab"
 LAB_TOPO = LAB_DIR / "mpls-backbone.clab.yml"
 LAB_DEVICES_DIR = LAB_DIR / "devices"
 
+# cEOS-lab images per host architecture. The mirror publishes no multi-arch tag,
+# so a single pin can only ever serve one architecture — hence the split.
+#
+# Both are >= 4.32.0F on purpose: earlier cEOS-lab builds require a cgroups v1
+# host and never finish booting on a cgroups v2 one, which is the default on
+# Ubuntu 21.04+, OrbStack and most current distros. The failure is silent —
+# `containerlab deploy` sits in "Running postdeploy actions" indefinitely,
+# because that step waits for the EOS CLI that never arrives.
+CEOS_IMAGE_AMD64 = "registry.opsmill.io/external/ceos-image:4.36.0.1F"
+CEOS_IMAGE_ARM64 = "registry.opsmill.io/external/ceos-image:4.33.2F"
+# `uname -m` spellings that mean 64-bit ARM. Apple Silicon under a Linux VM
+# (OrbStack, Lima, UTM) reports `aarch64`; `arm64` shows up on some others.
+_ARM64_MACHINES = frozenset({"aarch64", "arm64", "armv8l"})
+
+
+def _ceos_image_for_machine(machine: str) -> str:
+    """Return the cEOS image matching a ``platform.machine()`` value.
+
+    Args:
+        machine: The host architecture as reported by ``platform.machine()``.
+
+    Returns:
+        The arm64 image on 64-bit ARM hosts, the amd64 image everywhere else.
+        Unknown architectures get the amd64 image: it is the only one the demo
+        is regularly exercised on, so falling back to it fails loudly at
+        `docker pull` rather than silently pulling something for the wrong CPU.
+    """
+    return CEOS_IMAGE_ARM64 if machine.lower() in _ARM64_MACHINES else CEOS_IMAGE_AMD64
+
+
+def _resolve_ceos_image() -> str:
+    """Return the cEOS image ``invoke lab.deploy`` should hand to containerlab.
+
+    Returns:
+        An explicit ``CEOS_IMAGE`` from the environment if set, otherwise the
+        image matching the host architecture. The export has to win here:
+        ``c.run(env=...)`` merges over ``os.environ``, so passing the
+        architecture default unconditionally would shadow it and silently
+        ignore a build the user pinned on purpose.
+    """
+    return os.environ.get("CEOS_IMAGE") or _ceos_image_for_machine(platform.machine())
+
 
 def _fetch_artifact(c: Context, artifact_name: str, dest: Path) -> None:
     """Download the latest artifact content into ``dest``.
@@ -605,8 +648,17 @@ def lab_deploy(c: Context) -> None:
         warn=True,
     )
     c.run(f"docker network rm clab-{shlex.quote(lab_name)} 2>/dev/null || true", warn=True)
-    _step("Running containerlab deploy")
-    c.run(f"containerlab deploy --topo {LAB_TOPO}", pty=True)
+    # The rendered topology reads its cEOS image from CEOS_IMAGE (containerlab
+    # expands ${VAR:=default} in the topology file). Setting it here — rather
+    # than pinning one image in the template — is what lets the same Infrahub
+    # artifact deploy on an amd64 host and on Apple Silicon under a Linux VM.
+    ceos_image = _resolve_ceos_image()
+    _step(f"Running containerlab deploy [dim](cEOS image: {ceos_image})[/dim]")
+    c.run(
+        f"containerlab deploy --topo {LAB_TOPO}",
+        pty=True,
+        env={"CEOS_IMAGE": ceos_image},
+    )
     _success("Lab deployed")
 
 
