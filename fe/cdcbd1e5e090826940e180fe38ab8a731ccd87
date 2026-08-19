@@ -1,0 +1,39 @@
+.github/workflows/ci.yml
+  s_c61e7f2a6f8b30::t_de8ab62a288ed8 57,178
+.github/workflows/update-infrahub.yml
+  s_c61e7f2a6f8b30::t_564c586828cd27 104,140,195
+AGENTS.md
+  s_c61e7f2a6f8b30::t_017ddc30c84c0a 42,46,57,104-105,109-111,115-119,131,137
+pyproject.toml
+  s_c61e7f2a6f8b30::t_973a22423442f5 26,42,54,69-70,124,127,135,137
+tasks.py
+  s_c61e7f2a6f8b30::t_d9c9ce9a16b3c9 475,484,491,498,505,516,527,530,553,561
+tests/conftest.py
+  s_c61e7f2a6f8b30::t_fd8ca284e4f77c 1,3,13-15,20,29-30
+tests/integration/conftest.py
+  s_c61e7f2a6f8b30::t_9effc72eebddd9 4,25-27,34,40,48-49,54,65,73,82-83,108,126-127,150
+tests/integration/data/l3vpn_branch_request.yml
+  s_c61e7f2a6f8b30::t_7cef894500fcc3 2-4,14
+tests/integration/stack_config.py
+  s_c61e7f2a6f8b30::t_1caf5b7616f13b 3-10,23-24,28,30,54,58,60-61,87-91,97-98
+tests/integration/test_01_stack_config.py
+  s_c61e7f2a6f8b30::t_93fc9a54757a08 64,85,105
+tests/integration/test_workflow.py
+  s_c61e7f2a6f8b30::t_75b4b44d6ed3df 4-8,34,50-51,64,69,179,199,248,320,359-360,376,409-410,475,567,601-602,663-664
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "fecdcbd1e5e090826940e180fe38ab8a731ccd87",
+  "prompts": {},
+  "sessions": {
+    "s_c61e7f2a6f8b30": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f96e34cf-79d1-45f1-ade3-89a74eb5ed2e",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Benoit Kohler <Kohler.benoit@bearchitek.com>"
+    }
+  }
+}
