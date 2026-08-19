@@ -1,0 +1,21 @@
+AGENTS.md
+  s_c61e7f2a6f8b30::t_60a5bc7c95398d 75-86
+pyproject.toml
+  s_c61e7f2a6f8b30::t_19ac610f85ddba 37-43
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "3d9b7a79d288b3f927fd4c0abf2839ba720c180b",
+  "prompts": {},
+  "sessions": {
+    "s_c61e7f2a6f8b30": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f96e34cf-79d1-45f1-ade3-89a74eb5ed2e",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Benoit Kohler <Kohler.benoit@bearchitek.com>"
+    }
+  }
+}
