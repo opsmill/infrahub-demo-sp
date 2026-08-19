@@ -12,6 +12,8 @@ Batfish's
 BGP
 cEdge
 CEs
+cgroup
+cgroups
 clab
 CLIs
 colo
@@ -21,7 +23,9 @@ configs
 Containerlab
 containerlab
 Containerlab's
+containerlab's
 datacenter
+dataset's
 Dcim
 Diataxis
 direnv
@@ -72,6 +76,7 @@ parseWarning
 parseWarnings
 POP
 POPs
+postdeploy
 Pydantic
 RDs
 reachability
@@ -91,6 +96,7 @@ sudo
 supernet
 testcontainer
 tomek
+traceback
 unmanaged
 untrust
 uv
@@ -98,6 +104,7 @@ validator
 validators
 vBond
 Versa
+veth
 VIPs
 Viptela
 VLAN
