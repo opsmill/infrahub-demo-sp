@@ -470,28 +470,98 @@ def init_demo(c: Context) -> None:
     )
 
 
-@task
-def lint(c: Context) -> None:
-    """Run the full lint suite: ruff, mypy, yamllint."""
-    _banner("invoke lint", border="cyan")
+@task(name="lint-ruff")
+def lint_ruff(c: Context) -> None:
+    """Lint and check the formatting of all Python files with ruff."""
     _step("ruff check")
     c.run("uv run ruff check .", pty=True)
     _step("ruff format --check")
-    c.run("uv run ruff format --check .", pty=True)
+    c.run("uv run ruff format --check --diff .", pty=True)
+
+
+@task(name="lint-mypy")
+def lint_mypy(c: Context) -> None:
+    """Type-check all Python files with mypy."""
     _step("mypy")
-    c.run("uv run mypy .", pty=True)
+    c.run("uv run mypy --show-error-codes .", pty=True)
+
+
+@task(name="lint-yaml")
+def lint_yaml(c: Context) -> None:
+    """Lint all YAML files with yamllint."""
     _step("yamllint")
-    c.run("uv run yamllint .", pty=True)
-    _success("Lint suite passed")
+    c.run("uv run yamllint -s .", pty=True)
+
+
+@task(name="lint-markdown")
+def lint_markdown(c: Context) -> None:
+    """Lint all Markdown files with rumdl."""
+    _step("rumdl")
+    c.run("uv run rumdl check .", pty=True)
 
 
 @task
-def test(c: Context, kind: str = "unit") -> None:
-    """Run pytest; kind in {unit, integration, catalog, all}."""
-    _banner(f"invoke test --kind {kind}", border="cyan")
-    target = "tests/" if kind == "all" else f"tests/{kind}/"
-    c.run(f"uv run pytest {target}", pty=True)
-    _success(f"{kind} tests passed")
+def lint(c: Context) -> None:
+    """Run the full lint suite: markdown, YAML, ruff, mypy."""
+    _banner("invoke lint", border="cyan")
+    lint_markdown(c)
+    lint_yaml(c)
+    lint_ruff(c)
+    lint_mypy(c)
+    _success("Lint suite passed")
+
+
+@task(name="format")
+def format_code(c: Context) -> None:
+    """Format all Python files with ruff, applying safe lint fixes."""
+    _banner("invoke format", border="green")
+    _step("ruff format")
+    c.run("uv run ruff format .", pty=True)
+    _step("ruff check --fix")
+    c.run("uv run ruff check . --fix", pty=True)
+    _success("Formatting completed")
+
+
+@task(name="test-unit")
+def test_unit(c: Context) -> None:
+    """Run every test that needs no Infrahub deployment."""
+    _banner("invoke test-unit", border="cyan")
+    c.run("uv run pytest tests/unit", pty=True)
+    # Exit 5 means the `offline` marker selected nothing, which is not a failure.
+    result = c.run("uv run pytest tests/integration -m offline", pty=True, warn=True)
+    if result.exited not in (0, 5):
+        raise Exit(
+            f"uv run pytest tests/integration -m offline failed (exit {result.exited})",
+            code=result.exited,
+        )
+    _success("Unit tests passed")
+
+
+@task(
+    name="test-integration",
+    help={"tier": "core (default) runs everything but the extended tier; full runs all of it."},
+)
+def test_integration(c: Context, tier: str = "core") -> None:
+    """Run the integration suite against a throwaway Infrahub deployment.
+
+    Needs Docker. The Infrahub release under test is whatever
+    `[dependency-groups] dev` pins ``infrahub-testcontainers`` to.
+    """
+    if tier not in {"core", "full"}:
+        raise Exit(f"tier must be 'core' or 'full', got {tier!r}")
+    _banner(f"invoke test-integration --tier {tier}", border="cyan")
+    # `core` deselects the `extended` tests -- see issue #111.
+    marker = "" if tier == "full" else ' -m "not extended"'
+    c.run(f"uv run pytest tests/integration{marker}", pty=True)
+    _success(f"Integration tests passed ({tier})")
+
+
+@task(name="test")
+def test_all(c: Context) -> None:
+    """Run every test in the repository, unit and integration."""
+    _banner("invoke test", border="cyan")
+    c.run("uv run pytest tests", pty=True)
+    _success("Tests passed")
 
 
 @task
@@ -758,8 +828,15 @@ ns.add_task(start)
 ns.add_task(destroy)
 ns.add_task(bootstrap)
 ns.add_task(init_demo)
+ns.add_task(lint_markdown)
+ns.add_task(lint_yaml)
+ns.add_task(lint_ruff)
+ns.add_task(lint_mypy)
 ns.add_task(lint)
-ns.add_task(test)
+ns.add_task(format_code)
+ns.add_task(test_unit)
+ns.add_task(test_integration)
+ns.add_task(test_all)
 ns.add_task(batfish)
 ns.add_task(docs)
 ns.add_collection(lab)
