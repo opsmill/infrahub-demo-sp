@@ -20,12 +20,24 @@
 # SR Linux configuration for {{ device.name.value }}
 # Lab-scoped: hostname + interfaces + ISIS underlay + iBGP full mesh
 # (ipv4-unicast only) + MPLS forwarding plane on core interfaces.
-# Everything emitted here is what the public SR Linux 23.10 clab image
-# accepts. L3VPN signalling is NOT rendered — 23.10 either rejects the
-# constructs (LDP, per-VPN ip-vrf, bgp-vpn) or requires licensed
-# ixr-class hardware (VPNv4 afi-safi). Production-quality L3VPN config
-# lives in the pe-nokia-sros artifact. See docs/docs/lab/containerlab.mdx
-# 'Known gaps' for the rationale.
+# Verified to commit cleanly on the public SR Linux 26.7.1-554 clab image
+# ("All changes have been committed").
+#
+# L3VPN signalling is still NOT rendered, for two reasons that survive the
+# 23.10 -> 26.7 bump: LDP is absent from the protocols enum on this
+# platform, and there is no VPNv4 afi-safi (the enum holds ipv4-unicast,
+# ipv6-unicast, evpn and route-target only).
+#
+# What did change: the per-VPN routing-instance type and the evpn afi-safi
+# are both accepted on 26.7 where 23.10 rejected them, so an EVPN-signalled
+# L3VPN is renderable here -- it is simply not modelled yet.
+# Production-quality L3VPN config lives in the pe-nokia-sros artifact. See
+# docs/docs/lab/containerlab.mdx 'Known gaps'.
+#
+# Careful with the wording above: these header lines are emitted into the
+# rendered configuration, and tests/unit/test_transforms substring-match the
+# output for constructs that must not appear. Naming one literally here fails
+# the suite.
 set / system name host-name {{ device.name.value }}
 {% for iface in device.interfaces.edges if iface.node.name.value == 'Loopback0' %}
 set / interface lo0 admin-state enable
@@ -83,19 +95,22 @@ set / network-instance default protocols isis instance i1 interface {{ srl_iface
 set / network-instance default protocols isis instance i1 interface {{ srl_iface(iface.node.name.value) }}.0 passive true
 {% endfor %}
 {# Default circuit-type (broadcast) over Ethernet — same as netlab's
-   interop-validated baseline. cEOS 4.29 ↔ SR Linux 23.10 don't form a
-   P2P 3-way adjacency in this lab (cEOS sends RFC 3373's 5-byte TLV
-   240, SR Linux uses RFC 5303's 15-byte form, and the handshake stalls
-   in Initializing); broadcast adjacencies side-step that entirely. #}
+   interop-validated baseline. Observed on cEOS 4.29 ↔ SR Linux 23.10:
+   no P2P 3-way adjacency forms in this lab (cEOS sends RFC 3373's
+   5-byte TLV 240, SR Linux uses RFC 5303's 15-byte form, and the
+   handshake stalls in Initializing); broadcast adjacencies side-step
+   that entirely. Not re-tested against the current 4.36 ↔ 26.7 pins —
+   broadcast is kept because it works, not because P2P is known broken
+   on these builds. #}
 {% for iface in device.interfaces.edges if iface.node.role.value == 'core' %}
 set / network-instance default protocols isis instance i1 interface {{ srl_iface(iface.node.name.value) }}.0 admin-state enable
 {% endfor %}
 
-{# iBGP full mesh on loopbacks. ipv4-unicast only — 23.10's afi-safi
-   enum is {ipv4-unicast, ipv6-unicast, evpn}; l3vpn-ipv4-unicast is
-   not available on the public image, so no VPNv4 routes are carried.
-   transport.local-address pins sessions to the loopback (matches the
-   23.10 schema where local-address nests under transport/). #}
+{# iBGP full mesh on loopbacks. ipv4-unicast only — the afi-safi enum on
+   26.7.1-554 is {ipv4-unicast, ipv6-unicast, evpn, route-target}, with
+   no l3vpn-ipv4-unicast, so no VPNv4 routes are carried.
+   transport.local-address pins sessions to the loopback (local-address
+   nests under transport/ in this schema). #}
 {% for iface in device.interfaces.edges if iface.node.name.value == 'Loopback0' %}
 {% for ip in iface.node.ip_addresses.edges %}
 set / network-instance default protocols bgp admin-state enable
