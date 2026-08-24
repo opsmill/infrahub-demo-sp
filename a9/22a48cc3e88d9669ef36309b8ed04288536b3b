@@ -1,0 +1,36 @@
+tests/unit/test_transforms/test_clab_topology.py
+  s_be2d9b67095317::t_8afdad3a982ff3 500,503-511
+docs/docs/lab/containerlab.mdx
+  s_be2d9b67095317::t_8afdad3a982ff3 123,125-143,146-153,155-157,353-356
+tests/unit/test_tasks/test_ceos_image.py
+  s_be2d9b67095317::t_09269656bc758b 17,20,138-169
+  s_be2d9b67095317::t_8afdad3a982ff3 1,3-7,13,16,18-19,24-25,27-30,33-34,36-44,47-54,57-58,60-61,63-68,70-90,92-94,101,105,108,111-114,120,123,125,128,137
+.vale/styles/spelling-exceptions.txt
+  s_be2d9b67095317::t_8afdad3a982ff3 97,103
+templates/clab_topology.j2
+  s_be2d9b67095317::t_8afdad3a982ff3 53-58,60-61,64
+templates/pe_nokia_srlinux.j2
+  s_be2d9b67095317::t_8afdad3a982ff3 23-40,98-104,109-113
+tests/unit/test_transforms/test_pe_nokia_srlinux.py
+  s_be2d9b67095317::t_8afdad3a982ff3 52,54-57,64-65,68-79,93-94,100-103,144,147,149-150
+docs/docs/troubleshooting.mdx
+  s_be2d9b67095317::t_8afdad3a982ff3 149-151,175-178,180-182,184-204,216,236,297-304,307,311
+tasks.py
+  s_be2d9b67095317::t_8afdad3a982ff3 15,540-543,545-547,550,554-574,576-597,599-600,604-605,607-608,610-617,624-627,629,646-678,687-689,742-751
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "a922a48cc3e88d9669ef36309b8ed04288536b3b",
+  "prompts": {},
+  "sessions": {
+    "s_be2d9b67095317": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b5534fa6-20b2-45ee-9106-f433c4cc5af1",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Benoit Kohler <Kohler.benoit@bearchitek.com>"
+    }
+  }
+}
