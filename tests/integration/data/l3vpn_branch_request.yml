@@ -1,0 +1,43 @@
+---
+# Integration-test service request, loaded onto a branch as the Streamlit catalog does.
+# vpn_id 150, the 10.201.x.0/24 subnets and pe-05/pe-06 are all chosen not to collide with
+# the bootstrap dataset, so the l3vpn_overlap and l3vpn_site_subnet checks pass.
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: IpamPrefix
+  data:
+    - {prefix: 10.201.10.0/24, description: Integration test LAN — Milan, status: active, role: public}
+    - {prefix: 10.201.20.0/24, description: Integration test LAN — Madrid, status: active, role: public}
+
+---
+# Membership of the `l3vpns` group is what fires generate_l3vpn on this branch.
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: ServiceL3Vpn
+  data:
+    - name: integration-test-vpn
+      description: L3VPN created by the integration suite to exercise the service workflow.
+      vpn_id: 150
+      address_family: ipv4
+      status: draft
+      tenant:
+        kind: OrganizationTenant
+        data:
+          name: markets-trading
+      member_of_groups:
+        - l3vpns
+      sites:
+        kind: ServiceL3VpnSite
+        data:
+          - name: milan
+            pe_device: pe-05
+            customer_subnet: ["10.201.10.0/24", "default"]
+            routing_protocol: ebgp
+            bgp_peer_asn: 65201
+          - name: madrid
+            pe_device: pe-06
+            customer_subnet: ["10.201.20.0/24", "default"]
+            routing_protocol: ebgp
+            bgp_peer_asn: 65201
