@@ -49,28 +49,34 @@ async def test_renders_isis_instance_and_net_id() -> None:
 
 @pytest.mark.asyncio
 async def test_no_l3vpn_ipv4_unicast_afi_safi() -> None:
-    """SR Linux 23.10's afi-safi enum is {ipv4-unicast, ipv6-unicast, evpn}.
+    """There is no `l3vpn-ipv4-unicast` afi-safi on the public clab image.
 
-    Emitting `afi-safi l3vpn-ipv4-unicast` makes clab's srl postdeploy fail
-    with: Invalid value 'l3vpn-ipv4-unicast': Must be
-    ipv4-unicast|ipv6-unicast|evpn
+    Verified against 26.7.1-554, where the enum is still closed:
+        Wrong value for 'afi-safi-name': Got 'l3vpn-ipv4-unicast'
+        expected ipv4-unicast|ipv6-unicast|evpn|route-target
+    Emitting it fails the srl postdeploy step outright.
     """
     rendered = await PeNokiaSrLinux.__new__(PeNokiaSrLinux).transform(FIXTURE)
     assert "l3vpn-ipv4-unicast" not in rendered
 
 
 @pytest.mark.asyncio
-async def test_template_omits_unsupported_23_10_constructs() -> None:
-    """Lock out every SR Linux 23.10 construct the public clab image rejects.
+async def test_template_omits_l3vpn_signalling() -> None:
+    """Keep L3VPN signalling out of the SR Linux lab template.
 
     The template renders iBGP (ipv4-unicast only) on top of the ISIS underlay.
-    L3VPN signalling is off-limits: bgp-vpn, ip-vrf network-instances,
-    l3vpn-*-unicast afi-safi, and the PE-CE eBGP group all need licensed
-    ixr-class hardware that the public 23.10 image doesn't provide. LDP is
-    not in 23.10's protocols enum. The `mpls` keyword is not valid under
-    `network-instance default` either — the per-interface MPLS forwarding
-    plane has no parser-accepting form on this image. Production SR OS
-    template (pe_nokia_sros.j2) renders the real L3VPN.
+    Two of these are hard limits of the public clab image, re-verified on
+    26.7.1-554: `protocols ldp` is not in the protocols enum (which offers
+    bgp, bgp-evpn, bgp-vpn, igmp, isis, ospf, pim, stp), and there is no
+    l3vpn-*-unicast afi-safi. The `mpls` keyword is not valid under
+    `network-instance default` either.
+
+    The rest — `type ip-vrf`, and bgp-vpn/evpn — the 26.7 parser *does*
+    accept, where 23.10 did not. They stay on this list because an
+    EVPN-signalled L3VPN is not modelled yet, not because the image refuses
+    it: rendering one is a design change, and this test is what will fail
+    when someone starts. Production SR OS template (pe_nokia_sros.j2)
+    renders the real L3VPN.
     """
     rendered = await PeNokiaSrLinux.__new__(PeNokiaSrLinux).transform(FIXTURE)
     forbidden = [
@@ -84,16 +90,17 @@ async def test_template_omits_unsupported_23_10_constructs() -> None:
     ]
     for needle in forbidden:
         assert needle not in rendered, (
-            f"{needle!r} is back in the srlinux lab template — the public "
-            f"SR Linux 23.10 image rejects it (see docstring)."
+            f"{needle!r} is back in the srlinux lab template — see docstring "
+            f"for which of these the image rejects and which are unmodelled."
         )
 
 
 @pytest.mark.asyncio
 async def test_renders_ibgp_mesh_group() -> None:
-    """iBGP full mesh on loopbacks. ipv4-unicast only (the only legal
-    23.10 afi-safi besides ipv6 and evpn). transport.local-address pins
-    sessions to the loopback — 23.10 nests local-address under transport/.
+    """iBGP full mesh on loopbacks. ipv4-unicast only — the afi-safi enum is
+    {ipv4-unicast, ipv6-unicast, evpn, route-target}, none of which carry
+    VPNv4. transport.local-address pins sessions to the loopback, where
+    local-address nests in this schema.
     """
     rendered = await PeNokiaSrLinux.__new__(PeNokiaSrLinux).transform(FIXTURE)
     assert "set / network-instance default protocols bgp admin-state enable" in rendered
@@ -134,12 +141,13 @@ async def test_renders_ibgp_neighbors_from_internal_sessions() -> None:
 
 @pytest.mark.asyncio
 async def test_no_ldp_protocol_block() -> None:
-    """SR Linux 23.10's protocols enum doesn't include `ldp`.
+    """The SR Linux protocols enum doesn't include `ldp`, 26.7 included.
 
     Emitting `set / network-instance default protocols ldp …` makes clab's
-    srl postdeploy fail with:
+    srl postdeploy fail. Re-verified verbatim on 26.7.1-554:
         Unknown token 'ldp'. Options are
-        [..., 'bgp', 'bgp-evpn', 'bgp-vpn', 'isis', 'linux', 'ospf', '|']
+        [..., 'bgp', 'bgp-evpn', 'bgp-vpn', 'igmp', 'igmp-snooping', 'isis',
+        'linux', 'mld', 'mld-snooping', 'ospf', 'pim', 'stp', '|']
     SR Linux uses SR-MPLS for label distribution, not LDP.
     """
     rendered = await PeNokiaSrLinux.__new__(PeNokiaSrLinux).transform(FIXTURE)

@@ -12,7 +12,7 @@ from pathlib import Path
 import yaml
 from invoke.collection import Collection
 from invoke.context import Context
-from invoke.exceptions import Exit
+from invoke.exceptions import CommandTimedOut, Exit
 from invoke.tasks import task
 from rich import box
 from rich.console import Console
@@ -537,47 +537,96 @@ LAB_DIR = REPO_ROOT / "lab"
 LAB_TOPO = LAB_DIR / "mpls-backbone.clab.yml"
 LAB_DEVICES_DIR = LAB_DIR / "devices"
 
-# cEOS-lab images per host architecture. The mirror publishes no multi-arch tag,
-# so a single pin can only ever serve one architecture — hence the split.
+# The cEOS-lab image. One pin, not one per host architecture: every cEOS-lab
+# build Arista publishes has a 32-bit x86 userland — `SWI_ARCH=i686` in
+# /etc/swi-version, amd64 tags included — so there is no ARM build to choose
+# between. See _ceos_arch_blocker.
 #
-# Both are >= 4.32.0F on purpose: earlier cEOS-lab builds require a cgroups v1
-# host and never finish booting on a cgroups v2 one, which is the default on
-# Ubuntu 21.04+, OrbStack and most current distros. The failure is silent —
+# Must stay >= 4.32.0F: earlier cEOS-lab builds require a cgroups v1 host and
+# never finish booting on a cgroups v2 one, which is the default on Ubuntu
+# 21.04+, OrbStack and most current distros. The failure is silent —
 # `containerlab deploy` sits in "Running postdeploy actions" indefinitely,
 # because that step waits for the EOS CLI that never arrives.
-CEOS_IMAGE_AMD64 = "registry.opsmill.io/external/ceos-image:4.36.0.1F"
-CEOS_IMAGE_ARM64 = "registry.opsmill.io/external/ceos-image:4.33.2F"
+CEOS_IMAGE_DEFAULT = "registry.opsmill.io/external/ceos-image:4.36.0.1F"
 # `uname -m` spellings that mean 64-bit ARM. Apple Silicon under a Linux VM
 # (OrbStack, Lima, UTM) reports `aarch64`; `arm64` shows up on some others.
 _ARM64_MACHINES = frozenset({"aarch64", "arm64", "armv8l"})
+# Escape hatch: for anyone who wants to watch it fail for themselves, or who
+# has an ARM cEOS-lab build Arista has not published.
+LAB_ALLOW_UNSUPPORTED_ARCH = os.getenv("LAB_ALLOW_UNSUPPORTED_ARCH", "false").lower() == "true"
+# containerlab's ceos postdeploy waits for the EOS CLI in an unbounded retry
+# loop — `for { ...; time.Sleep(2 * time.Second); continue }` in
+# utils/networkcli.go — so a node that never boots stalls the deploy for as
+# long as you are willing to leave it running. Bound it here: twelve cEOS nodes
+# on a sized x86_64 host come up well inside this, and anything past it is a
+# node that is not coming up at all.
+LAB_DEPLOY_TIMEOUT_SECONDS = int(os.getenv("LAB_DEPLOY_TIMEOUT_SECONDS", "1800"))
 
 
-def _ceos_image_for_machine(machine: str) -> str:
-    """Return the cEOS image matching a ``platform.machine()`` value.
+def _ceos_arch_blocker(machine: str) -> str | None:
+    """Return why cEOS-lab cannot run on ``machine``, or ``None`` if it can.
+
+    cEOS-lab ships a 32-bit x86 userland in every build Arista publishes, and
+    Rosetta 2 does not translate 32-bit x86 at all. That leaves qemu-i386
+    user-mode emulation as the only way to execute it on Apple Silicon, and
+    under emulation EOS gets as far as ``agentsToStart=[...]`` and then loops on
+    ProcMgr until systemd gives up and PID 1 exits 255 — about 17 minutes per
+    node, twelve nodes at once, with no error that names the cause.
 
     Args:
         machine: The host architecture as reported by ``platform.machine()``.
 
     Returns:
-        The arm64 image on 64-bit ARM hosts, the amd64 image everywhere else.
-        Unknown architectures get the amd64 image: it is the only one the demo
-        is regularly exercised on, so falling back to it fails loudly at
-        `docker pull` rather than silently pulling something for the wrong CPU.
+        A reason to refuse on 64-bit ARM hosts, ``None`` everywhere else.
     """
-    return CEOS_IMAGE_ARM64 if machine.lower() in _ARM64_MACHINES else CEOS_IMAGE_AMD64
+    if machine.lower() not in _ARM64_MACHINES:
+        return None
+    return (
+        f"cEOS-lab cannot run on this host ({machine}).\n"
+        f"Every published cEOS-lab build has a 32-bit x86 userland, and Rosetta 2 does "
+        f"not translate 32-bit x86 — so on Apple Silicon EOS never finishes booting, "
+        f"whichever image tag is pinned.\n"
+        f"Run the lab on an x86_64 Linux host: 32 GB+ RAM and 8+ vCPU for the financial "
+        f"dataset, ~16 GB for INFRAHUB_DATASET=isp. Everything except `invoke lab.deploy` "
+        f"works on this machine unchanged.\n"
+        f"Set LAB_ALLOW_UNSUPPORTED_ARCH=true to attempt it anyway."
+    )
+
+
+def _assert_ceos_runnable(machine: str, *, allow_override: bool) -> None:
+    """Refuse a deploy the host cannot complete, before it does any work.
+
+    A deploy that cannot work should cost seconds, not the twenty minutes it
+    takes twelve emulated nodes to die one by one.
+
+    Args:
+        machine: The host architecture as reported by ``platform.machine()``.
+        allow_override: Whether ``LAB_ALLOW_UNSUPPORTED_ARCH`` is set, which
+            downgrades the refusal to a warning.
+
+    Raises:
+        Exit: If cEOS-lab cannot run here and the override is not set.
+    """
+    blocker = _ceos_arch_blocker(machine)
+    if blocker is None:
+        return
+    if allow_override:
+        _error(f"{blocker}\nLAB_ALLOW_UNSUPPORTED_ARCH is set — continuing anyway.")
+        return
+    _error(blocker)
+    raise Exit(code=1)
 
 
 def _resolve_ceos_image() -> str:
     """Return the cEOS image ``invoke lab.deploy`` should hand to containerlab.
 
     Returns:
-        An explicit ``CEOS_IMAGE`` from the environment if set, otherwise the
-        image matching the host architecture. The export has to win here:
-        ``c.run(env=...)`` merges over ``os.environ``, so passing the
-        architecture default unconditionally would shadow it and silently
-        ignore a build the user pinned on purpose.
+        An explicit ``CEOS_IMAGE`` from the environment if set, otherwise
+        ``CEOS_IMAGE_DEFAULT``. The export has to win here: ``c.run(env=...)``
+        merges over ``os.environ``, so passing the default unconditionally would
+        shadow it and silently ignore a build the user pinned on purpose.
     """
-    return os.environ.get("CEOS_IMAGE") or _ceos_image_for_machine(platform.machine())
+    return os.environ.get("CEOS_IMAGE") or CEOS_IMAGE_DEFAULT
 
 
 def _fetch_artifact(c: Context, artifact_name: str, dest: Path) -> None:
@@ -594,6 +643,39 @@ def _fetch_artifact(c: Context, artifact_name: str, dest: Path) -> None:
     )
 
 
+def _report_stalled_deploy(c: Context, lab_name: str, ceos_image: str) -> None:
+    """Explain a deploy that outlived ``LAB_DEPLOY_TIMEOUT_SECONDS``.
+
+    containerlab offers no diagnosis of its own — its postdeploy retries the EOS
+    CLI forever and says only that it is running postdeploy actions — so print
+    the per-node container state, which is what distinguishes a node that died
+    (``Exited (255)``) from one that is genuinely still booting.
+
+    Args:
+        c: Invoke context, used to shell out to Docker.
+        lab_name: Lab name from the topology, prefixing every container name.
+        ceos_image: The image the deploy was given, worth echoing because a
+            wrong one is the likeliest cause.
+    """
+    _error(
+        f"containerlab deploy exceeded {LAB_DEPLOY_TIMEOUT_SECONDS}s and was stopped.\n"
+        f"Its postdeploy step waits on the EOS CLI with no deadline of its own, so a node "
+        f"that never boots is indistinguishable from a slow one. Per-node state:"
+    )
+    c.run(
+        f'docker ps -a --filter "name=clab-{lab_name}-" '
+        f'--format "  {{{{.Names}}}}  {{{{.Status}}}}"',
+        pty=False,
+        warn=True,
+    )
+    console.print(
+        f"[dim]cEOS image: {ceos_image}\n"
+        f"`Exited (255)` on the ceos nodes means EOS died rather than stalled — check the "
+        f"host architecture first, then `docker logs clab-{lab_name}-pe-01`.\n"
+        f"Both known causes are in docs/docs/troubleshooting.mdx.[/dim]"
+    )
+
+
 # Lab namespace
 lab = Collection("lab")
 
@@ -602,6 +684,9 @@ lab = Collection("lab")
 def lab_deploy(c: Context) -> None:
     """Fetch the clab topology artifact + per-PE configs, then deploy."""
     _banner("invoke lab.deploy", border="cyan")
+    # Before anything else: a host that cannot boot cEOS should find out now,
+    # not after re-rendering artifacts and waiting out twelve dying nodes.
+    _assert_ceos_runnable(platform.machine(), allow_override=LAB_ALLOW_UNSUPPORTED_ARCH)
     LAB_DIR.mkdir(exist_ok=True)
     LAB_DEVICES_DIR.mkdir(exist_ok=True)
     # Re-render artifacts against the latest committed template state.
@@ -654,11 +739,16 @@ def lab_deploy(c: Context) -> None:
     # artifact deploy on an amd64 host and on Apple Silicon under a Linux VM.
     ceos_image = _resolve_ceos_image()
     _step(f"Running containerlab deploy [dim](cEOS image: {ceos_image})[/dim]")
-    c.run(
-        f"containerlab deploy --topo {LAB_TOPO}",
-        pty=True,
-        env={"CEOS_IMAGE": ceos_image},
-    )
+    try:
+        c.run(
+            f"containerlab deploy --topo {LAB_TOPO}",
+            pty=True,
+            env={"CEOS_IMAGE": ceos_image},
+            timeout=LAB_DEPLOY_TIMEOUT_SECONDS,
+        )
+    except CommandTimedOut:
+        _report_stalled_deploy(c, lab_name, ceos_image)
+        raise Exit(code=1) from None
     _success("Lab deployed")
 
 

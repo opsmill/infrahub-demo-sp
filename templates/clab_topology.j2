@@ -50,14 +50,18 @@ topology:
       # 4.32.0F is where cEOS-lab began detecting the host's cgroup version
       # itself. See docs/docs/troubleshooting.mdx.
       #
+      # x86_64 hosts only. Every cEOS-lab build Arista publishes has a 32-bit
+      # x86 userland, and Rosetta 2 does not translate 32-bit x86, so no tag
+      # runs on Apple Silicon -- `invoke lab.deploy` refuses ARM hosts outright
+      # rather than letting EOS die twelve times over. There is no arm64 tag to
+      # substitute here.
+      #
       # Resolved through CEOS_IMAGE (containerlab expands ${VAR:=default}
-      # anywhere in the topology) because the mirror publishes no multi-arch
-      # tag: the default below is amd64, and arm64 hosts need a different tag
-      # entirely. `invoke lab.deploy` sets CEOS_IMAGE from the host arch, so
-      # the artifact Infrahub renders stays host-independent.
+      # anywhere in the topology) so a different build can be pinned without
+      # re-rendering the artifact.
       image: "${CEOS_IMAGE:=registry.opsmill.io/external/ceos-image:4.36.0.1F}"
     srl:
-      image: ghcr.io/nokia/srlinux:23.10
+      image: ghcr.io/nokia/srlinux:26.7.1-554
     linux:
       # Simulated customer machines on the CE LAN side. netshoot carries
       # iproute2, so it can tag its own frames with the customer VLAN.

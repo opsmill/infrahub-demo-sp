@@ -94,11 +94,13 @@ subnet
 subnets
 sudo
 supernet
+systemd
 testcontainer
 tomek
 traceback
 unmanaged
 untrust
+userland
 uv
 validator
 validators
