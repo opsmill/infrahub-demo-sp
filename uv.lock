@@ -1881,8 +1881,8 @@ name = "pendulum"
 version = "3.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "python-dateutil", marker = "python_full_version < '3.13'" },
-    { name = "tzdata", marker = "python_full_version < '3.13'" },
+    { name = "python-dateutil" },
+    { name = "tzdata" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/cb/72/9a51afa0a822b09e286c4cb827ed7b00bc818dac7bd11a5f161e493a217d/pendulum-3.2.0.tar.gz", hash = "sha256:e80feda2d10fa3ff8b1526715f7d33dcb7e08494b3088f2c8a3ac92d4a4331ce", size = 86912, upload-time = "2026-01-30T11:22:24.093Z" }
 wheels = [
@@ -2166,7 +2166,7 @@ wheels = [
 
 [[package]]
 name = "pybatfish"
-version = "2025.7.7.2423"
+version = "2026.8.19.3660"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
@@ -2181,7 +2181,7 @@ dependencies = [
     { name = "urllib3" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ec/71/ff058a88839ef3bad5bf07dad73e4cd468221470a440f3cf72469943063b/pybatfish-2025.7.7.2423-py3-none-any.whl", hash = "sha256:c379bef0d0aae627a90ba310b7f7a118389ea925ee58d44bb3ccefa5e2fb9a47", size = 176333, upload-time = "2025-07-07T19:48:40.867Z" },
+    { url = "https://files.pythonhosted.org/packages/49/65/a0549668c1f717965f8f23b4cdbc3c57e86a1cf6efe92071482f71fcd0c8/pybatfish-2026.8.19.3660-py3-none-any.whl", hash = "sha256:6ce1d0c2346a67b27665f341e69837ee7711734a7859cd12259b6e08c5c19621", size = 191617, upload-time = "2026-08-19T13:18:50.041Z" },
 ]
 
 [[package]]
