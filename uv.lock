@@ -2166,7 +2166,7 @@ wheels = [
 
 [[package]]
 name = "pybatfish"
-version = "2025.7.7.2423"
+version = "2026.9.17.3748"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
@@ -2181,7 +2181,7 @@ dependencies = [
     { name = "urllib3" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ec/71/ff058a88839ef3bad5bf07dad73e4cd468221470a440f3cf72469943063b/pybatfish-2025.7.7.2423-py3-none-any.whl", hash = "sha256:c379bef0d0aae627a90ba310b7f7a118389ea925ee58d44bb3ccefa5e2fb9a47", size = 176333, upload-time = "2025-07-07T19:48:40.867Z" },
+    { url = "https://files.pythonhosted.org/packages/7b/9b/11f7c71147ce6c83e31c326c87b743e98027b44bed0cdea78e155d0d2ac5/pybatfish-2026.9.17.3748-py3-none-any.whl", hash = "sha256:901fca27d47ad1aba910c5771be3c78dd6ab6f90d104ab882dacf8dd093c31c2", size = 193355, upload-time = "2026-09-18T16:24:56.741Z" },
 ]
 
 [[package]]
