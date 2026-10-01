@@ -1531,7 +1531,7 @@ wheels = [
 
 [[package]]
 name = "netmiko"
-version = "4.7.0"
+version = "4.8.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "ntc-templates" },
@@ -1539,13 +1539,12 @@ dependencies = [
     { name = "pyserial" },
     { name = "pyyaml" },
     { name = "rich" },
-    { name = "ruamel-yaml" },
     { name = "scp" },
     { name = "textfsm" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/87/f7/28dc70a15f496635a9353726e7015d4819ed648a06f57f4b362176a57d51/netmiko-4.7.0.tar.gz", hash = "sha256:94cf7bfe5daed1d058444ce1637e10177df22f903683a53d1fbee47553488c65", size = 185674, upload-time = "2026-05-12T18:26:14.39Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/68/ef/be7a36c15a8772d3cd3e7e7b289debe8c6b0f1a94a719cea75820c8d68ad/netmiko-4.8.0.tar.gz", hash = "sha256:6264cf8afcbd9c10efb832bacabb9a89370452d522f6c20532d2ad0fefcbdd69", size = 2406838, upload-time = "2026-09-21T22:46:53.341Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d8/6d/7464ecd76316b40b875fd8a8e3128871dc8d24183cfb42b8f76527d8662d/netmiko-4.7.0-py3-none-any.whl", hash = "sha256:406684e45b3822e17efa0f8e376644995693ff40a750c297ccce0c58e873f29d", size = 294307, upload-time = "2026-05-12T18:26:12.73Z" },
+    { url = "https://files.pythonhosted.org/packages/0c/0d/796ef54d10e5af8a9af12a431ad278d74d9139c4888599c2073b2eec814d/netmiko-4.8.0-py3-none-any.whl", hash = "sha256:b4875b36604bcc7a72339f3b4d3091ce545ce0b4629f77f7844413b1c380d0e6", size = 294746, upload-time = "2026-09-21T22:46:51.832Z" },
 ]
 
 [[package]]
