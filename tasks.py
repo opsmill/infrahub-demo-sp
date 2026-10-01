@@ -502,7 +502,14 @@ def lint_markdown(c: Context) -> None:
 
 @task
 def lint(c: Context) -> None:
-    """Run the full lint suite: markdown, YAML, ruff, mypy."""
+    """Run the full lint suite: markdown, YAML, ruff, mypy.
+
+    CI runs one linter this task does not: the `validate-documentation-style` job
+    checks `docs/` prose with Vale. Vale is a Go binary the job downloads from
+    GitHub releases, not a Python dependency, so it is not on a contributor's PATH
+    by default and is deliberately left out here. A green `invoke lint` therefore
+    does not prove that job green.
+    """
     _banner("invoke lint", border="cyan")
     lint_markdown(c)
     lint_yaml(c)

@@ -8,23 +8,28 @@ from __future__ import annotations
 import os
 from typing import Any
 
-import psutil
-
 # The ``infrahub_testcontainers`` pytest plugin calls ``psutil.cpu_freq()`` unguarded at
 # session start; on Apple Silicon it raises (``SystemError`` or ``RuntimeError``) and kills
 # collection for every suite. Remove once fixed upstream.
-_original_cpu_freq = psutil.cpu_freq
+#
+# The import is guarded because psutil arrives with ``infrahub-testcontainers``: if psutil is
+# gone then so is the plugin, and there is no failure left to prevent. Importing it bare would
+# turn a missing dependency into the very collection error this file exists to remove.
+try:
+    import psutil
+except ImportError:
+    pass
+else:
+    _original_cpu_freq = psutil.cpu_freq
 
+    def _cpu_freq_or_none(*args: object, **kwargs: object) -> Any:  # noqa: ANN401 - mirrors psutil
+        """Report CPU frequency, or ``None`` where the platform cannot."""
+        try:
+            return _original_cpu_freq(*args, **kwargs)
+        except Exception:  # noqa: BLE001 - must degrade to None, never kill the session
+            return None
 
-def _cpu_freq_or_none(*args: object, **kwargs: object) -> Any:  # noqa: ANN401 - mirrors psutil
-    """Report CPU frequency, or ``None`` where the platform cannot."""
-    try:
-        return _original_cpu_freq(*args, **kwargs)
-    except Exception:  # noqa: BLE001 - must degrade to None, never kill the session
-        return None
-
-
-psutil.cpu_freq = _cpu_freq_or_none
+    psutil.cpu_freq = _cpu_freq_or_none
 
 # docker/compose#13899: `up --wait` fails on the zero-replica service the packaged compose
 # file defaults to. Drop when Compose ships the fix.
