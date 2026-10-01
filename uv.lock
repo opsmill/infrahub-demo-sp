@@ -1132,7 +1132,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "infrahub-testcontainers", specifier = ">=1.11.4" },
+    { name = "infrahub-testcontainers", specifier = ">=1.10.11" },
     { name = "mypy", specifier = ">=2.3.1" },
     { name = "psutil", specifier = ">=5.9.0" },
     { name = "pytest", specifier = ">=9.1.1" },
