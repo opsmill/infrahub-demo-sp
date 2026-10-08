@@ -1,47 +1,25 @@
 ---
 version: 2
 updates:
-  # `uv` only. Declaring `pip` for the same directory made Dependabot raise two
-  # pull requests for every dependency, since both ecosystems read pyproject.toml.
+  # Regular dependency upgrades target main after cooldown.
+  # Security updates target the default branch and are reviewed manually.
   - package-ecosystem: "uv"
     directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "12:00"
-    open-pull-requests-limit: 10
     target-branch: main
-    labels:
-      - "dependencies"
-    groups:
-      all:
-        # `exclude-patterns`, not a regex lookahead in `patterns`. Dependabot matches
-        # these as globs, so `^(?!infrahub-sdk$).*` matched nothing and the `all`
-        # group silently covered no package.
-        #
-        # The trailing `*` is not decoration: Dependabot names the dependency by its
-        # extras, `infrahub-sdk[all]`, so a bare `infrahub-sdk` matches neither rule.
-        patterns:
-          - "*"
-        exclude-patterns:
-          - "infrahub-sdk*"
-      # An SDK bump can change generator and transform call signatures, so it gets a
-      # reviewable pull request of its own rather than being buried in a bundle.
-      infrahub-sdk:
-        patterns:
-          - "infrahub-sdk*"
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+      semver-minor-days: 14
+      semver-major-days: 30
 
-  # Maintain dependencies for GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
     target-branch: main
-    labels:
-      - "dependencies"
-    groups:
-      all-actions:
-        patterns:
-          - "*"
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+      semver-major-days: 30
+    ignore:
+      - dependency-name: "github/gh-aw-actions/**"  # managed by gh aw compile
