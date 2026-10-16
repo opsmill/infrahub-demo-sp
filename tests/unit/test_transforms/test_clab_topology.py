@@ -522,3 +522,50 @@ async def test_ceos_image_is_overridable_and_defaults_to_a_cgroup_v2_safe_build(
         f"cEOS default {version} predates 4.32.0F, which is where cEOS-lab began "
         "detecting the host cgroup version; older builds never boot on cgroups v2"
     )
+
+
+def _onboarded_pe_fixture() -> dict:
+    """Financial ring plus a ninth PE wired the way generate_pe wires it.
+
+    pe-09 carries two core ports on fresh /31s; the far ends are former customer
+    ports on pe-02 and pe-04 that the generator converted to role ``core``.
+    """
+    fixture = _all_arista_fixture()
+    pes = fixture["TopologyMplsBackbone"]["edges"][0]["node"]["pes"]["edges"]
+    by_name = {pe["node"]["name"]["value"]: pe["node"] for pe in pes}
+    by_name["pe-02"]["interfaces"]["edges"].append(_core_iface("Ethernet5", "10.1.0.31/31"))
+    by_name["pe-04"]["interfaces"]["edges"].append(_core_iface("Ethernet5", "10.1.0.33/31"))
+    pes.append(
+        {
+            "node": {
+                "id": "9",
+                "name": {"value": "pe-09"},
+                "platform": _platform("arista_eos", "ceos"),
+                "interfaces": {
+                    "edges": [
+                        _core_iface("Ethernet1", "10.1.0.30/31"),
+                        _core_iface("Ethernet2", "10.1.0.32/31"),
+                    ]
+                },
+            }
+        }
+    )
+    return fixture
+
+
+@pytest.mark.asyncio
+async def test_onboarded_pe_renders_node_and_both_uplinks() -> None:
+    """The contract generate_pe relies on: a PE whose core ports share a /31 with
+    a converted port on an existing PE gets a node and one link per uplink, with
+    no transform or template change."""
+    rendered = await ClabTopology.__new__(ClabTopology).transform(_onboarded_pe_fixture())
+    parsed = yaml.safe_load(rendered)
+    node = parsed["topology"]["nodes"]["pe-09"]
+    assert node["kind"] == "ceos"
+    assert node["startup-config"] == "devices/pe-09.cfg"
+    pe09_links = [link for link in _link_strings(parsed) if "pe-09:" in link]
+    assert len(pe09_links) == 2
+    assert any("pe-09:eth1" in link and "pe-02:eth5" in link for link in pe09_links)
+    assert any("pe-09:eth2" in link and "pe-04:eth5" in link for link in pe09_links)
+    # The original ring is untouched: four ring links plus two uplinks.
+    assert len(parsed["topology"]["links"]) == 6

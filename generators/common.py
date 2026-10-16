@@ -332,3 +332,144 @@ async def find_vlan_subinterface(
         branch=branch,
     )
     return found[0] if found else None
+
+
+def isis_net_id(area_id: str, loopback: str) -> str:
+    """Return the ISO NET for a PE from its area and loopback address.
+
+    Follows the dataset convention: the system id is the loopback's four octets
+    zero-padded to three digits each and regrouped in fours, so ``10.0.0.9``
+    under area ``49.0001`` is ``49.0001.0100.0000.0009.00``.
+
+    Args:
+        area_id: IS-IS area, for example ``49.0001``.
+        loopback: Loopback address, with or without a prefix length.
+
+    Returns:
+        The NET string the IS-IS process and the vendor templates expect.
+    """
+    octets = loopback.split("/")[0].split(".")
+    digits = "".join(f"{int(octet):03d}" for octet in octets)
+    system_id = ".".join(digits[index : index + 4] for index in range(0, 12, 4))
+    return f"{area_id}.{system_id}.00"
+
+
+async def find_or_claim_core_interface(
+    client: InfrahubClient,
+    device_name: str,
+    description: str,
+    branch: str,
+) -> Any:
+    """Return the core port on ``device_name`` described ``description``, claiming one if absent.
+
+    The description (``To pe-09``) is the idempotency key, the same way the
+    L3VPN generator keys customer ports. When no port carries it, the lowest
+    free physical interface is converted: role ``core``, status ``active``,
+    MTU 9000.
+
+    The port is a bootstrap node that belongs to the uplink PE, not to the
+    onboarding request, so it is saved with ``update_group_context=False``:
+    the generator's tracking group never claims it and no later run of this
+    generator can reap it. The trade is that nothing un-claims it either; see
+    the module docstring of generators/generate_pe.py.
+
+    Args:
+        client: Active Infrahub SDK client.
+        device_name: The uplink PE.
+        description: Description that identifies the port facing the new PE.
+        branch: Branch on which to look up or claim.
+
+    Returns:
+        The InterfacePhysical node facing the new PE.
+
+    Raises:
+        RuntimeError: If the device has no free physical interface.
+    """
+    existing = await client.filters(
+        kind="InterfacePhysical",
+        device__name__value=device_name,
+        description__value=description,
+        branch=branch,
+    )
+    if existing:
+        return existing[0]
+    iface = await next_free_physical_interface(client, device_name, branch)
+    iface.role.value = "core"
+    iface.status.value = "active"
+    iface.description.value = description
+    iface.mtu.value = 9000
+    await iface.save(allow_upsert=True, update_group_context=False)
+    return iface
+
+
+async def backbone_pe_loopbacks(
+    client: InfrahubClient,
+    branch: str,
+    backbone_id: str,
+) -> dict[str, tuple[str, str, str]]:
+    """Return ``{pe name: (device id, Loopback0 address id, address)}`` for a backbone's PEs.
+
+    Reads the backbone's ``pes`` relationship, the same list the pe_onboarding
+    check counts sessions against, so a second backbone's PEs never join this
+    mesh. Read through GraphQL rather than the generator's own query so that
+    query never returns the device the generator creates (see
+    tests/unit/test_catalog/test_pe_generator_registration.py). A PE without a
+    Loopback0 address is skipped: the generator cannot peer with it.
+
+    Args:
+        client: Active Infrahub SDK client.
+        branch: Branch to read.
+        backbone_id: Infrahub id of the TopologyMplsBackbone.
+
+    Returns:
+        Mapping of PE name to its device id, Loopback0 address id and address.
+    """
+    query = """
+    query PeLoopbacks($backbone_id: ID!) {
+      TopologyMplsBackbone(ids: [$backbone_id]) {
+        edges {
+          node {
+            pes {
+              edges {
+                node {
+                  id
+                  name { value }
+                  interfaces {
+                    edges {
+                      node {
+                        ... on InterfaceVirtual {
+                          name { value }
+                          ip_addresses { edges { node { id address { value } } } }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    """
+    data = await client.execute_graphql(
+        query=query, variables={"backbone_id": backbone_id}, branch_name=branch
+    )
+    result: dict[str, tuple[str, str, str]] = {}
+    for backbone_edge in data["TopologyMplsBackbone"]["edges"]:
+        for edge in backbone_edge["node"]["pes"]["edges"]:
+            node = edge["node"]
+            for if_edge in node["interfaces"]["edges"]:
+                iface = if_edge["node"]
+                if (iface.get("name") or {}).get("value") != "Loopback0":
+                    continue
+                addresses = (iface.get("ip_addresses") or {}).get("edges") or []
+                if not addresses:
+                    continue
+                address = addresses[0]["node"]
+                result[node["name"]["value"]] = (
+                    node["id"],
+                    address["id"],
+                    address["address"]["value"],
+                )
+    return result

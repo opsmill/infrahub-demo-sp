@@ -84,3 +84,44 @@ def test_lookup_uses_name_filter() -> None:
         fetch_artifact.main()
 
     client.get.assert_called_once_with(kind="CoreArtifact", name__value="clab-mpls-topology")
+
+
+def test_branch_flag_reads_the_artifact_from_that_branch() -> None:
+    """`--branch` builds the client with that branch as its default.
+
+    `invoke lab.deploy --branch` relies on it to fetch a proposed change's
+    topology rather than main's.
+    """
+    client = MagicMock()
+    client.address = "http://localhost:8000"
+    client.get = MagicMock(return_value=_mock_artifact("store-1"))
+
+    with (
+        patch.object(fetch_artifact, "InfrahubClientSync", return_value=client) as ctor,
+        patch.dict("os.environ", {"INFRAHUB_API_TOKEN": "tok"}, clear=False),
+        patch(
+            "scripts.fetch_artifact.sys.argv",
+            ["fetch_artifact.py", "clab-mpls-topology", "--branch", "feature-x"],
+        ),
+        patch("scripts.fetch_artifact.urllib.request.urlopen", return_value=_fake_response(b"")),
+    ):
+        assert fetch_artifact.main() == 0
+
+    assert ctor.call_args.kwargs["config"].default_branch == "feature-x"
+
+
+def test_no_branch_flag_uses_the_default_client() -> None:
+    """Without `--branch` the client is built with no config, so main (or the env) applies."""
+    client = MagicMock()
+    client.address = "http://localhost:8000"
+    client.get = MagicMock(return_value=_mock_artifact("store-1"))
+
+    with (
+        patch.object(fetch_artifact, "InfrahubClientSync", return_value=client) as ctor,
+        patch.dict("os.environ", {"INFRAHUB_API_TOKEN": "tok"}, clear=False),
+        patch("scripts.fetch_artifact.sys.argv", ["fetch_artifact.py", "clab-mpls-topology"]),
+        patch("scripts.fetch_artifact.urllib.request.urlopen", return_value=_fake_response(b"")),
+    ):
+        fetch_artifact.main()
+
+    ctor.assert_called_once_with()

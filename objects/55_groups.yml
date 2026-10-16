@@ -32,3 +32,5 @@ spec:
       description: All Cisco Viptela SD-WAN edge devices (artifact target).
     - name: sdwan_versa_edges
       description: All Versa Networks SD-WAN edge devices (artifact target).
+    - name: pe_onboardings
+      description: All TopologyPeOnboarding rows (auto-populated as requests are created).

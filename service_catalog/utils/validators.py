@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import re
 from typing import Any
 
 
@@ -255,3 +256,97 @@ def sdwan_edges_awaiting_artifacts(
         for artifact in (data.get("CoreArtifact") or {}).get("edges", [])
     }
     return sorted(name for device_id, name in expected.items() if device_id not in rendered)
+
+
+PE_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{1,30}$")
+MIN_PE_UPLINKS = 2
+# Keep aligned with the PE generator's artifact groups. The catalog is also
+# deployed on its own, without the generators package.
+PE_PLATFORMS = frozenset({"arista_eos", "cisco_iosxr", "juniper_junos", "nokia_sros"})
+
+
+def validate_add_pe_form(
+    *,
+    name: str,
+    platform: str,
+    existing_device_names: set[str],
+    uplinks: list[str],
+    backbone_pes: set[str],
+) -> list[str]:
+    """Return human-readable errors for the Add PE form (empty list means valid).
+
+    Mirrors the rules checks/pe_onboarding.py enforces in the proposed-change
+    pipeline, so an operator hears about a bad request before a branch exists.
+
+    Args:
+        name: Device name the operator typed.
+        platform: Platform selected for the new PE.
+        existing_device_names: Names of every DcimDevice on the default branch.
+        uplinks: Names of the PEs the operator picked as uplinks.
+        backbone_pes: Names of the PEs in the selected backbone.
+
+    Returns:
+        A list of error message strings; empty list means the form is valid.
+    """
+    errors: list[str] = []
+    if platform not in PE_PLATFORMS:
+        errors.append(f"Unsupported PE platform: {platform}.")
+    if not PE_NAME_PATTERN.match(name or ""):
+        errors.append("Name must be lowercase letters, digits and hyphens, for example pe-09.")
+    if name in existing_device_names:
+        errors.append(f"A device named {name} already exists.")
+    if len(set(uplinks)) < MIN_PE_UPLINKS:
+        errors.append(f"Pick at least {MIN_PE_UPLINKS} distinct uplink PEs.")
+    if name in uplinks:
+        errors.append("The new PE cannot be its own uplink.")
+    outside = sorted(set(uplinks) - backbone_pes)
+    if outside:
+        errors.append(f"Not in the selected backbone: {', '.join(outside)}.")
+    return errors
+
+
+# What the PE generator writes for a request, read back to tell "finished" from
+# "started" -- the counts ``pe_is_materialised`` compares. Requested by name so
+# it works on the branch where the request was just created. Shared by the Add
+# PE page and ``scripts/demo_add_pe.py`` so both wait on the same thing.
+PE_ONBOARDING_PROGRESS_QUERY = """
+query PeProgress($name: String!) {
+  TopologyPeOnboarding(name__value: $name) {
+    edges { node { status { value } device { node { id } } } }
+  }
+  InterfacePhysical(device__name__value: $name, role__value: "core") { count }
+  RoutingBGPSession(device__name__value: $name, session_type__value: "INTERNAL") { count }
+}
+"""
+
+
+def pe_is_materialised(
+    request_node: dict[str, Any] | None,
+    *,
+    core_interface_count: int,
+    ibgp_session_count: int,
+    expected_uplinks: int,
+    expected_sessions: int,
+) -> bool:
+    """Return whether the PE onboarding generator has finished with a request.
+
+    Status alone is not enough (see ``l3vpn_is_materialised``): the generator
+    flips ``status`` and links ``device`` last, but the counts are what the
+    artifacts need, so both are checked.
+
+    Args:
+        request_node: The TopologyPeOnboarding node from a GraphQL query, or
+            ``None`` when the query matched nothing.
+        core_interface_count: Core ports found on the new PE.
+        ibgp_session_count: INTERNAL BGP sessions found on the new PE.
+        expected_uplinks: Number of uplinks the request named.
+        expected_sessions: Number of PEs in the backbone before the request.
+
+    Returns:
+        True when the generator has produced everything the artifacts need.
+    """
+    if not request_node or (request_node.get("status") or {}).get("value") != "active":
+        return False
+    if not (request_node.get("device") or {}).get("node"):
+        return False
+    return core_interface_count == expected_uplinks and ibgp_session_count == expected_sessions

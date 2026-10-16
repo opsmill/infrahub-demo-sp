@@ -53,6 +53,7 @@ exceptions:
   - Netbox
   - OpenConfig
   - OSPF
+  - PE
   - POP
   - Pydantic
   - Service Catalog
@@ -90,5 +91,6 @@ exceptions:
   - ServiceSdwanSite
   - SR
   - TopologyMplsBackbone
+  - TopologyPeOnboarding
   - uv
   - yamllint

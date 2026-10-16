@@ -1,0 +1,35 @@
+# Generator input for generate_pe. Deliberately returns only what the operator
+# supplied: the request, its uplinks and the backbone's AS and IS-IS settings.
+# It must never return `device` (the DcimDevice the generator creates) or the
+# backbone's `pes` (which the generator adds that device to), or the generator's
+# query group tracks its own output and destabilises inside the proposed-change
+# pipeline — see tests/unit/test_catalog/test_pe_generator_registration.py. Everything
+# else the generator needs (the other PEs' loopbacks) is read through the SDK.
+query PeOnboarding($name: String!) {
+  TopologyPeOnboarding(name__value: $name) {
+    edges {
+      node {
+        id
+        name { value }
+        status { value }
+        location { node { id shortname { value } } }
+        platform { node { id name { value } } }
+        device_type { node { id name { value } } }
+        backbone {
+          node {
+            id
+            name { value }
+            isis_area { value }
+            isis_level { value }
+            asn { node { id asn { value } } }
+          }
+        }
+        uplinks {
+          edges {
+            node { id name { value } role { value } }
+          }
+        }
+      }
+    }
+  }
+}

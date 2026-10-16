@@ -148,6 +148,8 @@ router bgp {{ device.asn.node.asn.value }}
    address-family ipv4 unicast
     route-policy PASS-ALL in
     route-policy PASS-ALL out
+    ! Sites of one VPN can share a customer AS; see pe_arista_eos.j2.
+    as-override
    !
   !
 {% elif s.node.routing_protocol.value == 'static' %}

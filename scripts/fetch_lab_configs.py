@@ -9,7 +9,7 @@ directory so containerlab can mount it via the ``startup-config`` field in the
 topology file.
 
 Usage:
-    uv run python scripts/fetch_lab_configs.py [--out-dir lab/devices]
+    uv run python scripts/fetch_lab_configs.py [--out-dir lab/devices] [--branch <branch>]
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from infrahub_sdk import InfrahubClientSync
+from infrahub_sdk import Config, InfrahubClientSync
 
 # Which kinds containerlab actually boots is decided in one place — the topology
 # transform — so this script and the rendered topology cannot disagree about
@@ -118,12 +118,21 @@ def main() -> int:
         default="lab/devices",
         help="Where to write the per-device config files",
     )
+    parser.add_argument(
+        "--branch",
+        default=None,
+        help="Infrahub branch to read from (default: the SDK's default branch, normally main)",
+    )
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    client = InfrahubClientSync()
+    client = (
+        InfrahubClientSync(config=Config(default_branch=args.branch))
+        if args.branch
+        else InfrahubClientSync()
+    )
 
     written = 0
     missing: list[str] = []

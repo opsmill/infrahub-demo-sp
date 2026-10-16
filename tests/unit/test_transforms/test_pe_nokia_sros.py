@@ -108,3 +108,13 @@ async def test_vprn_admin_state_and_local_as() -> None:
     )
     assert 'vprn "acme-prod" {\n            admin-state enable' in rendered
     assert "autonomous-system 65000" in rendered
+
+
+@pytest.mark.asyncio
+async def test_ce_neighbor_overrides_the_customer_as() -> None:
+    """Two sites of one VPN can share a customer AS; each CE neighbor needs as-override."""
+    rendered = await PeNokiaSrOs.__new__(PeNokiaSrOs).transform(
+        pe_fixture_with_site("pe-nyc-nokia", "10.0.0.4/32", "49.0001.0100.0000.0004.00")
+    )
+    neighbor = rendered.split('neighbor "10.100.0.2" {', 1)[1].split("}", 1)[0]
+    assert "as-override true" in neighbor

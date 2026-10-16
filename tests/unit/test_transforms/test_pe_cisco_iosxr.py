@@ -71,3 +71,13 @@ async def test_translates_arista_iface_to_iosxr_gig_form() -> None:
     assert "interface GigabitEthernet0/0/0/0" in rendered
     # Per-VRF customer iface (Ethernet4) → GigabitEthernet0/0/0/3.
     assert "interface GigabitEthernet0/0/0/3" in rendered
+
+
+@pytest.mark.asyncio
+async def test_ce_neighbor_overrides_the_customer_as() -> None:
+    """Two sites of one VPN can share a customer AS; each CE neighbor needs as-override."""
+    rendered = await PeCiscoIosXr.__new__(PeCiscoIosXr).transform(
+        pe_fixture_with_site("pe-fra-cisco", "10.0.0.2/32", "49.0001.0100.0000.0002.00")
+    )
+    neighbor = rendered.split("  neighbor 10.100.0.2\n", 1)[1].split("\n  !", 1)[0]
+    assert "    as-override" in neighbor

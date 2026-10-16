@@ -11,25 +11,32 @@ This is the suite the Infrahub version-bump automation runs against a new releas
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, TypeVar
 
+import httpx
 import pytest
 from infrahub_sdk import InfrahubClient, InfrahubClientSync
 from infrahub_sdk.graphql import Mutation
 from infrahub_sdk.task.models import TaskState
 from infrahub_sdk.testing.repository import GitRepo
 
-from .conftest import PROJECT_DIRECTORY, TestInfrahubDockerWithClient
+from .conftest import ADMIN_TOKEN, PROJECT_DIRECTORY, TestInfrahubDockerWithClient
 
 REPO_NAME = "infrahub-demo-sp"
 SERVICE_BRANCH = "integration-add-l3vpn"
 BOOTSTRAP_VPN = "trading-floor-vpn"
 BRANCH_VPN = "integration-test-vpn"
 BRANCH_REQUEST_FILE = "tests/integration/data/l3vpn_branch_request.yml"
+PE_BRANCH = "integration-add-pe"
+BRANCH_PE = "pe-09"
+PE_UPLINKS = ("pe-02", "pe-07")
+PE_REQUEST_FILE = "tests/integration/data/pe_branch_request.yml"
+BACKBONE = "mpls-backbone-1"
 
 # Generous: a cold container pulls images, syncs the repository, and renders artifacts.
 REPO_SYNC_ATTEMPTS = 60
@@ -708,3 +715,486 @@ class TestSpDemoWorkflow(TestInfrahubDockerWithClient):
         )
 
         logging.info("%s and its VRF verified on main", BRANCH_VPN)
+
+    # ------------------------------------------------------------ PE onboarding
+    #
+    # Independent of the L3VPN proposed change above (16 to 18, `extended`): the
+    # PE flow never runs generate_l3vpn, so it does not hit issue #111 and its
+    # proposed change can merge in the blocking tier.
+
+    @staticmethod
+    def _api_headers() -> dict[str, str]:
+        """Auth header for the REST endpoints the SDK does not wrap."""
+        return {"X-INFRAHUB-KEY": ADMIN_TOKEN}
+
+    async def pe_state(self, client: InfrahubClient, branch: str) -> dict[str, Any]:
+        """Read everything the PE assertions look at, in one query on ``branch``.
+
+        Args:
+            client: Async Infrahub client.
+            branch: Branch to read.
+
+        Returns:
+            The raw GraphQL result.
+        """
+        query = """
+        query PeState($name: String!, $claim: String!, $backbone: String!) {
+          TopologyPeOnboarding(name__value: $name) {
+            edges { node { status { value } device { node { name { value } } } } }
+          }
+          DcimDevice(name__value: $name) {
+            edges {
+              node {
+                role { value }
+                interfaces {
+                  edges {
+                    node {
+                      __typename
+                      name { value }
+                      role { value }
+                      status { value }
+                      ... on InterfaceVirtual {
+                        ip_addresses { edges { node { address { value } } } }
+                      }
+                      ... on InterfacePhysical {
+                        ip_addresses { edges { node { address { value } } } }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+          pe_count: DcimDevice(role__value: "pe") { count }
+          RoutingBGPSession(device__name__value: $name, session_type__value: "INTERNAL") { count }
+          claimed: InterfacePhysical(description__value: $claim) {
+            edges {
+              node {
+                name { value }
+                role { value }
+                status { value }
+                device { node { name { value } } }
+                ip_addresses { edges { node { address { value } } } }
+              }
+            }
+          }
+          TopologyMplsBackbone(name__value: $backbone) {
+            edges { node { pes { edges { node { name { value } } } } } }
+          }
+          MplsIsisProcess(device__name__value: $name) { edges { node { net_id { value } } } }
+        }
+        """
+        return await client.execute_graphql(
+            query=query,
+            variables={"name": BRANCH_PE, "claim": f"To {BRANCH_PE}", "backbone": BACKBONE},
+            branch_name=branch,
+        )
+
+    @staticmethod
+    def _pe_materialised(state: dict[str, Any]) -> bool:
+        """The gate the catalog page uses: active, linked, every port and session present."""
+        requests = state["TopologyPeOnboarding"]["edges"]
+        if not requests:
+            return False
+        request = requests[0]["node"]
+        if request["status"]["value"] != "active" or not request["device"]["node"]:
+            return False
+        expected_sessions = int(state["pe_count"]["count"]) - 1
+        devices = state["DcimDevice"]["edges"]
+        if not devices:
+            return False
+        core_ports = [
+            i["node"]
+            for i in devices[0]["node"]["interfaces"]["edges"]
+            if i["node"]["__typename"] == "InterfacePhysical"
+            and i["node"]["role"]["value"] == "core"
+        ]
+        return (
+            len(core_ports) == len(PE_UPLINKS)
+            and int(state["RoutingBGPSession"]["count"]) == expected_sessions
+        )
+
+    @pytest.mark.order(19)
+    @pytest.mark.dependency(name="pe_branch", depends=["diff"])
+    def test_19_create_pe_branch(self, client_main: InfrahubClientSync) -> None:
+        """Create the branch the onboarding request is staged on."""
+        if PE_BRANCH not in client_main.branch.all():
+            client_main.branch.create(PE_BRANCH, wait_until_completion=True)
+        assert PE_BRANCH in client_main.branch.all()
+
+    @pytest.mark.order(20)
+    @pytest.mark.dependency(name="pe_request", depends=["pe_branch"])
+    def test_20_load_pe_request(self, client_main: InfrahubClientSync) -> None:
+        """Load a ``TopologyPeOnboarding`` onto the branch, as the catalog would."""
+        result = self.execute_command(
+            f"infrahubctl object load {PE_REQUEST_FILE} --branch {PE_BRANCH}",
+            address=client_main.config.address,
+        )
+        self.assert_command_ok(result, "PE request load")
+
+    @pytest.mark.order(21)
+    @pytest.mark.dependency(name="pe_generated", depends=["pe_request"])
+    async def test_21_group_trigger_runs_pe_generator(
+        self, async_client_main: InfrahubClient
+    ) -> None:
+        """The group trigger ran generate_pe and it wrote the whole PE."""
+        client = async_client_main
+
+        async def materialised() -> tuple[bool, dict[str, Any]]:
+            state = await self.pe_state(client, PE_BRANCH)
+            return self._pe_materialised(state), state
+
+        try:
+            state = await self.wait_for(
+                materialised,
+                attempts=TRIGGERED_GENERATOR_ATTEMPTS,
+                interval=TRIGGERED_GENERATOR_INTERVAL,
+                description=f"group trigger to run generate_pe for {BRANCH_PE}",
+            )
+        except TimeoutError as exc:
+            actions = [a.name.value for a in await client.all(kind="CoreGeneratorAction")]
+            rules = [r.name.value for r in await client.all(kind="CoreGroupTriggerRule")]
+            last = await self.pe_state(client, PE_BRANCH)
+            raise AssertionError(
+                f"group trigger never completed generate_pe on {PE_BRANCH}.\n"
+                f"  generator actions: {actions}\n"
+                f"  group trigger rules: {rules}\n"
+                f"  last state: {last}\n"
+                f"  waited: {TRIGGERED_GENERATOR_ATTEMPTS * TRIGGERED_GENERATOR_INTERVAL}s"
+            ) from exc
+
+        # Settle: a sibling run must not still be rewriting what we are about to assert on.
+        await asyncio.sleep(TRIGGERED_GENERATOR_INTERVAL)
+        state = await self.pe_state(client, PE_BRANCH)
+        assert self._pe_materialised(state), f"PE state regressed while settling: {state}"
+
+        device = state["DcimDevice"]["edges"][0]["node"]
+        assert device["role"]["value"] == "pe"
+        interfaces = [i["node"] for i in device["interfaces"]["edges"]]
+        loopbacks = [i for i in interfaces if i["name"]["value"] == "Loopback0"]
+        assert len(loopbacks) == 1, f"expected one Loopback0 on {BRANCH_PE}, got {interfaces}"
+        loopback = loopbacks[0]["ip_addresses"]["edges"][0]["node"]["address"]["value"]
+        assert loopback.startswith("10.0.0.") and loopback.endswith("/32"), loopback
+
+        core = {
+            i["name"]["value"]: i["ip_addresses"]["edges"][0]["node"]["address"]["value"]
+            for i in interfaces
+            if i["__typename"] == "InterfacePhysical" and i["role"]["value"] == "core"
+        }
+        assert sorted(core) == ["Ethernet1", "Ethernet2"], core
+        spare_ports = [
+            interface["name"]["value"]
+            for interface in interfaces
+            if interface["__typename"] == "InterfacePhysical"
+            and interface["status"]["value"] == "free"
+            and interface["role"]["value"] == "cust"
+        ]
+        assert sorted(spare_ports) == ["Ethernet3", "Ethernet4"], interfaces
+
+        claimed = {
+            c["node"]["device"]["node"]["name"]["value"]: c["node"]
+            for c in state["claimed"]["edges"]
+        }
+        assert sorted(claimed) == sorted(PE_UPLINKS), f"claimed ports: {claimed}"
+        local_networks = {str(ipaddress.ip_interface(a).network) for a in core.values()}
+        for uplink, port in claimed.items():
+            assert port["role"]["value"] == "core" and port["status"]["value"] == "active", port
+            address = port["ip_addresses"]["edges"][0]["node"]["address"]["value"]
+            network = str(ipaddress.ip_interface(address).network)
+            assert network in local_networks, (
+                f"{uplink} port {port['name']['value']} ({address}) shares no /31 with {core}"
+            )
+
+        backbone_pes = {
+            p["node"]["name"]["value"]
+            for p in state["TopologyMplsBackbone"]["edges"][0]["node"]["pes"]["edges"]
+        }
+        assert BRANCH_PE in backbone_pes, backbone_pes
+
+        net_id = state["MplsIsisProcess"]["edges"][0]["node"]["net_id"]["value"]
+        octets = loopback.split("/")[0].split(".")
+        digits = "".join(f"{int(o):03d}" for o in octets)
+        assert net_id == f"49.0001.{digits[0:4]}.{digits[4:8]}.{digits[8:12]}.00", net_id
+        logging.info(
+            "%s materialised: loopback %s, core %s, NET %s", BRANCH_PE, loopback, core, net_id
+        )
+
+    async def _artifact_content(
+        self,
+        client: InfrahubClient,
+        branch: str,
+        definition_name: str,
+        object_name: str,
+    ) -> str | None:
+        """Return the rendered artifact for one object on ``branch``, or ``None``."""
+        definition = await client.get(kind="CoreArtifactDefinition", name__value=definition_name)
+        artifacts = await client.filters(
+            kind="CoreArtifact", definition__ids=[definition.id], branch=branch
+        )
+        for artifact in artifacts:
+            if artifact.status.value != "Ready" or not artifact.storage_id.value:
+                continue
+            await artifact.object.fetch()
+            if artifact.object.peer.display_label not in (object_name, None):
+                continue
+            response = httpx.get(
+                f"{client.config.address}/api/storage/object/{artifact.storage_id.value}",
+                headers=self._api_headers(),
+                timeout=30,
+            )
+            response.raise_for_status()
+            return response.text
+        return None
+
+    @pytest.mark.order(22)
+    @pytest.mark.dependency(name="pe_artifacts", depends=["pe_generated"])
+    async def test_22_pe_artifacts_render_on_branch(
+        self, async_client_main: InfrahubClient
+    ) -> None:
+        """The new PE's config and the lab topology render on the branch.
+
+        Triggered per definition exactly as the catalog page does it.
+        """
+        client = async_client_main
+        for definition_name in ("pe-arista-eos-config", "clab-mpls-topology"):
+            definition = await client.get(
+                kind="CoreArtifactDefinition", name__value=definition_name
+            )
+            response = httpx.post(
+                f"{client.config.address}/api/artifact/generate/{definition.id}?branch={PE_BRANCH}",
+                headers=self._api_headers(),
+                timeout=60,
+            )
+            assert response.status_code == 200, f"{definition_name}: {response.text}"
+
+        async def pe_config() -> tuple[bool, str | None]:
+            content = await self._artifact_content(
+                client, PE_BRANCH, "pe-arista-eos-config", BRANCH_PE
+            )
+            return bool(content and f"hostname {BRANCH_PE}" in content), content
+
+        config = await self.wait_for(
+            pe_config,
+            attempts=ARTIFACT_ATTEMPTS,
+            interval=ARTIFACT_INTERVAL,
+            description=f"pe-arista-eos artifact for {BRANCH_PE} on {PE_BRANCH}",
+        )
+        assert config is not None
+        assert config.count("peer group RR-MESH") >= 8, config
+        assert "net 49.0001." in config and "router isis 1" in config, config
+        for uplink in PE_UPLINKS:
+            assert f"description To {uplink}" in config, config
+
+        async def topology() -> tuple[bool, str | None]:
+            content = await self._artifact_content(
+                client, PE_BRANCH, "clab-mpls-topology", BACKBONE
+            )
+            return bool(content and f"    {BRANCH_PE}:" in content), content
+
+        topo = await self.wait_for(
+            topology,
+            attempts=ARTIFACT_ATTEMPTS,
+            interval=ARTIFACT_INTERVAL,
+            description=f"clab topology including {BRANCH_PE} on {PE_BRANCH}",
+        )
+        assert topo is not None
+        pe_links = [
+            line for line in topo.splitlines() if "endpoints" in line and f"{BRANCH_PE}:" in line
+        ]
+        assert len(pe_links) == len(PE_UPLINKS), f"links naming {BRANCH_PE}: {pe_links}"
+
+        # The neighbours' artifacts must carry the new session too: the Arista
+        # template reads sessions by device, so a missing reverse row shows up
+        # here as an uplink config without the new neighbour.
+        state = await self.pe_state(client, PE_BRANCH)
+        loopback = next(
+            a["node"]["address"]["value"]
+            for i in state["DcimDevice"]["edges"][0]["node"]["interfaces"]["edges"]
+            if i["node"]["name"]["value"] == "Loopback0"
+            for a in i["node"]["ip_addresses"]["edges"]
+        ).split("/")[0]
+        for uplink in PE_UPLINKS:
+
+            async def uplink_config(name: str = uplink) -> tuple[bool, str | None]:
+                content = await self._artifact_content(
+                    client, PE_BRANCH, "pe-arista-eos-config", name
+                )
+                return bool(
+                    content and f"neighbor {loopback} peer group RR-MESH" in content
+                ), content
+
+            uplink_cfg = await self.wait_for(
+                uplink_config,
+                attempts=ARTIFACT_ATTEMPTS,
+                interval=ARTIFACT_INTERVAL,
+                description=f"{uplink} artifact on {PE_BRANCH} to list neighbour {loopback}",
+            )
+            assert uplink_cfg is not None
+            assert f"description To {BRANCH_PE}" in uplink_cfg, uplink_cfg
+
+    def open_proposed_change(
+        self, client_main: InfrahubClientSync, branch: str, pc_name: str
+    ) -> tuple[str, list[str], set[str]]:
+        """Open a proposed change and wait for its validators to settle.
+
+        Returns:
+            The proposed change id, the list of ``label -> conclusion`` strings
+            for validators that did not conclude ``success``, and the label of
+            every validator that ran.
+        """
+        mutation = Mutation(
+            mutation="CoreProposedChangeCreate",
+            input_data={
+                "data": {
+                    "name": {"value": pc_name},
+                    "source_branch": {"value": branch},
+                    "destination_branch": {"value": "main"},
+                }
+            },
+            query={"ok": None, "object": {"id": None}},
+        )
+        response = client_main.execute_graphql(query=mutation.render())
+        pc_id = response["CoreProposedChangeCreate"]["object"]["id"]
+        logging.info("proposed change %s created (id=%s)", pc_name, pc_id)
+
+        validations: list[Any] = []
+        settled_count = -1
+        for attempt in range(1, VALIDATION_ATTEMPTS + 1):
+            pc = client_main.get(
+                "CoreProposedChange",
+                id=pc_id,
+                include=["validations"],
+                exclude=["reviewers", "approved_by", "created_by"],
+                prefetch_relationships=True,
+                populate_store=True,
+            )
+            peers = [v.peer for v in pc.validations.peers]
+            complete = bool(peers) and all(peer.state.value == "completed" for peer in peers)
+            if complete and len(peers) == settled_count:
+                validations = peers
+                break
+            settled_count = len(peers) if complete else -1
+            logging.info(
+                "waiting for validations of %s (%d/%d), %d known",
+                pc_name,
+                attempt,
+                VALIDATION_ATTEMPTS,
+                len(peers),
+            )
+            time.sleep(VALIDATION_INTERVAL)
+
+        assert validations, f"validations of {pc_name} never completed ({pc_id})"
+        failed = []
+        for validation in validations:
+            name = validation.label.value or validation.id
+            conclusion = validation.conclusion.value
+            logging.info("validation %s -> %s", name, conclusion)
+            if conclusion != "success":
+                failed.append(f"{name} -> {conclusion}")
+        return pc_id, failed, {validation.label.value for validation in validations}
+
+    @pytest.mark.order(23)
+    @pytest.mark.dependency(name="pe_proposed_change", depends=["pe_artifacts"])
+    def test_23_create_pe_proposed_change(
+        self, client_main: InfrahubClientSync, workflow_state: dict[str, Any]
+    ) -> None:
+        """Every validator, pe_onboarding and backbone_session_count included, succeeds.
+
+        "Included" is asserted, not assumed: when a repository sync deletes a
+        check definition, Infrahub stops creating that check's validator and
+        reports no error, so "no validator failed" alone would pass without the
+        check ever running (see the rollout section of docs/docs/backbone/add-pe.mdx).
+        """
+        pc_id, failed, labels = self.open_proposed_change(
+            client_main, PE_BRANCH, f"Add PE {BRANCH_PE}"
+        )
+        workflow_state["pe_pc_id"] = pc_id
+        assert not failed, f"proposed-change validations did not all succeed: {failed}"
+        for check in ("Check: pe_onboarding", "Check: backbone_session_count"):
+            assert check in labels, f"{check} did not run; validators that ran: {sorted(labels)}"
+
+    @pytest.mark.order(24)
+    @pytest.mark.dependency(name="pe_merge", depends=["pe_proposed_change"])
+    def test_24_merge_pe_proposed_change(
+        self, client_main: InfrahubClientSync, workflow_state: dict[str, Any]
+    ) -> None:
+        """Merge the PE proposed change into main."""
+        pc_id = workflow_state["pe_pc_id"]
+        mutation = Mutation(
+            mutation="CoreProposedChangeMerge",
+            input_data={"data": {"id": pc_id}, "wait_until_completion": False},
+            query={"ok": None, "task": {"id": None}},
+        )
+        response = client_main.execute_graphql(query=mutation.render())
+        task_id = response["CoreProposedChangeMerge"]["task"]["id"]
+        task = client_main.task.wait_for_completion(id=task_id, timeout=MERGE_TASK_TIMEOUT)
+        logging.info("PE merge task %s finished in state %s", task_id, task.state)
+        pc = client_main.get("CoreProposedChange", id=pc_id)
+        assert pc.state.value in ("merged", "closed"), (
+            f"PE proposed change did not merge: state {pc.state.value}, task {task.state}\n"
+            f"{self.task_log_tail(task)}"
+        )
+
+    @pytest.mark.order(25)
+    @pytest.mark.dependency(name="pe_on_main", depends=["pe_merge"])
+    async def test_25_verify_pe_on_main(self, async_client_main: InfrahubClient) -> None:
+        """The new PE, its mesh and the neighbours' new sessions all landed on main."""
+        client = async_client_main
+        await asyncio.sleep(MERGE_PROPAGATION_DELAY)
+        state = await self.pe_state(client, "main")
+        assert self._pe_materialised(state), f"{BRANCH_PE} not fully on main: {state}"
+        pe_count = int(state["pe_count"]["count"])
+        for uplink in PE_UPLINKS:
+            sessions = await client.filters(
+                kind="RoutingBGPSession",
+                device__name__value=uplink,
+                session_type__value="INTERNAL",
+                branch="main",
+            )
+            assert len(sessions) == pe_count - 1, (
+                f"{uplink} has {len(sessions)} iBGP sessions on main, expected {pe_count - 1}"
+            )
+
+        # The artifacts the lab deploys from are the ones on main. Re-render them
+        # the way `invoke lab.deploy` does and require the merged PE to be in them.
+        for definition_name in ("pe-arista-eos-config", "clab-mpls-topology"):
+            definition = await client.get(
+                kind="CoreArtifactDefinition", name__value=definition_name
+            )
+            response = httpx.post(
+                f"{client.config.address}/api/artifact/generate/{definition.id}",
+                headers=self._api_headers(),
+                timeout=60,
+            )
+            assert response.status_code == 200, f"{definition_name} on main: {response.text}"
+
+        async def main_pe_config() -> tuple[bool, str | None]:
+            content = await self._artifact_content(
+                client, "main", "pe-arista-eos-config", BRANCH_PE
+            )
+            return bool(content and f"hostname {BRANCH_PE}" in content), content
+
+        config = await self.wait_for(
+            main_pe_config,
+            attempts=ARTIFACT_ATTEMPTS,
+            interval=ARTIFACT_INTERVAL,
+            description=f"pe-arista-eos artifact for {BRANCH_PE} on main after merge",
+        )
+        assert config is not None and config.count("peer group RR-MESH") >= pe_count - 1, config
+
+        async def main_topology() -> tuple[bool, str | None]:
+            content = await self._artifact_content(client, "main", "clab-mpls-topology", BACKBONE)
+            return bool(content and f"    {BRANCH_PE}:" in content), content
+
+        topo = await self.wait_for(
+            main_topology,
+            attempts=ARTIFACT_ATTEMPTS,
+            interval=ARTIFACT_INTERVAL,
+            description=f"clab topology on main to include {BRANCH_PE} after merge",
+        )
+        assert topo is not None
+        pe_links = [
+            line for line in topo.splitlines() if "endpoints" in line and f"{BRANCH_PE}:" in line
+        ]
+        assert len(pe_links) == len(PE_UPLINKS), f"links naming {BRANCH_PE} on main: {pe_links}"
+        logging.info("%s verified on main with %d PEs in the backbone", BRANCH_PE, pe_count)

@@ -7,6 +7,7 @@ redirect to a file.
 
 Usage:
     uv run python scripts/fetch_artifact.py pe-arista-eos > pe.cfg
+    uv run python scripts/fetch_artifact.py clab-mpls-topology --branch <branch> > topo.yml
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ import os
 import sys
 import urllib.request
 
-from infrahub_sdk import InfrahubClientSync
+from infrahub_sdk import Config, InfrahubClientSync
 
 
 def main() -> int:
@@ -27,9 +28,18 @@ def main() -> int:
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("name", help="CoreArtifact name (e.g. pe-arista-eos)")
+    parser.add_argument(
+        "--branch",
+        default=None,
+        help="Infrahub branch to read from (default: the SDK's default branch, normally main)",
+    )
     args = parser.parse_args()
 
-    client = InfrahubClientSync()
+    client = (
+        InfrahubClientSync(config=Config(default_branch=args.branch))
+        if args.branch
+        else InfrahubClientSync()
+    )
     artifact = client.get(kind="CoreArtifact", name__value=args.name)
     storage_id = artifact.storage_id.value
     if not storage_id:

@@ -25,6 +25,8 @@ queries:
   - {name: sdwan_id_overlap, file_path: queries/validation/sdwan_id_overlap.gql}
   - {name: sdwan_site_subnet, file_path: queries/validation/sdwan_site_subnet.gql}
   - {name: batfish_backbone, file_path: queries/validation/batfish_backbone.gql}
+  - {name: pe_onboarding, file_path: queries/service/pe_onboarding.gql}
+  - {name: pe_onboarding_check, file_path: queries/validation/pe_onboarding.gql}
 python_transforms:
   - {name: pe_arista_eos, class_name: PeAristaEos, file_path: transforms/pe_arista_eos.py}
   - {name: ce_arista_eos, class_name: CeAristaEos, file_path: transforms/ce_arista_eos.py}
@@ -118,6 +120,20 @@ generator_definitions:
     class_name: SdwanGenerator
     parameters:
       name: name__value
+  # generate_pe: event-driven like generate_l3vpn, fired by trigger-pe-generator
+  # when a TopologyPeOnboarding joins the pe_onboardings group. `watch` names
+  # the helper module it imports; Infrahub does not follow imports itself.
+  - name: generate_pe
+    file_path: generators/generate_pe.py
+    targets: pe_onboardings
+    query: pe_onboarding
+    class_name: PeOnboardingGenerator
+    execute_in_proposed_change: false
+    parameters:
+      name: name__value
+    watch:
+      files:
+        - generators/common.py
 check_definitions:
   - {name: l3vpn_overlap, class_name: L3VpnOverlapCheck, file_path: checks/l3vpn_overlap.py, targets: l3vpns}
   - {name: l3vpn_site_subnet, class_name: L3VpnSiteSubnetCheck, file_path: checks/l3vpn_site_subnet.py, targets: l3vpns}
@@ -126,6 +142,12 @@ check_definitions:
   - {name: backbone_session_count, class_name: BackboneSessionCountCheck, file_path: checks/backbone_session_count.py, targets: pes}
   - {name: sdwan_id_overlap, class_name: SdwanIdOverlapCheck, file_path: checks/sdwan_id_overlap.py, targets: sdwans}
   - {name: sdwan_site_subnet, class_name: SdwanSiteSubnetCheck, file_path: checks/sdwan_site_subnet.py, targets: sdwans}
+  - name: pe_onboarding
+    class_name: PeOnboardingCheck
+    file_path: checks/pe_onboarding.py
+    targets: pe_onboardings
+    parameters:
+      name: name__value
   - name: batfish_backbone
     class_name: BatfishBackboneCheck
     file_path: checks/batfish_backbone.py

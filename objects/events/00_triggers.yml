@@ -121,3 +121,29 @@ spec:
         data:
           - relationship_name: sites
             modification_type: updated
+
+---
+# PE onboarding. One rule only: the request has no child rows that arrive after
+# it, so joining the group is the single event. generate_pe is kept out of the
+# proposed-change pipeline for the same reason as generate_l3vpn above.
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: CoreGeneratorAction
+  data:
+    - name: run-pe-generator
+      description: Run the PE onboarding generator against the impacted request.
+      generator: generate_pe
+
+---
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: CoreGroupTriggerRule
+  data:
+    - name: trigger-pe-generator
+      description: Fire the PE onboarding generator when a request joins the pe_onboardings group.
+      branch_scope: other_branches
+      member_update: added
+      group: pe_onboardings
+      action: run-pe-generator

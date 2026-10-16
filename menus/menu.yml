@@ -40,6 +40,13 @@ spec:
             kind: TopologyMplsBackbone
             order_weight: 2100
 
+          - namespace: Topology
+            name: PeOnboarding
+            label: PE Onboarding
+            icon: mdi:router-network-wireless
+            kind: TopologyPeOnboarding
+            order_weight: 2150
+
           - namespace: Mpls
             name: IsisProcess
             label: ISIS Processes

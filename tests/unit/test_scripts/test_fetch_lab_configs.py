@@ -256,3 +256,33 @@ def test_labbed_device_with_no_role_is_still_visible(
 
     assert rc == 1
     assert "no artifact definition for role=None" in capsys.readouterr().err
+
+
+def test_branch_flag_reads_devices_and_artifacts_from_that_branch(tmp_path: Path) -> None:
+    """`--branch` builds the client with that branch as its default.
+
+    Every query here — the devices, the artifact definitions and the artifacts
+    — then reads the branch, which is what `invoke lab.deploy --branch` needs to
+    boot a PE that exists only in a proposed change.
+    """
+    pe = _device("pe-09", "ceos")
+    client = _client(
+        devices_by_role={"pe": [pe]}, artifacts_by_device_id={pe.id: [_artifact("s-1")]}
+    )
+
+    with (
+        patch.object(fetch_lab_configs, "InfrahubClientSync", return_value=client) as ctor,
+        patch.dict("os.environ", {"INFRAHUB_API_TOKEN": "tok"}, clear=False),
+        patch(
+            "scripts.fetch_lab_configs.sys.argv",
+            ["fetch_lab_configs.py", "--out-dir", str(tmp_path), "--branch", "feature-x"],
+        ),
+        patch(
+            "scripts.fetch_lab_configs.urllib.request.urlopen",
+            return_value=_fake_response(b"pe-09-cfg"),
+        ),
+    ):
+        assert fetch_lab_configs.main() == 0
+
+    assert ctor.call_args.kwargs["config"].default_branch == "feature-x"
+    assert (tmp_path / "pe-09.cfg").read_bytes() == b"pe-09-cfg"

@@ -1,0 +1,23 @@
+---
+# Integration-test PE onboarding request, loaded onto a branch as the Streamlit
+# catalog does. pe-02 and pe-07 are chosen because both still have free customer
+# ports after the bootstrap dataset's CE attachments (those sit on pe-01 and
+# pe-08). Membership of the `pe_onboardings` group is what fires generate_pe on
+# the branch.
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: TopologyPeOnboarding
+  data:
+    - name: pe-09
+      description: PE added by the integration suite to exercise the onboarding workflow.
+      status: draft
+      backbone: mpls-backbone-1
+      location: mil
+      platform: arista_eos
+      device_type: 7280R3
+      uplinks:
+        - pe-02
+        - pe-07
+      member_of_groups:
+        - pe_onboardings

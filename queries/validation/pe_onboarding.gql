@@ -1,0 +1,39 @@
+query PeOnboardingCheck($name: String!) {
+  TopologyPeOnboarding(name__value: $name) {
+    edges {
+      node {
+        name { value }
+        status { value }
+        device { node { id name { value } } }
+        backbone {
+          node {
+            name { value }
+            pes { edges { node { name { value } } } }
+          }
+        }
+        uplinks {
+          edges {
+            node {
+              name { value }
+              role { value }
+              interfaces {
+                edges {
+                  node {
+                    __typename
+                    ... on InterfacePhysical {
+                      status { value }
+                      description { value }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  DcimDevice(name__value: $name) { edges { node { id } } }
+  InterfacePhysical(device__name__value: $name, role__value: "core") { count }
+  RoutingBGPSession(device__name__value: $name, session_type__value: "INTERNAL") { count }
+}

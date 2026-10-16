@@ -181,6 +181,87 @@ def _running_infrahub_version() -> str:
         return "(server not reachable)"
 
 
+# 150 attempts x 2s = 5 minutes. infrahub-demo-dc waits 60s; the first start after
+# pulling new images takes longer than that.
+INFRAHUB_READY_MAX_RETRIES = 150
+INFRAHUB_READY_SLEEP_SECONDS = 2
+
+
+def _infrahub_is_ready(address: str) -> bool:
+    """Return True when the Infrahub API answers ``/api/schema`` with HTTP 200.
+
+    ``docker compose up -d`` returns once containers have started, before the
+    server inside is listening, so a connection error here means "not yet".
+    Same endpoint as ``check_infrahub_ready`` in infrahub-demo-dc.
+    """
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(f"{address}/api/schema", timeout=2) as resp:
+            return bool(resp.status == 200)
+    except Exception:
+        return False
+
+
+def _wait_for_infrahub(
+    max_retries: int = INFRAHUB_READY_MAX_RETRIES,
+    sleep_time: int = INFRAHUB_READY_SLEEP_SECONDS,
+) -> None:
+    """Block until the Infrahub API is ready, showing a progress bar.
+
+    Without this, ``invoke start bootstrap`` reaches ``infrahubctl schema load``
+    seconds after the containers start and fails with "Unable to connect".
+    The progress bar matches ``check_infrahub_ready`` in infrahub-demo-dc.
+
+    Args:
+        max_retries: Attempts before giving up.
+        sleep_time: Seconds between attempts.
+
+    Raises:
+        Exit: The API did not answer within ``max_retries * sleep_time`` seconds.
+    """
+    address = os.getenv("INFRAHUB_ADDRESS", "http://localhost:8000")
+    console.print()
+    with Progress(
+        SpinnerColumn(spinner_name="dots12", style="bold bright_magenta"),
+        TextColumn("[progress.description]{task.description}", style="bold white"),
+        BarColumn(
+            bar_width=60,
+            style="magenta",
+            complete_style="bright_green",
+            finished_style="bold bright_green",
+            pulse_style="bright_magenta",
+        ),
+        TextColumn("[bold bright_cyan]{task.percentage:>3.0f}%"),
+        TextColumn("•", style="dim"),
+        TimeElapsedColumn(),
+        console=console,
+    ) as progress:
+        bar = progress.add_task("→ Checking if Infrahub is ready", total=max_retries)
+        for _ in range(max_retries):
+            if _infrahub_is_ready(address):
+                progress.update(bar, completed=max_retries)
+                console.print("[bold green]✓ Infrahub is ready![/bold green]\n")
+                return
+            progress.update(bar, advance=1)
+            time.sleep(sleep_time)
+
+    console.print()
+    console.print(
+        Panel(
+            f"[red]✗ ERROR: Infrahub at {address} is not responding[/red]\n\n"
+            "[dim]Please ensure Infrahub is running with:[/dim]\n"
+            "  [bold]uv run invoke start[/bold]\n\n"
+            "[dim]Check container status with:[/dim]\n"
+            "  [bold]docker ps[/bold]",
+            title="Connection Error",
+            border_style="red",
+            box=box.SIMPLE,
+        )
+    )
+    raise Exit(code=1)
+
+
 @task
 def info(c: Context) -> None:
     """Show the current demo configuration."""
@@ -386,6 +467,8 @@ def bootstrap(c: Context) -> None:
     paths = _dataset_files(INFRAHUB_DATASET)
     _banner(f"invoke bootstrap (dataset: {INFRAHUB_DATASET})", border="cyan")
 
+    _wait_for_infrahub()
+
     _step("Loading schemas")
     c.run("uv run infrahubctl schema load schemas/", pty=True)
     _success("Schemas loaded")
@@ -444,7 +527,11 @@ def bootstrap(c: Context) -> None:
     _success("All artifacts ready")
 
     console.print()
-    _banner("Bootstrap complete", border="green")
+    _banner(
+        "Bootstrap complete",
+        body="[dim]Demo adding a PE router:[/dim] uv run invoke demo-add-device",
+        border="green",
+    )
 
 
 @task(name="init")
@@ -477,10 +564,64 @@ def init_demo(c: Context) -> None:
                 if INFRAHUB_SERVICE_CATALOG
                 else ""
             )
-            + "[dim]Try:[/dim] uv run invoke info"
+            + "[dim]Try:[/dim] uv run invoke info\n"
+            + "[dim]Demo adding a PE router:[/dim] uv run invoke demo-add-device"
         ),
         border="green",
     )
+
+
+@task(
+    name="demo-add-device",
+    help={
+        "name": "New PE name (default: the next free pe-NN, pe-09 on the financial dataset)",
+        "uplinks": "Comma-separated existing PEs to link to, 2 to 4 (default: the first two PEs)",
+        "platform": "Platform of the new PE (default: arista_eos, which the lab can boot)",
+        "site": "Site shortname (default: the first uplink's site)",
+        "device_type": "Device type (default: the first uplink's device type)",
+        "branch": "Branch to create (default: backbone/add-pe-<name>-<random suffix>)",
+    },
+)
+def demo_add_device(
+    c: Context,
+    name: str = "",
+    uplinks: str = "",
+    platform: str = "",
+    site: str = "",
+    device_type: str = "",
+    branch: str = "",
+) -> None:
+    """Add a PE router on a new branch and open a proposed change into main.
+
+    The command-line version of the service catalog's Add PE page, step for
+    step: branch, onboarding request, PE generator, artifacts, proposed change.
+    It prints the proposed change's link and the ``lab.deploy --branch``
+    command that boots the change in containerlab before it is merged.
+
+    Args:
+        c: Invoke context.
+        name: New PE name; empty means the next free ``pe-NN``.
+        uplinks: Comma-separated uplink PE names; empty means the first two PEs.
+        platform: Platform name; empty means ``arista_eos``.
+        site: Site shortname; empty means the first uplink's site.
+        device_type: Device type name; empty means the first uplink's.
+        branch: Branch to create; empty means a generated name.
+    """
+    _banner(
+        "invoke demo-add-device",
+        body="[bold]Add a PE router to the MPLS backbone as a proposed change[/bold]",
+        border="cyan",
+    )
+    options = {
+        "--name": name,
+        "--uplinks": uplinks,
+        "--platform": platform,
+        "--site": site,
+        "--device-type": device_type,
+        "--branch": branch,
+    }
+    args = "".join(f" {flag} {shlex.quote(value)}" for flag, value in options.items() if value)
+    c.run(f"uv run python scripts/demo_add_pe.py{args}", pty=True)
 
 
 @task(name="lint-ruff")
@@ -572,7 +713,9 @@ def test_integration(c: Context, tier: str = "core") -> None:
     _banner(f"invoke test-integration --tier {tier}", border="cyan")
     # `core` deselects the `extended` tests -- see issue #111.
     marker = "" if tier == "full" else ' -m "not extended"'
-    c.run(f"uv run pytest tests/integration{marker}", pty=True)
+    # -v names every step in the CI log, so a reviewer can see the proposed-change
+    # and merge steps actually ran rather than counting dots.
+    c.run(f"uv run pytest -v tests/integration{marker}", pty=True)
     _success(f"Integration tests passed ({tier})")
 
 
@@ -719,15 +862,22 @@ def _resolve_ceos_image() -> str:
     return os.environ.get("CEOS_IMAGE") or CEOS_IMAGE_DEFAULT
 
 
-def _fetch_artifact(c: Context, artifact_name: str, dest: Path) -> None:
+def _fetch_artifact(c: Context, artifact_name: str, dest: Path, branch: str = "") -> None:
     """Download the latest artifact content into ``dest``.
 
     Infrahub serves rendered artifacts from ``/api/storage/object/<id>``.
     ``scripts/fetch_artifact.py`` resolves the artifact name to a
     ``storage_id`` and streams the bytes to stdout, which we redirect.
+
+    Args:
+        c: Invoke context.
+        artifact_name: ``CoreArtifact`` name to fetch.
+        dest: File to write the artifact content to.
+        branch: Infrahub branch to read the artifact from; empty means main.
     """
+    branch_arg = f" --branch {shlex.quote(branch)}" if branch else ""
     c.run(
-        f"uv run python scripts/fetch_artifact.py {shlex.quote(artifact_name)} "
+        f"uv run python scripts/fetch_artifact.py {shlex.quote(artifact_name)}{branch_arg} "
         f"> {shlex.quote(str(dest))}",
         pty=False,
     )
@@ -770,10 +920,28 @@ def _report_stalled_deploy(c: Context, lab_name: str, ceos_image: str) -> None:
 lab = Collection("lab")
 
 
-@task(name="deploy")
-def lab_deploy(c: Context) -> None:
-    """Fetch the clab topology artifact + per-PE configs, then deploy."""
-    _banner("invoke lab.deploy", border="cyan")
+@task(
+    name="deploy",
+    help={
+        "branch": "Infrahub branch to deploy from, for example a proposed change's source "
+        "branch (default: main)",
+    },
+)
+def lab_deploy(c: Context, branch: str = "") -> None:
+    """Fetch the clab topology artifact + per-PE configs, then deploy.
+
+    Args:
+        c: Invoke context.
+        branch: Infrahub branch whose artifacts to render and deploy. Empty
+            means the SDK's default branch, normally ``main``. Pass a proposed
+            change's source branch to boot the change in the lab before merging.
+    """
+    branch_arg = f" --branch {shlex.quote(branch)}" if branch else ""
+    _banner(
+        "invoke lab.deploy",
+        body=f"[dim]Infrahub branch:[/dim] {branch or 'main'}",
+        border="cyan",
+    )
     # Before anything else: a host that cannot boot cEOS should find out now,
     # not after re-rendering artifacts and waiting out twelve dying nodes.
     _assert_ceos_runnable(platform.machine(), allow_override=LAB_ALLOW_UNSUPPORTED_ARCH)
@@ -784,14 +952,15 @@ def lab_deploy(c: Context) -> None:
     # `regenerate_artifacts.py` run before the artifact you fetch picks
     # up the new content — easy to forget.
     _step("Regenerating artifacts (template fixes are picked up here)")
-    c.run("uv run python scripts/regenerate_artifacts.py", pty=True)
+    c.run(f"uv run python scripts/regenerate_artifacts.py{branch_arg}", pty=True)
     _success("Artifacts re-rendered")
     _step(f"Fetching clab-mpls-topology → {LAB_TOPO.relative_to(REPO_ROOT)}")
-    _fetch_artifact(c, "clab-mpls-topology", LAB_TOPO)
+    _fetch_artifact(c, "clab-mpls-topology", LAB_TOPO, branch=branch)
     _success("Topology artifact fetched")
     _step(f"Fetching per-PE startup configs → {LAB_DEVICES_DIR.relative_to(REPO_ROOT)}/")
     c.run(
-        f"uv run python scripts/fetch_lab_configs.py --out-dir {shlex.quote(str(LAB_DEVICES_DIR))}",
+        f"uv run python scripts/fetch_lab_configs.py "
+        f"--out-dir {shlex.quote(str(LAB_DEVICES_DIR))}{branch_arg}",
         pty=True,
     )
     _success("Per-PE configs fetched")
@@ -938,6 +1107,7 @@ ns.add_task(start)
 ns.add_task(destroy)
 ns.add_task(bootstrap)
 ns.add_task(init_demo)
+ns.add_task(demo_add_device)
 ns.add_task(lint_markdown)
 ns.add_task(lint_yaml)
 ns.add_task(lint_ruff)

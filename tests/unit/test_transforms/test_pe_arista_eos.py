@@ -206,17 +206,26 @@ async def test_route_target_is_under_router_bgp_not_vrf_instance() -> None:
 
 
 @pytest.mark.asyncio
-async def test_global_mpls_enable_and_ldp_interfaces() -> None:
-    """Without global `mpls ip` plus per-interface `mpls ldp interface`
-    declarations, LDP adjacencies never form on cEOS — the section looks
-    configured but does nothing. Locks both in.
+async def test_global_mpls_enable_and_ldp_is_not_shut_down() -> None:
+    """LDP needs global `mpls ip` and a `no shutdown` that EOS applies to LDP.
+
+    EOS has no `interface` sub-command under `mpls ldp`: an `interface X` line
+    there switches to interface X's config mode, so a `no shutdown` after it
+    never reaches LDP, which stays shut down. On a live lab that left every PE
+    with no LDP sessions and every remote VPN route unresolved. The LDP block
+    must therefore hold no `interface` line, and `no shutdown` must be in it.
     """
     rendered = await PeAristaEos.__new__(PeAristaEos).transform(FIXTURE)
     assert "\nmpls ip\n" in rendered
-    assert "transport-address interface Loopback0" in rendered
-    ldp_block = rendered.split("mpls ldp\n")[1].split("\n!", 1)[0]
-    assert "interface Loopback0" in ldp_block
-    assert "interface Ethernet1" in ldp_block
+    ldp_block = rendered.split("\nmpls ldp\n")[1].split("\n!", 1)[0]
+    assert "transport-address interface Loopback0" in ldp_block
+    assert "no shutdown" in ldp_block
+    assert not [line for line in ldp_block.splitlines() if line.strip().startswith("interface ")], (
+        f"`interface` lines inside `mpls ldp` stop `no shutdown` reaching LDP:\n{ldp_block}"
+    )
+    # LDP runs on a core interface because the interface itself has `mpls ip`.
+    ethernet1 = rendered.split("\ninterface Ethernet1\n", 1)[1].split("\n!", 1)[0]
+    assert "mpls ip" in ethernet1
 
 
 @pytest.mark.asyncio
@@ -260,6 +269,18 @@ async def test_pe_ce_neighbor_uses_the_site_asn_override() -> None:
     fixture = pe_fixture_with_site("pe-lon-arista", "10.0.0.1/32", "49.0001.0100.0000.0001.00")
     rendered = await PeAristaEos.__new__(PeAristaEos).transform(fixture)
     assert "neighbor 10.100.0.2 remote-as 65501" in rendered
+
+
+@pytest.mark.asyncio
+async def test_pe_ce_neighbor_overrides_the_customer_as() -> None:
+    """Two sites of one VPN can share a customer AS (the financial dataset does).
+
+    Without as-override the PE never sends one site's routes to the other,
+    because their AS path already holds the receiving CE's AS.
+    """
+    fixture = pe_fixture_with_site("pe-lon-arista", "10.0.0.1/32", "49.0001.0100.0000.0001.00")
+    rendered = await PeAristaEos.__new__(PeAristaEos).transform(fixture)
+    assert "neighbor 10.100.0.2 as-path remote-as replace out" in rendered
 
 
 @pytest.mark.asyncio

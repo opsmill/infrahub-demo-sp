@@ -80,13 +80,19 @@ router isis 1
    addressing on the core interfaces. #}
    address-family ipv4 unicast
 !
+{# No `interface` lines here. EOS has no per-interface sub-command under
+   `mpls ldp`: `interface X` leaves the LDP block for interface X's own config
+   mode, so the `no shutdown` after it shut nothing but that interface and LDP
+   stayed in its default shutdown state on every PE. LDP runs on each core
+   interface because the interface carries `mpls ip` (rendered above).
+   Observed on a 9-PE containerlab lab on cEOS-lab 4.36.0.1F: with the
+   `interface` lines, `show mpls ldp neighbor` printed "LDP is not enabled" on
+   every PE. With the block reduced to the lines below, each core link formed
+   an LDP session (state `oper`) and `ping mpls ldp` to remote loopbacks
+   succeeded. #}
 mpls ldp
    router-id {{ ldp.router_id.value }}
    transport-address interface Loopback0
-   interface Loopback0
-   {% for iface in device.interfaces.edges if iface.node.role.value == 'core' %}
-   interface {{ iface.node.name.value }}
-   {% endfor %}
    no shutdown
 !
 {# Per-VRF instances #}
@@ -147,6 +153,10 @@ router bgp {{ device.asn.node.asn.value }}
 {% for s in sites if s.node.l3vpn.node.name.value == vpn.name.value %}
 {% if s.node.routing_protocol.value == 'ebgp' %}
       neighbor {{ m.ip_only(s.node.ce_address.node.address.value) }} remote-as {{ m.peer_asn(s.node) }}
+      ! as-override: sites of one VPN can share a customer AS. Without this
+      ! the PE never advertises one site's routes to another, because their
+      ! AS path already holds the receiving CE's AS.
+      neighbor {{ m.ip_only(s.node.ce_address.node.address.value) }} as-path remote-as replace out
 {% elif s.node.routing_protocol.value == 'static' %}
 {% for sr in s.node.static_routes.value or [] %}
       ! static route: {{ sr.prefix }} via {{ sr.next_hop }}

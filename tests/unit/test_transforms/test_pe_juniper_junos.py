@@ -113,3 +113,13 @@ async def test_ce_peer_as_is_per_neighbor_not_group_level() -> None:
     assert "                    peer-as " not in ce_group.split("neighbor", 1)[0], (
         "peer-as must be nested inside each neighbor {} block, not at group ce level."
     )
+
+
+@pytest.mark.asyncio
+async def test_ce_neighbor_overrides_the_customer_as() -> None:
+    """Two sites of one VPN can share a customer AS; each CE neighbor needs as-override."""
+    rendered = await PeJuniperJunos.__new__(PeJuniperJunos).transform(
+        pe_fixture_with_site("pe-ams-juniper", "10.0.0.3/32", "49.0001.0100.0000.0003.00")
+    )
+    neighbor = rendered.split("neighbor 10.100.0.2 {", 1)[1].split("}", 1)[0]
+    assert "as-override;" in neighbor

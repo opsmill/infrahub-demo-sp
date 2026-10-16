@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from scripts import regenerate_artifacts
 
 
@@ -26,16 +24,6 @@ def _artifact(id_: str, name: str, status: str) -> MagicMock:
     return a
 
 
-@pytest.fixture
-def fake_response() -> MagicMock:
-    """A context-manager-friendly response object for urllib.urlopen."""
-    resp = MagicMock()
-    resp.__enter__ = MagicMock(return_value=resp)
-    resp.__exit__ = MagicMock(return_value=False)
-    resp.read = MagicMock(return_value=b"")
-    return resp
-
-
 def test_no_definitions_returns_zero(capsys) -> None:
     """A repo with no artifact definitions should exit successfully without polling."""
     client = MagicMock()
@@ -46,22 +34,20 @@ def test_no_definitions_returns_zero(capsys) -> None:
     assert "nothing to regenerate" in capsys.readouterr().out.lower()
 
 
-def test_trigger_generate_posts_with_api_key(fake_response: MagicMock) -> None:
-    """The trigger request must carry X-INFRAHUB-KEY so Infrahub authorizes it."""
+def test_trigger_generate_posts_through_the_client() -> None:
+    """The POST goes through the SDK client, which adds credentials and a timeout.
+
+    A bare urllib call had neither: no timeout, so one slow render blocked the
+    caller, and a `KeyError` when INFRAHUB_API_TOKEN was not exported.
+    """
     client = MagicMock()
     client.address = "http://localhost:8000"
-    with (
-        patch.dict("os.environ", {"INFRAHUB_API_TOKEN": "test-token"}, clear=False),
-        patch(
-            "scripts.regenerate_artifacts.urllib.request.urlopen",
-            return_value=fake_response,
-        ) as urlopen,
-    ):
-        regenerate_artifacts._trigger_generate(client, "def-1")
-    request = urlopen.call_args.args[0]
-    assert request.full_url.endswith("/api/artifact/generate/def-1")
-    assert request.headers["X-infrahub-key"] == "test-token"
-    assert request.get_method() == "POST"
+    regenerate_artifacts._trigger_generate(client, "def-1", "main")
+    client._post.assert_called_once_with(
+        url="http://localhost:8000/api/artifact/generate/def-1?branch=main",
+        payload={"nodes": []},
+    )
+    client._post.return_value.raise_for_status.assert_called_once_with()
 
 
 def test_delete_existing_artifacts_calls_graphql_delete_per_row() -> None:
@@ -81,10 +67,11 @@ def test_delete_existing_artifacts_calls_graphql_delete_per_row() -> None:
     client.filters.assert_called_once_with(kind="CoreArtifact", definition__ids=["def-99"])
 
 
-def test_main_happy_path_returns_zero_when_all_ready(fake_response: MagicMock, capsys) -> None:
+def test_main_happy_path_returns_zero_when_all_ready(capsys) -> None:
     """Two definitions, delete stale, trigger, all artifacts Ready on first poll → rc 0."""
     client = MagicMock()
     client.address = "http://localhost:8000"
+    client.default_branch = "main"
     defs = [_definition("d-1", "pe-arista-eos"), _definition("d-2", "pe-cisco-iosxr")]
     # `.all()` is called for definitions first, then for artifacts during the poll.
     client.all = MagicMock(
@@ -105,8 +92,6 @@ def test_main_happy_path_returns_zero_when_all_ready(fake_response: MagicMock, c
 
     with (
         patch.object(regenerate_artifacts, "InfrahubClientSync", return_value=client),
-        patch.dict("os.environ", {"INFRAHUB_API_TOKEN": "tok"}, clear=False),
-        patch("scripts.regenerate_artifacts.urllib.request.urlopen", return_value=fake_response),
         patch("scripts.regenerate_artifacts.time.sleep"),
         # First monotonic call sets the deadline; the loop polls once and finds Ready.
         patch("scripts.regenerate_artifacts.time.monotonic", side_effect=[0.0, 0.1, 0.2]),
@@ -120,10 +105,11 @@ def test_main_happy_path_returns_zero_when_all_ready(fake_response: MagicMock, c
     assert "All 2 artifacts Ready" in out
 
 
-def test_main_times_out_when_artifact_stuck_non_ready(fake_response: MagicMock, capsys) -> None:
+def test_main_times_out_when_artifact_stuck_non_ready(capsys) -> None:
     """If polling never sees all-Ready before the deadline, exit non-zero with detail."""
     client = MagicMock()
     client.address = "http://localhost:8000"
+    client.default_branch = "main"
     defs = [_definition("d-1", "pe-arista-eos")]
     error_art = _artifact("a-1", "pe-arista-eos", "Error")
     # First .all() returns definitions; every subsequent .all() returns stuck artifacts.
@@ -136,8 +122,6 @@ def test_main_times_out_when_artifact_stuck_non_ready(fake_response: MagicMock, 
 
     with (
         patch.object(regenerate_artifacts, "InfrahubClientSync", return_value=client),
-        patch.dict("os.environ", {"INFRAHUB_API_TOKEN": "tok"}, clear=False),
-        patch("scripts.regenerate_artifacts.urllib.request.urlopen", return_value=fake_response),
         patch("scripts.regenerate_artifacts.time.sleep"),
         patch(
             "scripts.regenerate_artifacts.time.monotonic",
@@ -150,3 +134,68 @@ def test_main_times_out_when_artifact_stuck_non_ready(fake_response: MagicMock, 
     err = capsys.readouterr().err
     assert "Timed out" in err
     assert "pe-arista-eos" in err
+
+
+def test_trigger_generate_names_the_branch_in_the_url() -> None:
+    """The generate endpoint renders on main unless `?branch=` says otherwise.
+
+    The client's default branch never reaches this call. Without the
+    parameter, a run against a proposed change's branch deleted that branch's
+    artifacts and then rendered main's. Branch names carry `/`, so it is encoded.
+    """
+    client = MagicMock()
+    client.address = "http://localhost:8000"
+    regenerate_artifacts._trigger_generate(client, "def-1", "backbone/add-pe-pe-09-1234")
+    assert client._post.call_args.kwargs["url"] == (
+        "http://localhost:8000/api/artifact/generate/def-1?branch=backbone%2Fadd-pe-pe-09-1234"
+    )
+
+
+def test_main_branch_flag_reads_and_renders_on_that_branch() -> None:
+    """`--branch` sets the client's default branch and the branch on every generate call."""
+    client = MagicMock()
+    client.address = "http://localhost:8000"
+    client.all = MagicMock(
+        side_effect=[[_definition("d-1", "pe-arista-eos")], [_artifact("a-1", "x", "Ready")]]
+    )
+    client.filters = MagicMock(return_value=[_artifact("a-1", "x", "Ready")])
+
+    with (
+        patch.object(regenerate_artifacts, "InfrahubClientSync", return_value=client) as ctor,
+        patch("scripts.regenerate_artifacts.time.sleep"),
+        patch("scripts.regenerate_artifacts.time.monotonic", side_effect=[0.0, 0.1, 0.2]),
+    ):
+        rc = regenerate_artifacts.main(["--branch", "feature-x"])
+
+    assert rc == 0
+    assert ctor.call_args.kwargs["config"].default_branch == "feature-x"
+    assert client._post.call_args.kwargs["url"].endswith(
+        "/api/artifact/generate/d-1?branch=feature-x"
+    )
+
+
+def test_main_without_branch_flag_uses_the_client_default_branch() -> None:
+    """With no `--branch`, the URL follows the client's default branch.
+
+    That default is main unless INFRAHUB_DEFAULT_BRANCH is exported, and an
+    exported branch has to reach the generate call too.
+    """
+    client = MagicMock()
+    client.address = "http://localhost:8000"
+    client.default_branch = "from-env"
+    client.all = MagicMock(
+        side_effect=[[_definition("d-1", "pe-arista-eos")], [_artifact("a-1", "x", "Ready")]]
+    )
+    client.filters = MagicMock(return_value=[_artifact("a-1", "x", "Ready")])
+
+    with (
+        patch.object(regenerate_artifacts, "InfrahubClientSync", return_value=client) as ctor,
+        patch("scripts.regenerate_artifacts.time.sleep"),
+        patch("scripts.regenerate_artifacts.time.monotonic", side_effect=[0.0, 0.1, 0.2]),
+    ):
+        regenerate_artifacts.main()
+
+    ctor.assert_called_once_with()
+    assert client._post.call_args.kwargs["url"].endswith(
+        "/api/artifact/generate/d-1?branch=from-env"
+    )

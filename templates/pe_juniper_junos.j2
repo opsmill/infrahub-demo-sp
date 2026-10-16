@@ -137,6 +137,9 @@ routing-instances {
                        multiple CEs at different ASNs. */
                     neighbor {{ m.ip_only(s.node.ce_address.node.address.value) }} {
                         peer-as {{ m.peer_asn(s.node) }};
+                        /* Sites of one VPN can share a customer AS; see
+                           pe_arista_eos.j2. */
+                        as-override;
                     }
 {% endif %}
 {% endfor %}
