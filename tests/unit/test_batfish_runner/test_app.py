@@ -93,6 +93,18 @@ def test_check_batfish_unreachable_returns_503(client) -> None:  # type: ignore[
     assert "unreachable" in resp.get_json()["error"]
 
 
+def test_check_opens_session_on_batfish_port(client, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("BATFISH_PORT", "8080")
+    with (
+        patch("batfish_runner.app.wait_for_batfish", return_value=True),
+        patch("pybatfish.client.session.Session") as session_cls,
+        patch("batfish_runner.app.run_snapshot", return_value=[]),
+    ):
+        resp = client.post("/check", json={"configs": {"pe1": "! pe1\n"}})
+    assert resp.status_code == 200
+    session_cls.assert_called_once_with(host="batfish", port=8080)
+
+
 def test_check_rejects_empty_configs(client) -> None:  # type: ignore[no-untyped-def]
     resp = client.post("/check", json={"configs": {}})
     assert resp.status_code == 400
