@@ -73,30 +73,43 @@ def test_wait_for_generator_times_out_with_helpful_message() -> None:
         run_generator._wait_for_generator(client, "generate_l3vpn")
 
 
+def _graphql(*task_states: str, ok: bool = True) -> MagicMock:
+    """Mock ``execute_graphql``: the run mutation, then one task query per state."""
+    started = {"CoreGeneratorDefinitionRun": {"ok": ok, "task": {"id": "task-1"} if ok else None}}
+    polls = [{"InfrahubTask": {"edges": [{"node": {"state": s}}]}} for s in task_states]
+    return MagicMock(side_effect=[started, *polls])
+
+
 def test_main_returns_zero_on_successful_run(capsys) -> None:
-    """Successful mutation reports ok=True; main exits 0 with a completion line."""
+    """The run starts without waiting, its task is polled until COMPLETED, then main exits 0."""
     client = MagicMock()
     gen = MagicMock(id="gen-3")
     client.get = MagicMock(return_value=gen)
-    client.execute_graphql = MagicMock(return_value={"CoreGeneratorDefinitionRun": {"ok": True}})
+    client.execute_graphql = _graphql("PENDING", "RUNNING", "COMPLETED")
 
     with (
         patch.object(run_generator, "InfrahubClientSync", return_value=client),
         patch("scripts.run_generator.sys.argv", ["run_generator.py", "generate_l3vpn"]),
+        patch("scripts.run_generator.time.sleep") as sleep,
     ):
         rc = run_generator.main()
 
     assert rc == 0
     assert "Generator 'generate_l3vpn' run completed" in capsys.readouterr().out
-    # The mutation must pass the generator's id, not its name.
-    assert client.execute_graphql.call_args.kwargs["variables"] == {"id": "gen-3"}
+    calls = client.execute_graphql.call_args_list
+    # The mutation must pass the generator's id, not its name, and must not hold the request open.
+    assert calls[0].kwargs["variables"] == {"id": "gen-3"}
+    assert "wait_until_completion: false" in calls[0].args[0]
+    assert calls[1].kwargs["variables"] == {"ids": ["task-1"]}
+    assert len(calls) == 4
+    assert sleep.call_count == 2
 
 
 def test_main_returns_nonzero_when_run_not_ok(capsys) -> None:
     """A mutation that returns ok=False → exit non-zero with the raw response logged."""
     client = MagicMock()
     client.get = MagicMock(return_value=MagicMock(id="gen-4"))
-    client.execute_graphql = MagicMock(return_value={"CoreGeneratorDefinitionRun": {"ok": False}})
+    client.execute_graphql = _graphql(ok=False)
 
     with (
         patch.object(run_generator, "InfrahubClientSync", return_value=client),
@@ -106,3 +119,41 @@ def test_main_returns_nonzero_when_run_not_ok(capsys) -> None:
 
     assert rc == 1
     assert "did not report ok" in capsys.readouterr().err
+
+
+def test_main_returns_nonzero_when_the_task_fails(capsys) -> None:
+    """A run whose task ends FAILED exits non-zero and says where the traceback is."""
+    client = MagicMock()
+    client.get = MagicMock(return_value=MagicMock(id="gen-5"))
+    client.execute_graphql = _graphql("RUNNING", "FAILED")
+
+    with (
+        patch.object(run_generator, "InfrahubClientSync", return_value=client),
+        patch("scripts.run_generator.sys.argv", ["run_generator.py", "generate_sdwan"]),
+        patch("scripts.run_generator.time.sleep"),
+    ):
+        rc = run_generator.main()
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "run ended FAILED" in err
+    assert "task-worker" in err
+
+
+def test_wait_for_task_gives_up_after_the_timeout() -> None:
+    """A task that never ends returns its last state once the deadline passes."""
+    client = MagicMock()
+    client.execute_graphql = MagicMock(
+        return_value={"InfrahubTask": {"edges": [{"node": {"state": "RUNNING"}}]}}
+    )
+    monotonic_values = iter([0.0, 1.0, 999_999.0])
+
+    with (
+        patch("scripts.run_generator.time.sleep"),
+        patch(
+            "scripts.run_generator.time.monotonic",
+            side_effect=lambda: next(monotonic_values, 1_000_000.0),
+        ),
+    ):
+        assert run_generator._wait_for_task(client, "task-1") == "RUNNING"
+    assert client.execute_graphql.call_count == 2

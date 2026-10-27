@@ -22,6 +22,12 @@ from infrahub_sdk.exceptions import GraphQLError, NodeNotFoundError
 
 SYNC_TIMEOUT_SECONDS = 120
 SYNC_POLL_INTERVAL_SECONDS = 3
+# The run is started without waiting, then its task is polled: one request held open for the
+# whole run hit the SDK's 60-second client timeout, and Cloudflare, in front of the public
+# sandboxes, ends a request after 100 seconds.
+RUN_TIMEOUT_SECONDS = 600
+RUN_POLL_INTERVAL_SECONDS = 3
+FINAL_TASK_STATES = {"COMPLETED", "FAILED", "CANCELLED", "CRASHED"}
 
 _FAILURE_HINT = """
 The generator's traceback is server-side. To see it:
@@ -64,6 +70,28 @@ def _wait_for_generator(client: InfrahubClientSync, name: str) -> object:
             time.sleep(SYNC_POLL_INTERVAL_SECONDS)
 
 
+def _wait_for_task(client: InfrahubClientSync, task_id: str) -> str:
+    """Poll the generator run's task until it ends, and return its final state.
+
+    Returns:
+        The task state: ``COMPLETED`` on success, another final state on
+        failure, or the last state seen when the run outlasts the timeout.
+    """
+    deadline = time.monotonic() + RUN_TIMEOUT_SECONDS
+    state = "PENDING"
+    while True:
+        response = client.execute_graphql(
+            "query Task($ids: [String]) { InfrahubTask(ids: $ids) { edges { node { state } } } }",
+            variables={"ids": [task_id]},
+        )
+        edges = response["InfrahubTask"]["edges"]
+        if edges:
+            state = edges[0]["node"]["state"]
+        if state in FINAL_TASK_STATES or time.monotonic() >= deadline:
+            return state
+        time.sleep(RUN_POLL_INTERVAL_SECONDS)
+
+
 def main() -> int:
     """Trigger a generator by name and wait for completion.
 
@@ -81,22 +109,27 @@ def main() -> int:
         response = client.execute_graphql(
             """
             mutation Run($id: String!) {
-              CoreGeneratorDefinitionRun(data: { id: $id }, wait_until_completion: true) {
+              CoreGeneratorDefinitionRun(data: { id: $id }, wait_until_completion: false) {
                 ok
+                task { id }
               }
             }
             """,
             variables={"id": generator.id},
         )
     except GraphQLError as exc:
-        # The server reports only "One or more generators failed" — the real
-        # traceback stays in the task worker. Say where to find it, and name
-        # the usual cause, rather than re-raising an opaque stack trace.
-        print(f"Generator {args.name!r} failed server-side: {exc}", file=sys.stderr)
-        print(_FAILURE_HINT, file=sys.stderr)
+        print(f"Generator {args.name!r} could not start: {exc}", file=sys.stderr)
         return 1
-    if not response.get("CoreGeneratorDefinitionRun", {}).get("ok"):
+    run = response.get("CoreGeneratorDefinitionRun") or {}
+    if not run.get("ok") or not run.get("task"):
         print(f"Generator {args.name!r} run did not report ok: {response}", file=sys.stderr)
+        return 1
+    state = _wait_for_task(client, run["task"]["id"])
+    if state != "COMPLETED":
+        # The task holds only a state: the real traceback stays in the task
+        # worker. Say where to find it, and name the usual cause.
+        print(f"Generator {args.name!r} run ended {state}.", file=sys.stderr)
+        print(_FAILURE_HINT, file=sys.stderr)
         return 1
     print(f"Generator {args.name!r} run completed.")
     return 0

@@ -36,6 +36,9 @@ INFRAHUB_DATASET = os.getenv("INFRAHUB_DATASET", "financial")
 # Git ref the server clones for transforms/generators/checks. Defaults to the
 # branch you have checked out, NOT to `main` — see _github_repo_ref.
 INFRAHUB_REPO_REF = os.getenv("INFRAHUB_REPO_REF", "")
+# Repository the server clones when INFRAHUB_GIT_LOCAL is off. Empty keeps the
+# location in objects/git-repo/github.yml (the opsmill repository); a fork sets its own.
+INFRAHUB_REPO_URL = os.getenv("INFRAHUB_REPO_URL", "")
 INFRAHUB_ENTERPRISE = os.getenv("INFRAHUB_ENTERPRISE", "false").lower() == "true"
 LOCAL_COMPOSE_FILE = REPO_ROOT / "docker-compose.yml"
 OVERRIDE_FILE = REPO_ROOT / "docker-compose.override.yml"
@@ -192,14 +195,15 @@ def _infrahub_is_ready(address: str) -> bool:
 
     ``docker compose up -d`` returns once containers have started, before the
     server inside is listening, so a connection error here means "not yet".
-    Same endpoint as ``check_infrahub_ready`` in infrahub-demo-dc.
+    Same endpoint and library as ``check_infrahub_ready`` in infrahub-demo-dc.
+    ``requests``, not ``urllib``: Cloudflare, in front of the public sandboxes,
+    answers 403 to urllib's default user agent.
     """
-    import urllib.request
+    import requests
 
     try:
-        with urllib.request.urlopen(f"{address}/api/schema", timeout=2) as resp:
-            return bool(resp.status == 200)
-    except Exception:
+        return requests.get(f"{address}/api/schema", timeout=2).status_code == 200
+    except requests.RequestException:
         return False
 
 
@@ -384,6 +388,8 @@ def _render_repo_file(c: Context, ref: str) -> Path:
     # CoreRepository calls it `default_branch`; CoreReadOnlyRepository, `ref`.
     key = "default_branch" if INFRAHUB_GIT_LOCAL else "ref"
     spec["spec"]["data"][0][key] = ref
+    if INFRAHUB_REPO_URL and not INFRAHUB_GIT_LOCAL:
+        spec["spec"]["data"][0]["location"] = INFRAHUB_REPO_URL
     RENDERED_REPO_FILE.parent.mkdir(parents=True, exist_ok=True)
     RENDERED_REPO_FILE.write_text(yaml.safe_dump(spec, sort_keys=False))
 
@@ -532,6 +538,22 @@ def bootstrap(c: Context) -> None:
         body="[dim]Demo adding a PE router:[/dim] uv run invoke demo-add-device",
         border="green",
     )
+
+
+@task(name="sandbox-setup")
+def sandbox_setup(c: Context) -> None:
+    """Build the whole demo on an Infrahub that already runs (the public sandbox entry point).
+
+    The public sandbox pipeline runs this after it deploys an empty Infrahub. It reads
+    only environment variables, starts no container and never calls localhost:
+
+    - ``INFRAHUB_ADDRESS`` and ``INFRAHUB_API_TOKEN``: the Infrahub to build the demo on
+    - ``INFRAHUB_REPO_URL`` and ``INFRAHUB_REPO_REF``: the repository to register
+    - ``INFRAHUB_DATASET``: the dataset to load (default ``financial``)
+
+    It runs the same steps as ``invoke bootstrap``, so running it again gives the same result.
+    """
+    bootstrap(c)
 
 
 @task(name="init")
@@ -1106,6 +1128,7 @@ ns.add_task(info)
 ns.add_task(start)
 ns.add_task(destroy)
 ns.add_task(bootstrap)
+ns.add_task(sandbox_setup)
 ns.add_task(init_demo)
 ns.add_task(demo_add_device)
 ns.add_task(lint_markdown)

@@ -63,6 +63,18 @@ def _delete_existing_artifacts(client: InfrahubClientSync, definition_id: str) -
     return len(arts)
 
 
+def _target_count(client: InfrahubClientSync, definition: object) -> int:
+    """Return how many artifacts ``definition`` renders: one per artifact target in its group.
+
+    The wait below needs this number. Counting the rows deleted before the run
+    is not enough: an artifact that did not exist yet, such as one for a device
+    a generator created moments earlier, is not counted, and the wait ended
+    before Infrahub had rendered it.
+    """
+    group_id = definition.targets.id  # type: ignore[attr-defined]
+    return len(client.filters(kind="CoreArtifactTarget", member_of_groups__ids=[group_id]))
+
+
 def main(argv: list[str] | None = None) -> int:
     """Delete + re-trigger every artifact, then wait for all to be Ready.
 
@@ -103,9 +115,10 @@ def main(argv: list[str] | None = None) -> int:
     expected = 0
     for definition in definitions:
         deleted = _delete_existing_artifacts(client, definition.id)
+        targets = _target_count(client, definition)
         _trigger_generate(client, definition.id, branch)
-        print(f"queued: {definition.name.value} (deleted {deleted} stale)")
-        expected += deleted
+        print(f"queued: {definition.name.value} (deleted {deleted} stale, {targets} expected)")
+        expected += targets
 
     # Give the server a moment to start creating the new artifacts.
     time.sleep(POLL_INTERVAL_SECONDS)
