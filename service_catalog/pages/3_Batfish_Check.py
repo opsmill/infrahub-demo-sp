@@ -274,7 +274,7 @@ if run:
 
     snapshot_name = f"{backbone_name}-{uuid.uuid4().hex[:8]}"
     network = "infrahub-mpls"
-    session = Session(host=host)
+    session = Session(host=host, port=port)
     findings: list[Finding] = []
     with st.status(f"Initializing snapshot `{snapshot_name}` …", expanded=True) as status:
         session.set_network(network)

@@ -122,7 +122,7 @@ def check() -> Any:
 
         try:
             findings = run_snapshot(
-                session=Session(host=host),
+                session=Session(host=host, port=port),
                 snapshot_dir=Path(tmp),
                 network=network,
                 snapshot_name=snapshot_name,
