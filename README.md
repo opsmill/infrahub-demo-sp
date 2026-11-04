@@ -60,6 +60,7 @@ Quick task reference (run via `uv run invoke <name>`):
 | `init` | Destroy + start + bootstrap end-to-end |
 | `start` / `destroy` | Bring Infrahub up / tear it down |
 | `bootstrap` | Load schemas + data into a running Infrahub |
+| `sandbox-setup` | Load the whole demo into an Infrahub that already runs, without starting containers (see the quickstart) |
 | `demo-add-device` | Add a PE router on a new branch and open a proposed change; prints its link |
 | `batfish` | Run `BatfishBackboneCheck` against the live MPLS backbone |
 | `lab.deploy` / `lab.destroy` | Bring the containerlab up / down (`lab.deploy --branch <name>` boots a branch) |

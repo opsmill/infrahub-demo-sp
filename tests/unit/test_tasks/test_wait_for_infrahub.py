@@ -7,9 +7,10 @@ with "Unable to connect to 'http://localhost:8000'".
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 from invoke.exceptions import Exit
 
 from tasks import _infrahub_is_ready, _wait_for_infrahub
@@ -17,8 +18,21 @@ from tasks import _infrahub_is_ready, _wait_for_infrahub
 
 def test_an_unreachable_server_is_not_ready() -> None:
     """A refused connection counts as "not ready yet", not as an error."""
-    with patch("urllib.request.urlopen", side_effect=ConnectionRefusedError):
+    with patch("requests.get", side_effect=requests.ConnectionError):
         assert _infrahub_is_ready("http://localhost:8000") is False
+
+
+def test_a_refused_request_is_not_ready() -> None:
+    """A 403, which Cloudflare sends to clients it blocks, is not taken as ready."""
+    with patch("requests.get", return_value=MagicMock(status_code=403)):
+        assert _infrahub_is_ready("https://sandbox.example") is False
+
+
+def test_a_200_on_the_schema_endpoint_is_ready() -> None:
+    """The API is ready once ``/api/schema`` answers 200."""
+    with patch("requests.get", return_value=MagicMock(status_code=200)) as get:
+        assert _infrahub_is_ready("https://sandbox.example") is True
+    assert get.call_args.args[0] == "https://sandbox.example/api/schema"
 
 
 def test_the_wait_returns_once_the_api_answers() -> None:

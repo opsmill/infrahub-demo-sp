@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.metadata
 import os
 import platform
+import re
 import shlex
 import time
 from pathlib import Path
@@ -36,6 +37,9 @@ INFRAHUB_DATASET = os.getenv("INFRAHUB_DATASET", "financial")
 # Git ref the server clones for transforms/generators/checks. Defaults to the
 # branch you have checked out, NOT to `main` — see _github_repo_ref.
 INFRAHUB_REPO_REF = os.getenv("INFRAHUB_REPO_REF", "")
+# Repository the server clones when INFRAHUB_GIT_LOCAL is off. Empty keeps the
+# location in objects/git-repo/github.yml (the opsmill repository); a fork sets its own.
+INFRAHUB_REPO_URL = os.getenv("INFRAHUB_REPO_URL", "")
 INFRAHUB_ENTERPRISE = os.getenv("INFRAHUB_ENTERPRISE", "false").lower() == "true"
 LOCAL_COMPOSE_FILE = REPO_ROOT / "docker-compose.yml"
 OVERRIDE_FILE = REPO_ROOT / "docker-compose.override.yml"
@@ -192,14 +196,15 @@ def _infrahub_is_ready(address: str) -> bool:
 
     ``docker compose up -d`` returns once containers have started, before the
     server inside is listening, so a connection error here means "not yet".
-    Same endpoint as ``check_infrahub_ready`` in infrahub-demo-dc.
+    Same endpoint and library as ``check_infrahub_ready`` in infrahub-demo-dc.
+    ``requests``, not ``urllib``: Cloudflare, in front of the public sandboxes,
+    answers 403 to urllib's default user agent.
     """
-    import urllib.request
+    import requests
 
     try:
-        with urllib.request.urlopen(f"{address}/api/schema", timeout=2) as resp:
-            return bool(resp.status == 200)
-    except Exception:
+        return requests.get(f"{address}/api/schema", timeout=2).status_code == 200
+    except requests.RequestException:
         return False
 
 
@@ -333,6 +338,10 @@ GIT_REPO_DIR = REPO_ROOT / "objects" / "git-repo"
 RENDERED_REPO_FILE = REPO_ROOT / "lab" / "git-repo.yml"
 
 
+# A full commit hash, SHA-1 or SHA-256. `git ls-remote` lists branches and tags, never commits.
+_COMMIT_HASH = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+
+
 def _repo_ref(c: Context) -> str:
     """Return the git ref the server should read `.infrahub.yml` code from.
 
@@ -368,7 +377,8 @@ def _render_repo_file(c: Context, ref: str) -> Path:
 
     Args:
         c: Invoke context, used to verify the ref is visible to the server.
-        ref: Git ref to pin the repository to.
+        ref: Git ref to pin the repository to: a branch, a tag or, unchecked, a full
+            commit hash.
 
     Returns:
         Path to the rendered object file.
@@ -377,13 +387,16 @@ def _render_repo_file(c: Context, ref: str) -> Path:
         Exit: If the ref is not present on the repository the server will clone.
             A local mount is only warned about, because a stale working tree
             still produces a usable (if outdated) clone; a missing remote ref
-            produces nothing at all.
+            produces nothing at all. A full commit hash is not checked: no remote
+            listing shows commits.
     """
     template = GIT_REPO_DIR / ("local-dev.yml" if INFRAHUB_GIT_LOCAL else "github.yml")
     spec = yaml.safe_load(template.read_text())
     # CoreRepository calls it `default_branch`; CoreReadOnlyRepository, `ref`.
     key = "default_branch" if INFRAHUB_GIT_LOCAL else "ref"
     spec["spec"]["data"][0][key] = ref
+    if INFRAHUB_REPO_URL and not INFRAHUB_GIT_LOCAL:
+        spec["spec"]["data"][0]["location"] = INFRAHUB_REPO_URL
     RENDERED_REPO_FILE.parent.mkdir(parents=True, exist_ok=True)
     RENDERED_REPO_FILE.write_text(yaml.safe_dump(spec, sort_keys=False))
 
@@ -403,8 +416,13 @@ def _render_repo_file(c: Context, ref: str) -> Path:
         # on a fork those differ, so probing `origin` reports a branch that is
         # present on the fork but absent from the repository being registered.
         location = spec["spec"]["data"][0]["location"]
+        if _COMMIT_HASH.fullmatch(ref):
+            # No remote listing shows a commit, so it cannot be probed. A commit that the
+            # server cannot fetch fails at the repository sync instead.
+            _wait(f"Ref '{ref}' is a commit: not checked on {location}")
+            return RENDERED_REPO_FILE
         probe = c.run(
-            f"git ls-remote --exit-code --heads {shlex.quote(location)} {shlex.quote(ref)}",
+            f"git ls-remote --exit-code --heads --tags {shlex.quote(location)} {shlex.quote(ref)}",
             hide=True,
             warn=True,
         )
@@ -419,9 +437,9 @@ def _render_repo_file(c: Context, ref: str) -> Path:
             # Exit message out verbatim, so Rich markup would reach the terminal
             # as literal "[red]" text.
             _error(
-                f"Ref '{ref}' is not on {location} — the server clones that URL over HTTPS "
-                f"and will not find it, so no transforms, generators or checks would be "
-                f"registered.\n"
+                f"Ref '{ref}' is not a branch or tag on {location} — the server clones that "
+                f"URL over HTTPS and will not find it, so no transforms, generators or "
+                f"checks would be registered.\n"
                 f"Push the branch there, set INFRAHUB_REPO_REF to a ref that exists, or set "
                 f"INFRAHUB_GIT_LOCAL=true to mount the working tree instead."
             )
@@ -532,6 +550,23 @@ def bootstrap(c: Context) -> None:
         body="[dim]Demo adding a PE router:[/dim] uv run invoke demo-add-device",
         border="green",
     )
+
+
+@task(name="sandbox-setup")
+def sandbox_setup(c: Context) -> None:
+    """Build the whole demo on an Infrahub that already runs (the public sandbox entry point).
+
+    The public sandbox pipeline runs this after it deploys an empty Infrahub. It reads
+    only environment variables and starts no container. It calls no localhost address
+    when ``INFRAHUB_ADDRESS`` is set (the default is localhost):
+
+    - ``INFRAHUB_ADDRESS`` and ``INFRAHUB_API_TOKEN``: the Infrahub to build the demo on
+    - ``INFRAHUB_REPO_URL`` and ``INFRAHUB_REPO_REF``: the repository to register
+    - ``INFRAHUB_DATASET``: the dataset to load (default ``financial``)
+
+    It runs the same steps as ``invoke bootstrap``, so running it again gives the same result.
+    """
+    bootstrap(c)
 
 
 @task(name="init")
@@ -1106,6 +1141,7 @@ ns.add_task(info)
 ns.add_task(start)
 ns.add_task(destroy)
 ns.add_task(bootstrap)
+ns.add_task(sandbox_setup)
 ns.add_task(init_demo)
 ns.add_task(demo_add_device)
 ns.add_task(lint_markdown)

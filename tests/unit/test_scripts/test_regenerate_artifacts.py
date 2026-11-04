@@ -24,6 +24,17 @@ def _artifact(id_: str, name: str, status: str) -> MagicMock:
     return a
 
 
+def _filters(artifacts: dict[str, list[MagicMock]], targets: dict[str, int]) -> MagicMock:
+    """Mock ``client.filters``: artifacts by definition id, artifact targets by group id."""
+
+    def filters(kind: str, **kwargs: list[str]) -> list[MagicMock]:
+        if kind == "CoreArtifact":
+            return artifacts[kwargs["definition__ids"][0]]
+        return [MagicMock() for _ in range(targets[kwargs["member_of_groups__ids"][0]])]
+
+    return MagicMock(side_effect=filters)
+
+
 def test_no_definitions_returns_zero(capsys) -> None:
     """A repo with no artifact definitions should exit successfully without polling."""
     client = MagicMock()
@@ -83,11 +94,14 @@ def test_main_happy_path_returns_zero_when_all_ready(capsys) -> None:
             ],
         ]
     )
-    client.filters = MagicMock(
-        side_effect=[
-            [_artifact("a-1", "pe-arista-eos", "Ready")],
-            [_artifact("a-2", "pe-cisco-iosxr", "Ready")],
-        ]
+    defs[0].targets.id = "g-1"
+    defs[1].targets.id = "g-2"
+    client.filters = _filters(
+        {
+            "d-1": [_artifact("a-1", "pe-arista-eos", "Ready")],
+            "d-2": [_artifact("a-2", "pe-cisco-iosxr", "Ready")],
+        },
+        {"g-1": 1, "g-2": 1},
     )
 
     with (
@@ -102,6 +116,38 @@ def test_main_happy_path_returns_zero_when_all_ready(capsys) -> None:
     out = capsys.readouterr().out
     assert "queued: pe-arista-eos" in out
     assert "queued: pe-cisco-iosxr" in out
+    assert "All 2 artifacts Ready" in out
+
+
+def test_main_waits_for_the_artifacts_that_did_not_exist_before(capsys) -> None:
+    """A target with no artifact yet is waited for, not only the rows that were deleted.
+
+    Seen on a fresh Infrahub: the SD-WAN generator had just created its edge
+    devices, so their artifacts did not exist when this script ran. Counting
+    deleted rows expected 13, found 13 Ready and returned while the 3 SD-WAN
+    artifacts were still being rendered.
+    """
+    client = MagicMock()
+    client.address = "http://localhost:8000"
+    client.default_branch = "main"
+    definition = _definition("d-1", "sdwan-viptela-config")
+    definition.targets.id = "g-1"
+    first = _artifact("a-1", "sdwan-viptela-config", "Ready")
+    second = _artifact("a-2", "sdwan-viptela-config", "Ready")
+    client.all = MagicMock(side_effect=[[definition], [first], [first, second]])
+    client.filters = _filters({"d-1": []}, {"g-1": 2})
+
+    with (
+        patch.object(regenerate_artifacts, "InfrahubClientSync", return_value=client),
+        patch("scripts.regenerate_artifacts.time.sleep"),
+        patch("scripts.regenerate_artifacts.time.monotonic", side_effect=[0.0, 0.1, 0.2, 0.3]),
+    ):
+        rc = regenerate_artifacts.main()
+
+    assert rc == 0
+    assert client.all.call_count == 3
+    out = capsys.readouterr().out
+    assert "(deleted 0 stale, 2 expected)" in out
     assert "All 2 artifacts Ready" in out
 
 
