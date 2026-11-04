@@ -2,10 +2,22 @@
 
 from __future__ import annotations
 
+import http.server
+import threading
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
-from infrahub_sdk.exceptions import NodeNotFoundError
+from infrahub_sdk import Config, InfrahubClientSync
+from infrahub_sdk.exceptions import (
+    AuthenticationError,
+    GraphQLError,
+    JsonDecodeError,
+    NodeNotFoundError,
+    RateLimitError,
+    ServerNotReachableError,
+    ServerNotResponsiveError,
+)
 
 from scripts import run_generator
 
@@ -157,3 +169,137 @@ def test_wait_for_task_gives_up_after_the_timeout() -> None:
     ):
         assert run_generator._wait_for_task(client, "task-1") == "RUNNING"
     assert client.execute_graphql.call_count == 2
+
+
+_COMPLETED = {"InfrahubTask": {"edges": [{"node": {"state": "COMPLETED"}}]}}
+
+# What `execute_graphql` raises when one status request fails on the public sandbox,
+# which runs behind Cloudflare.
+_TRANSIENT_ERRORS = [
+    pytest.param(ServerNotReachableError(address="http://x"), id="connection-refused"),
+    pytest.param(ServerNotResponsiveError(url="http://x", timeout=60), id="read-timeout"),
+    pytest.param(
+        JsonDecodeError(url="http://x", content="error code: 524"), id="502-524-html-body"
+    ),
+    pytest.param(GraphQLError(errors=[{"message": "boom"}]), id="graphql-error"),
+    pytest.param(httpx.RemoteProtocolError("connection dropped"), id="dropped-connection"),
+    pytest.param(RateLimitError(url="http://x", attempts=3), id="rate-limited"),
+    pytest.param(KeyError("data"), id="5xx-json-body-without-data"),
+]
+
+
+@pytest.mark.parametrize("error", _TRANSIENT_ERRORS)
+def test_wait_for_task_keeps_polling_after_a_failed_status_request(error: Exception) -> None:
+    """One failed status request must not stop the wait while the run succeeds on the server."""
+    client = MagicMock()
+    client.execute_graphql = MagicMock(side_effect=[error, _COMPLETED])
+
+    with patch("scripts.run_generator.time.sleep") as sleep:
+        assert run_generator._wait_for_task(client, "task-1") == "COMPLETED"
+
+    assert client.execute_graphql.call_count == 2
+    sleep.assert_called_once()
+
+
+def test_wait_for_task_stops_on_a_refused_login() -> None:
+    """A refused token will not heal by waiting: the error reaches the caller at once."""
+    client = MagicMock()
+    client.execute_graphql = MagicMock(side_effect=AuthenticationError("invalid token"))
+
+    with patch("scripts.run_generator.time.sleep"), pytest.raises(AuthenticationError):
+        run_generator._wait_for_task(client, "task-1")
+
+    client.execute_graphql.assert_called_once()
+
+
+def test_wait_for_task_raises_when_the_state_stays_unreadable_until_the_deadline() -> None:
+    """A state never read is not "PENDING": the caller is told, with the last error."""
+    client = MagicMock()
+    client.execute_graphql = MagicMock(side_effect=ServerNotReachableError(address="http://x"))
+    monotonic_values = iter([0.0, 1.0, 999_999.0])
+
+    with (
+        patch("scripts.run_generator.time.sleep"),
+        patch(
+            "scripts.run_generator.time.monotonic",
+            side_effect=lambda: next(monotonic_values, 1_000_000.0),
+        ),
+        pytest.raises(run_generator.TaskStateUnreadableError, match="ServerNotReachableError"),
+    ):
+        run_generator._wait_for_task(client, "task-1")
+    assert client.execute_graphql.call_count == 2
+
+
+def test_wait_for_task_prints_a_persistent_error_once(capsys) -> None:
+    """The same error on every poll is printed once, not every 3 seconds."""
+    client = MagicMock()
+    error = ServerNotReachableError(address="http://x")
+    client.execute_graphql = MagicMock(side_effect=[error, error, error, _COMPLETED])
+
+    with patch("scripts.run_generator.time.sleep"):
+        assert run_generator._wait_for_task(client, "task-1") == "COMPLETED"
+
+    assert capsys.readouterr().err.count("Could not read the state") == 1
+
+
+def test_main_does_not_blame_the_clone_when_the_state_is_unreadable(capsys) -> None:
+    """The traceback hint names a different cause: it must not follow an unreadable state."""
+    client = MagicMock()
+    client.get = MagicMock(return_value=MagicMock(id="gen-6"))
+    client.execute_graphql = _graphql()
+
+    with (
+        patch.object(run_generator, "InfrahubClientSync", return_value=client),
+        patch("scripts.run_generator.sys.argv", ["run_generator.py", "generate_sdwan"]),
+        patch.object(
+            run_generator,
+            "_wait_for_task",
+            side_effect=run_generator.TaskStateUnreadableError("state not read"),
+        ),
+    ):
+        rc = run_generator.main()
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "state not read" in err
+    assert "task-worker" not in err
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        pytest.param((502, b"<html>error code: 502</html>", "text/html"), id="html-502"),
+        pytest.param((502, b'{"message": "Bad gateway"}', "application/json"), id="json-502"),
+    ],
+)
+def test_wait_for_task_survives_a_5xx_from_a_real_http_server(
+    failure: tuple[int, bytes, str],
+) -> None:
+    """A 5xx answer, read by the real SDK, does not stop the wait."""
+    completed = b'{"data": {"InfrahubTask": {"edges": [{"node": {"state": "COMPLETED"}}]}}}'
+    answers = [failure, (200, completed, "application/json")]
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args: object) -> None:
+            pass
+
+        def do_POST(self) -> None:
+            self.rfile.read(int(self.headers.get("content-length", 0)))
+            status, body, content_type = answers.pop(0)
+            self.send_response(status)
+            self.send_header("content-type", content_type)
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        address = f"http://127.0.0.1:{server.server_address[1]}"
+        client = InfrahubClientSync(config=Config(address=address, api_token="x"))
+        with patch("scripts.run_generator.time.sleep"):
+            assert run_generator._wait_for_task(client, "task-1") == "COMPLETED"
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert answers == []

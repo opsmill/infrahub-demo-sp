@@ -17,8 +17,16 @@ import argparse
 import sys
 import time
 
+import httpx
 from infrahub_sdk import InfrahubClientSync
-from infrahub_sdk.exceptions import GraphQLError, NodeNotFoundError
+from infrahub_sdk.exceptions import (
+    GraphQLError,
+    JsonDecodeError,
+    NodeNotFoundError,
+    RateLimitError,
+    ServerNotReachableError,
+    ServerNotResponsiveError,
+)
 
 SYNC_TIMEOUT_SECONDS = 120
 SYNC_POLL_INTERVAL_SECONDS = 3
@@ -28,6 +36,25 @@ SYNC_POLL_INTERVAL_SECONDS = 3
 RUN_TIMEOUT_SECONDS = 600
 RUN_POLL_INTERVAL_SECONDS = 3
 FINAL_TASK_STATES = {"COMPLETED", "FAILED", "CANCELLED", "CRASHED"}
+# What the SDK raises when one status request fails and the run may still be fine on the
+# server: a refused or dropped connection, a read timeout, a 429 that outlasts the SDK's own
+# retries, a 502 or 524 page from Cloudflare (an HTML body, which the SDK reports as a JSON
+# decoding error), a 5xx JSON body without a ``data`` key (a KeyError inside the SDK) and an
+# error answer of Infrahub itself. A refused token is not in the list: waiting does not fix it.
+_TRANSIENT_ERRORS = (
+    httpx.HTTPError,
+    GraphQLError,
+    JsonDecodeError,
+    KeyError,
+    RateLimitError,
+    ServerNotReachableError,
+    ServerNotResponsiveError,
+)
+
+
+class TaskStateUnreadableError(RuntimeError):
+    """The state of the run could not be read before the deadline."""
+
 
 _FAILURE_HINT = """
 The generator's traceback is server-side. To see it:
@@ -73,21 +100,49 @@ def _wait_for_generator(client: InfrahubClientSync, name: str) -> object:
 def _wait_for_task(client: InfrahubClientSync, task_id: str) -> str:
     """Poll the generator run's task until it ends, and return its final state.
 
+    A status request that fails is asked again until the deadline: the run goes on
+    in the task worker whatever happens to one request.
+
     Returns:
         The task state: ``COMPLETED`` on success, another final state on
         failure, or the last state seen when the run outlasts the timeout.
+
+    Raises:
+        TaskStateUnreadableError: If the deadline passes while the last status request
+            was failing, so the state of the run is not known.
     """
     deadline = time.monotonic() + RUN_TIMEOUT_SECONDS
     state = "PENDING"
+    last_error = ""
     while True:
-        response = client.execute_graphql(
-            "query Task($ids: [String]) { InfrahubTask(ids: $ids) { edges { node { state } } } }",
-            variables={"ids": [task_id]},
-        )
-        edges = response["InfrahubTask"]["edges"]
-        if edges:
-            state = edges[0]["node"]["state"]
-        if state in FINAL_TASK_STATES or time.monotonic() >= deadline:
+        error = ""
+        try:
+            response = client.execute_graphql(
+                "query Task($ids: [String]) "
+                "{ InfrahubTask(ids: $ids) { edges { node { state } } } }",
+                variables={"ids": [task_id]},
+            )
+        except _TRANSIENT_ERRORS as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            if error != last_error:  # a persistent error is printed once, not every 3 seconds
+                print(
+                    f"Could not read the state of task {task_id}, asking again. {error}",
+                    file=sys.stderr,
+                )
+            last_error = error
+        else:
+            last_error = ""
+            edges = response["InfrahubTask"]["edges"]
+            if edges:
+                state = edges[0]["node"]["state"]
+        if state in FINAL_TASK_STATES:
+            return state
+        if time.monotonic() >= deadline:
+            if error:
+                raise TaskStateUnreadableError(
+                    f"The state of task {task_id} could not be read in the last "
+                    f"{RUN_TIMEOUT_SECONDS} s. Last error: {error}"
+                )
             return state
         time.sleep(RUN_POLL_INTERVAL_SECONDS)
 
@@ -124,7 +179,12 @@ def main() -> int:
     if not run.get("ok") or not run.get("task"):
         print(f"Generator {args.name!r} run did not report ok: {response}", file=sys.stderr)
         return 1
-    state = _wait_for_task(client, run["task"]["id"])
+    try:
+        state = _wait_for_task(client, run["task"]["id"])
+    except TaskStateUnreadableError as exc:
+        # The run may have ended: the traceback hint below does not apply.
+        print(f"Generator {args.name!r}: {exc}", file=sys.stderr)
+        return 1
     if state != "COMPLETED":
         # The task holds only a state: the real traceback stays in the task
         # worker. Say where to find it, and name the usual cause.

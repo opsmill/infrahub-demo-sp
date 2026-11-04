@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.metadata
 import os
 import platform
+import re
 import shlex
 import time
 from pathlib import Path
@@ -337,6 +338,10 @@ GIT_REPO_DIR = REPO_ROOT / "objects" / "git-repo"
 RENDERED_REPO_FILE = REPO_ROOT / "lab" / "git-repo.yml"
 
 
+# A full commit hash, SHA-1 or SHA-256. `git ls-remote` lists branches and tags, never commits.
+_COMMIT_HASH = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+
+
 def _repo_ref(c: Context) -> str:
     """Return the git ref the server should read `.infrahub.yml` code from.
 
@@ -372,7 +377,8 @@ def _render_repo_file(c: Context, ref: str) -> Path:
 
     Args:
         c: Invoke context, used to verify the ref is visible to the server.
-        ref: Git ref to pin the repository to.
+        ref: Git ref to pin the repository to: a branch, a tag or, unchecked, a full
+            commit hash.
 
     Returns:
         Path to the rendered object file.
@@ -381,7 +387,8 @@ def _render_repo_file(c: Context, ref: str) -> Path:
         Exit: If the ref is not present on the repository the server will clone.
             A local mount is only warned about, because a stale working tree
             still produces a usable (if outdated) clone; a missing remote ref
-            produces nothing at all.
+            produces nothing at all. A full commit hash is not checked: no remote
+            listing shows commits.
     """
     template = GIT_REPO_DIR / ("local-dev.yml" if INFRAHUB_GIT_LOCAL else "github.yml")
     spec = yaml.safe_load(template.read_text())
@@ -409,8 +416,13 @@ def _render_repo_file(c: Context, ref: str) -> Path:
         # on a fork those differ, so probing `origin` reports a branch that is
         # present on the fork but absent from the repository being registered.
         location = spec["spec"]["data"][0]["location"]
+        if _COMMIT_HASH.fullmatch(ref):
+            # No remote listing shows a commit, so it cannot be probed. A commit that the
+            # server cannot fetch fails at the repository sync instead.
+            _wait(f"Ref '{ref}' is a commit: not checked on {location}")
+            return RENDERED_REPO_FILE
         probe = c.run(
-            f"git ls-remote --exit-code --heads {shlex.quote(location)} {shlex.quote(ref)}",
+            f"git ls-remote --exit-code --heads --tags {shlex.quote(location)} {shlex.quote(ref)}",
             hide=True,
             warn=True,
         )
@@ -425,9 +437,9 @@ def _render_repo_file(c: Context, ref: str) -> Path:
             # Exit message out verbatim, so Rich markup would reach the terminal
             # as literal "[red]" text.
             _error(
-                f"Ref '{ref}' is not on {location} — the server clones that URL over HTTPS "
-                f"and will not find it, so no transforms, generators or checks would be "
-                f"registered.\n"
+                f"Ref '{ref}' is not a branch or tag on {location} — the server clones that "
+                f"URL over HTTPS and will not find it, so no transforms, generators or "
+                f"checks would be registered.\n"
                 f"Push the branch there, set INFRAHUB_REPO_REF to a ref that exists, or set "
                 f"INFRAHUB_GIT_LOCAL=true to mount the working tree instead."
             )
@@ -545,7 +557,8 @@ def sandbox_setup(c: Context) -> None:
     """Build the whole demo on an Infrahub that already runs (the public sandbox entry point).
 
     The public sandbox pipeline runs this after it deploys an empty Infrahub. It reads
-    only environment variables, starts no container and never calls localhost:
+    only environment variables and starts no container. It calls no localhost address
+    when ``INFRAHUB_ADDRESS`` is set (the default is localhost):
 
     - ``INFRAHUB_ADDRESS`` and ``INFRAHUB_API_TOKEN``: the Infrahub to build the demo on
     - ``INFRAHUB_REPO_URL`` and ``INFRAHUB_REPO_REF``: the repository to register
