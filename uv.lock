@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.11, <3.15"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
@@ -1075,7 +1075,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "flask", specifier = ">=3.0.0" },
-    { name = "infrahub-sdk", extras = ["all"], specifier = ">=1.23.0" },
+    { name = "infrahub-sdk", extras = ["all"], specifier = ">=1.24.0" },
     { name = "invoke", specifier = ">=2.2.0" },
     { name = "jinja2", specifier = ">=3.1.3" },
     { name = "netmiko", specifier = ">=4.3.0" },
@@ -1105,7 +1105,7 @@ dev = [
 
 [[package]]
 name = "infrahub-sdk"
-version = "1.24.0b1"
+version = "1.24.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -1122,9 +1122,9 @@ dependencies = [
     { name = "ujson" },
     { name = "whenever" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/78/8d/03c4927c3cb55928f036c13344e9db4d2ce09e1754b3faab677c97352bc5/infrahub_sdk-1.24.0b1.tar.gz", hash = "sha256:c280b7b08559f57cd371cce822fa6a0d62c3e72918370c5f06b798b2f3995ea2", size = 1838180, upload-time = "2026-11-06T11:06:51.369Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/eb/b3/46058d587f5e3f2d5a10e516d82fb046f22b2f2e7047cbd1c4b6fd1e53e4/infrahub_sdk-1.24.0.tar.gz", hash = "sha256:fea3095290ed0383f47df24651619e66c84f442a77136ed97ab14f9d1061ea27", size = 1835376, upload-time = "2026-11-10T08:08:58.41Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/41/07/a61ca55f9b051f68565125d954502c64e6640c97b64199b92e885df84977/infrahub_sdk-1.24.0b1-py3-none-any.whl", hash = "sha256:524f586bf21a533516f9f5032dc51b5c1459461c54337795b4e6dd6a70cfdbcb", size = 365520, upload-time = "2026-11-06T11:06:49.492Z" },
+    { url = "https://files.pythonhosted.org/packages/5d/ca/f72cce48538de5810d1cfc74ac0ffdd23a657328c2e799f4d7628fb3f4f1/infrahub_sdk-1.24.0-py3-none-any.whl", hash = "sha256:44c0f67f9051e020632bee2c1fc6a0d0babc003698bfff03d45f43c128a0e965", size = 365492, upload-time = "2026-11-10T08:08:56.569Z" },
 ]
 
 [package.optional-dependencies]
@@ -1840,8 +1840,8 @@ name = "pendulum"
 version = "3.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "python-dateutil" },
-    { name = "tzdata" },
+    { name = "python-dateutil", marker = "python_full_version < '3.13'" },
+    { name = "tzdata", marker = "python_full_version < '3.13'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/cb/72/9a51afa0a822b09e286c4cb827ed7b00bc818dac7bd11a5f161e493a217d/pendulum-3.2.0.tar.gz", hash = "sha256:e80feda2d10fa3ff8b1526715f7d33dcb7e08494b3088f2c8a3ac92d4a4331ce", size = 86912, upload-time = "2026-01-30T11:22:24.093Z" }
 wheels = [
