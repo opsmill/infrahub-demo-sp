@@ -261,7 +261,7 @@ All four loads are idempotent.
 One more thing to check on an instance whose repository carries branches that
 predate this change. The repository sync creates an Infrahub branch per git
 branch and deletes the `pe_onboarding` check definition on every branch whose
-`.infrahub.yml` does not declare it. Infrahub 1.11.7 then refuses to create
+`.infrahub.yml` does not declare it. Infrahub then refuses to create
 the `Check: pe_onboarding` validator on any branch, so the check is silently
 missing from every proposed change (the task-worker log shows
 `Unable to find the node <id> / CoreCheckDefinition`). Delete those stale

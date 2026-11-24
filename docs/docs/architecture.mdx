@@ -21,7 +21,7 @@ Schema definition  →  Bootstrap data  →  Generators  →  Transforms  →  A
 | `generators/` | `L3VpnGenerator` materialises VRF + interfaces + IPs; `PeOnboardingGenerator` builds a new PE; `SdwanGenerator` builds SD-WAN edges |
 | `transforms/` | One Python+Jinja transform per vendor + the clab transform |
 | `templates/` | Jinja2 templates (one per vendor + clab + macros) |
-| `checks/` | Five checks gating the proposed-change pipeline (incl. Batfish) |
+| `checks/` | Nine checks gating the proposed-change pipeline (incl. Batfish) |
 | `service_catalog/` | Streamlit sidecar (Dashboard, Create L3VPN, Create SD-WAN, Batfish Check, Add PE), published as a container image |
 | `scripts/` | Helpers `invoke` runs, including `demo_add_pe.py` behind `invoke demo-add-device` |
 | `queries/` | GraphQL queries used by generators, transforms, checks |
@@ -134,14 +134,18 @@ all-Arista, so it only renders through `pe_arista_eos`.
 
 ## Checks
 
-Five checks gate the proposed-change pipeline:
+Nine checks gate the proposed-change pipeline:
 
 | Check | What it enforces |
 |---|---|
-| `l3vpn_overlap` | No duplicate VPN IDs across active L3VPNs |
-| `l3vpn_site_subnet` | Customer subnet is reachable / not already allocated in the same VRF |
-| `pe_interface_alloc` | The nominated PE interface is free (status = `free`) |
+| `l3vpn_overlap` | No two L3VPNs share an RD (derived from `vpn_id`) |
+| `l3vpn_site_subnet` | The customer subnet is not already claimed by another site in the same VRF |
+| `l3vpn_peer_asn_range` | No site's `bgp_peer_asn` override falls inside the range of `customer_asn_pool` |
+| `pe_interface_alloc` | No PE interface is claimed by more than one L3VPN site |
 | `backbone_session_count` | Every PE has its full-mesh complement of N−1 iBGP sessions (N = PE count: 7 each for the 8-PE financial backbone, 3 each for the 4-PE isp backbone) |
+| `sdwan_id_overlap` | No two SD-WAN services share a `service_id` |
+| `sdwan_site_subnet` | No two sites of an SD-WAN service have overlapping LAN subnets |
+| `pe_onboarding` | A request to add a PE router names two distinct uplinks, each a PE of the same backbone with a free port, and a device name that is not already in use. See [Add a PE router](./backbone/add-pe.mdx#checks). |
 | `batfish_backbone` | Batfish-driven static validation of rendered backbone configs (parse status, undefined references, BGP session compatibility, IS-IS adjacency mesh). See [Batfish validation](./validation/batfish.mdx). |
 
 ## Per-vendor interface name macros
