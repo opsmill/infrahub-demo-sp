@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.11, <3.15"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
@@ -1089,7 +1089,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "infrahub-testcontainers", specifier = ">=1.12.2" },
+    { name = "infrahub-testcontainers", specifier = ">=1.12.3" },
     { name = "mypy", specifier = ">=2.3.1" },
     { name = "psutil", specifier = ">=5.9.0" },
     { name = "pytest", specifier = ">=9.1.1" },
@@ -1142,7 +1142,7 @@ all = [
 
 [[package]]
 name = "infrahub-testcontainers"
-version = "1.12.2"
+version = "1.12.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -1152,9 +1152,9 @@ dependencies = [
     { name = "pytest" },
     { name = "testcontainers" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/72/06/f15f41ba98cab9a247152e8c901d17e5009d7693e2bf022e992d2c9d7c3b/infrahub_testcontainers-1.12.2.tar.gz", hash = "sha256:e38be222d94630928bb10ca4145be30e4bf43344857656e9298631bbb3b8b24c", size = 23340, upload-time = "2026-11-20T06:59:02.913Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d3/9d/29cec33a742575b087c878af381a32c76c4f2c012c700afcadef79b66756/infrahub_testcontainers-1.12.3.tar.gz", hash = "sha256:c40e8bd842cd0c5733b8952899d4f802b7608564e09957d00dbe1a0722ea31d4", size = 23343, upload-time = "2026-11-25T08:48:47.839Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e4/dc/c9b3943536b97b1b07b4f8519231d61cbea9f0e4db4c97814d1eb5010fea/infrahub_testcontainers-1.12.2-py3-none-any.whl", hash = "sha256:994ae2cd5198ba7a5977e977784135ccf24d83d512c06f3bffc5284e8defd13c", size = 30066, upload-time = "2026-11-20T06:59:01.508Z" },
+    { url = "https://files.pythonhosted.org/packages/cc/ff/6e7222400aff65dbf750b4795cf3863bcd6f3dc7567980ae8a0d4795cafb/infrahub_testcontainers-1.12.3-py3-none-any.whl", hash = "sha256:bb8fcbdc6430396a2897c4b1d546fcf8d39fc8f2d73c6d07205d3907db688ade", size = 30066, upload-time = "2026-11-25T08:48:46.536Z" },
 ]
 
 [[package]]
@@ -1840,8 +1840,8 @@ name = "pendulum"
 version = "3.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "python-dateutil" },
-    { name = "tzdata" },
+    { name = "python-dateutil", marker = "python_full_version < '3.13'" },
+    { name = "tzdata", marker = "python_full_version < '3.13'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/cb/72/9a51afa0a822b09e286c4cb827ed7b00bc818dac7bd11a5f161e493a217d/pendulum-3.2.0.tar.gz", hash = "sha256:e80feda2d10fa3ff8b1526715f7d33dcb7e08494b3088f2c8a3ac92d4a4331ce", size = 86912, upload-time = "2026-01-30T11:22:24.093Z" }
 wheels = [
